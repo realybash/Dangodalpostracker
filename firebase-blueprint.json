@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Terminal cashier or manager account linked to a Google owner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Manager", "Employee"] },
+        "pin": { "type": "string" },
+        "phone": { "type": "string" },
+        "ownerId": { "type": "string", "description": "Google Auth UID of the terminal owner" }
+      },
+      "required": ["id", "name", "role", "pin", "phone", "ownerId"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Simulated or actual POS financial transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Deposit", "Withdrawal", "Transfer"] },
+        "provider": { "type": "string", "enum": ["OPay", "Moniepoint", "PalmPay", "Others"] },
+        "subType": { "type": "string" },
+        "amount": { "type": "number" },
+        "customerFee": { "type": "number" },
+        "terminalFee": { "type": "number" },
+        "profit": { "type": "number" },
+        "feeMethod": { "type": "string", "enum": ["CardDebit", "Cash"] },
+        "totalCustomerCharged": { "type": "number" },
+        "timestamp": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["Success", "Pending", "Failed"] },
+        "ownerId": { "type": "string", "description": "Google Auth UID of the terminal owner" },
+        "terminalId": { "type": "string" },
+        "terminalName": { "type": "string" }
+      },
+      "required": ["id", "employeeId", "employeeName", "type", "provider", "amount", "customerFee", "terminalFee", "profit", "timestamp", "ownerId"]
+    },
+    "PosTerminal": {
+      "title": "PosTerminal",
+      "description": "Custom linked POS terminal in the cashier account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "provider": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "terminalFeeRate": { "type": "number" },
+        "ownerId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "posAccountNo": { "type": "string" },
+        "cashierName": { "type": "string" },
+        "areaOfWorking": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "name", "provider", "ownerId", "posAccountNo", "cashierName", "areaOfWorking", "addedBy", "status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Collection of terminal authorization profiles"
+    },
+    "transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of transaction records"
+    },
+    "pos_terminals/{terminalId}": {
+      "schema": "PosTerminal",
+      "description": "Collection of linked custom POS terminals"
+    },
+    "test_connection/{documentId}": {
+      "schema": {
+        "title": "TestConnection",
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" }
+        }
+      },
+      "description": "Collection for connectivity checks"
+    }
+  }
+}

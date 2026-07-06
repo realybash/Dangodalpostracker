@@ -1,0 +1,80 @@
+--- src/components/CashierReconciliationCalculator.tsx
++++ src/components/CashierReconciliationCalculator.tsx
+@@ -73,6 +73,28 @@
+   // The waterfall calculation
+   let runningTotal = totalAdditions;
+ 
++  // Generate the waterfall steps outside of the JSX render phase
++  const waterfallSteps = [];
++  let currentBalance = runningTotal;
++  
++  deductions.forEach(item => {
++    currentBalance -= item.amount;
++    waterfallSteps.push({
++      id: item.id,
++      name: item.name,
++      amount: item.amount,
++      balance: currentBalance,
++      type: 'deduction'
++    });
++  });
++  
++  currentBalance -= capital;
++  waterfallSteps.push({
++    id: 'capital-deduct',
++    name: 'Capital',
++    amount: capital,
++    balance: currentBalance,
++    type: 'capital'
++  });
++
+   return (
+     <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+       <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border border-neutral-200 animate-fade-in my-8">
+@@ -194,30 +216,21 @@
+                 <span className="text-emerald-600">₦{runningTotal.toLocaleString()}</span>
+               </div>
+ 
+-              {deductions.map((item, idx) => {
+-                const stepAmount = item.amount;
+-                runningTotal -= stepAmount;
+-                return (
+-                  <div key={item.id} className="space-y-1">
+-                    <div className="flex justify-between items-center text-xs text-neutral-500">
+-                      <span className="flex items-center gap-1"><Minus className="w-3 h-3 text-rose-500" /> {item.name}</span>
+-                      <span className="text-rose-500">-₦{stepAmount.toLocaleString()}</span>
+-                    </div>
+-                    <div className="flex justify-between items-center font-bold text-neutral-700 pl-4 border-l-2 border-neutral-200">
+-                      <span className="text-xs text-neutral-400">Balance</span>
+-                      <span>₦{runningTotal.toLocaleString()}</span>
+-                    </div>
++              {waterfallSteps.map(step => (
++                <div key={step.id} className="space-y-1">
++                  <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
++                    <span className="flex items-center gap-1">
++                      <Minus className={`w-3 h-3 ${step.type === 'capital' ? 'text-blue-500' : 'text-rose-500'}`} /> {step.name}
++                    </span>
++                    <span className={step.type === 'capital' ? 'text-blue-500' : 'text-rose-500'}>-₦{step.amount.toLocaleString()}</span>
+                   </div>
+-                );
+-              })}
+-
+-              <div className="pt-2">
+-                <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+-                  <span className="flex items-center gap-1"><Minus className="w-3 h-3 text-blue-500" /> Capital</span>
+-                  <span className="text-blue-500">-₦{capital.toLocaleString()}</span>
++                  {step.type !== 'capital' && (
++                  <div className="flex justify-between items-center font-bold text-neutral-700 pl-4 border-l-2 border-neutral-200">
++                    <span className="text-xs text-neutral-400">Balance</span>
++                    <span>₦{step.balance.toLocaleString()}</span>
++                  </div>
++                  )}
+                 </div>
+-                {(() => {
+-                  runningTotal -= capital;
+-                  return null;
+-                })()}
+-              </div>
++              ))}
+ 
+             </div>

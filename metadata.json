@@ -1,0 +1,6 @@
+{
+  "name": "DANGODALPOSTRACKER",
+  "description": "POS agent transaction and profit tracker with role-based filtering, advanced performance metrics, and transaction simulation.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
