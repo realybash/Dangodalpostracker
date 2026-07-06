@@ -421,6 +421,15 @@ export default function App() {
 
    // Manager Auth states
   const [cloudUser, setCloudUser] = useState<any>(null);
+  const syncOwnerId = useMemo(() => {
+    if (cloudUser) {
+      return cloudUser.uid;
+    }
+    if (state.currentUser && state.currentUser.id && state.currentUser.id !== '') {
+      return state.currentUser.role === 'Manager' ? state.currentUser.id : state.currentUser.ownerId;
+    }
+    return null;
+  }, [cloudUser, state.currentUser]);
   const [cloudLoading, setCloudLoading] = useState(true);
 
   // Authentication form modal states
@@ -636,14 +645,14 @@ export default function App() {
     testConnection();
   }, []);
 
-  // Real-time Firestore sync subscriptions when cloudUser is signed in
+  // Real-time Firestore sync subscriptions when syncOwnerId is active
   useEffect(() => {
-    if (!cloudUser) {
+    if (!syncOwnerId) {
       return;
     }
 
     // Subscribe to Manager-owned employees
-    const usersQuery = query(collection(db, 'users'), where('ownerId', '==', cloudUser.uid));
+    const usersQuery = query(collection(db, 'users'), where('ownerId', '==', syncOwnerId));
     const unsubscribeUsers = onSnapshot(usersQuery, async (snapshot) => {
       const usersList: User[] = [];
       snapshot.forEach((docSnap) => {
@@ -663,19 +672,19 @@ export default function App() {
       dispatch({ type: 'SET_TRANSACTIONS', payload: unique });
     };
 
-    const unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', cloudUser.uid)), (snap) => {
+    const unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', syncOwnerId)), (snap) => {
       ownerTxsRef.current = snap.docs.map(d => d.data() as Transaction);
       updateCombinedTxs();
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
 
-    const unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', cloudUser.uid)), (snap) => {
+    const unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', syncOwnerId)), (snap) => {
       cashierTxsRef.current = snap.docs.map(d => d.data() as Transaction);
       updateCombinedTxs();
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
 
 
     // Subscribe to Manager-owned expenses
-    const expensesQuery = query(collection(db, 'expenses'), where('ownerId', '==', cloudUser.uid));
+    const expensesQuery = query(collection(db, 'expenses'), where('ownerId', '==', syncOwnerId));
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
       const expList: Expense[] = [];
       snapshot.forEach((docSnap) => {
@@ -689,7 +698,7 @@ export default function App() {
     });
 
     // Subscribe to Manager-owned POS Terminals
-    const terminalsQuery = query(collection(db, 'pos_terminals'), where('ownerId', '==', cloudUser.uid));
+    const terminalsQuery = query(collection(db, 'pos_terminals'), where('ownerId', '==', syncOwnerId));
     const unsubscribeTerminals = onSnapshot(terminalsQuery, (snapshot) => {
       const termList: PosTerminal[] = [];
       snapshot.forEach((docSnap) => {
@@ -709,13 +718,13 @@ export default function App() {
       unsubscribeExpenses();
       unsubscribeTerminals();
     };
-  }, [cloudUser, state.terminalFeeRate]);
+  }, [syncOwnerId, state.terminalFeeRate]);
 
   // Firestore mutation wrappers
   const handleAddPosTerminal = async (term: PosTerminal) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
-        const termWithOwner = { ...term, ownerId: cloudUser.uid };
+        const termWithOwner = { ...term, ownerId: syncOwnerId };
         await setDoc(doc(db, 'pos_terminals', term.id), termWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
@@ -726,9 +735,9 @@ export default function App() {
   };
 
   const handleUpdatePosTerminal = async (term: PosTerminal) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
-        const termWithOwner = { ...term, ownerId: cloudUser.uid };
+        const termWithOwner = { ...term, ownerId: syncOwnerId };
         await setDoc(doc(db, 'pos_terminals', term.id), termWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
@@ -755,7 +764,7 @@ export default function App() {
   };
 
   const handleDeletePosTerminal = async (id: string) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'pos_terminals', id));
       } catch (err) {
@@ -767,10 +776,10 @@ export default function App() {
   };
 
   const handleAddTransaction = async (tx: Transaction) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
-        const txWithOwner = { ...tx, ownerId: cloudUser.uid, cashierId };
+        const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
         await setDoc(doc(db, 'transactions', tx.id), txWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
@@ -781,10 +790,10 @@ export default function App() {
   };
 
   const handleUpdateTransaction = async (tx: Transaction) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
-        const txWithOwner = { ...tx, ownerId: cloudUser.uid, cashierId };
+        const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
         await setDoc(doc(db, 'transactions', tx.id), txWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
@@ -795,7 +804,7 @@ export default function App() {
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'transactions', id));
       } catch (err) {
@@ -807,7 +816,7 @@ export default function App() {
   };
 
   const handleBulkDeleteTransactions = async (ids: string[]) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
         ids.forEach((id) => {
@@ -823,12 +832,12 @@ export default function App() {
   };
 
   const handleBulkUpdateTransactions = async (updatedTxs: Transaction[]) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
         updatedTxs.forEach((tx) => {
           const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
-          const txWithOwner = { ...tx, ownerId: cloudUser.uid, cashierId };
+          const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
           batch.set(doc(db, 'transactions', tx.id), txWithOwner, { merge: true });
         });
         await batch.commit();
@@ -841,7 +850,7 @@ export default function App() {
   };
 
   const handleCustomResetData = async () => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
         const currentTxs = state.transactions;
@@ -851,7 +860,7 @@ export default function App() {
 
         const seedTxs = getSeedTransactions(state.terminalFeeRate);
         seedTxs.forEach((tx) => {
-          const txWithOwner = { ...tx, ownerId: cloudUser.uid };
+          const txWithOwner = { ...tx, ownerId: syncOwnerId };
           batch.set(doc(db, 'transactions', tx.id), txWithOwner);
         });
 
@@ -865,9 +874,9 @@ export default function App() {
   };
 
   const handleAddExpense = async (expense: Expense) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
-        const expenseWithOwner = { ...expense, ownerId: cloudUser.uid };
+        const expenseWithOwner = { ...expense, ownerId: syncOwnerId };
         await setDoc(doc(db, 'expenses', expense.id), expenseWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `expenses/${expense.id}`);
@@ -878,7 +887,7 @@ export default function App() {
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'expenses', id));
       } catch (err) {
@@ -980,9 +989,9 @@ export default function App() {
   });
 
   const handleRegisterUser = async (newUser: User) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
-        const userWithOwner = { ...newUser, ownerId: cloudUser.uid };
+        const userWithOwner = { ...newUser, ownerId: syncOwnerId };
         await setDoc(doc(db, 'users', newUser.id), userWithOwner);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `users/${newUser.id}`);
@@ -998,7 +1007,7 @@ export default function App() {
   };
 
   const handleUpdateUserPin = async (userId: string, newPin: string) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const userDocRef = doc(db, 'users', userId);
         await setDoc(userDocRef, { pin: newPin }, { merge: true });
@@ -1016,9 +1025,9 @@ export default function App() {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
-        const userWithOwner = { ...updatedUser, ownerId: cloudUser.uid };
+        const userWithOwner = { ...updatedUser, ownerId: syncOwnerId };
         await setDoc(doc(db, 'users', updatedUser.id), userWithOwner, { merge: true });
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `users/${updatedUser.id}`);
@@ -1038,7 +1047,7 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'users', userId));
       } catch (err) {
@@ -1054,7 +1063,7 @@ export default function App() {
   };
 
   const handleDeleteAllUsers = async () => {
-    if (cloudUser) {
+    if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
         registeredUsers.forEach((u) => {
@@ -2673,7 +2682,7 @@ export default function App() {
                     areaOfWorking: newTerminalArea.trim(),
                     terminalFeeRate: newTerminalRate,
                     serialNumber: newTerminalSN.trim(),
-                    ownerId: state.impersonatedUserId || (cloudUser ? cloudUser.uid : 'local_owner'),
+                    ownerId: state.impersonatedUserId || (syncOwnerId || 'local_owner'),
                     addedBy: state.currentUser.name,
                     status: 'Active',
                     timestamp: new Date().toISOString(),
@@ -3117,7 +3126,7 @@ export default function App() {
             onAddTransaction={handleAddTransaction}
             currentUser={state.currentUser}
           />
-          <BorrowKeepSection state={state} cloudUser={cloudUser} />
+          <BorrowKeepSection state={state} syncOwnerId={syncOwnerId} />
         </>
         )}
 

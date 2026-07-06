@@ -35,7 +35,8 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser: any }) {
+export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwnerId: string | null }) {
+  const isCloudMode = !!syncOwnerId;
   const [transactions, setTransactions] = useState<BorrowKeepTransaction[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   
@@ -170,15 +171,15 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
   const [isDisputeCopied, setIsDisputeCopied] = useState(false);
 
   useEffect(() => {
-    console.log("BorrowKeepSection: effect running, currentUser:", state.currentUser, "cloudUser:", cloudUser);
+    console.log("BorrowKeepSection: effect running, currentUser:", state.currentUser, "isCloudMode:", isCloudMode);
     if (!state.currentUser || !state.currentUser.ownerId) {
         console.log("BorrowKeepSection: no currentUser or ownerId");
         return;
     }
 
-    if (cloudUser) {
-      console.log("BorrowKeepSection: cloud mode active, ownerId:", state.currentUser.ownerId);
-      const q = query(collection(db, 'borrowKeep'), where('ownerId', '==', state.currentUser.ownerId));
+    if (isCloudMode && syncOwnerId) {
+      console.log("BorrowKeepSection: cloud mode active, ownerId:", syncOwnerId);
+      const q = query(collection(db, 'borrowKeep'), where('ownerId', '==', syncOwnerId));
       console.log("BorrowKeepSection: firestore query created");
       const unsubscribe = onSnapshot(q, (snapshot) => {
         console.log("BorrowKeepSection: firestore snapshot received");
@@ -203,7 +204,7 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
         setTransactions([]);
       }
     }
-  }, [state.currentUser?.ownerId, cloudUser]);
+  }, [state.currentUser?.ownerId, isCloudMode]);
 
   // FIFO & explicit ID matching algorithm to map repayments to active loans/kept money
   const compileCustomerLedger = () => {
@@ -317,7 +318,7 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
     }
     if (name && amount) {
       const parsedAmount = parseFloat(amount);
-      const transactionId = cloudUser 
+      const transactionId = isCloudMode 
         ? doc(collection(db, 'borrowKeep')).id 
         : 'bk_' + Math.floor(100000 + Math.random() * 900000);
 
@@ -327,7 +328,7 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
         amount: parsedAmount,
         type,
         timestamp: new Date().toISOString(),
-        ownerId: state.currentUser.ownerId,
+        ownerId: syncOwnerId || 'local_owner',
         employeeId: state.currentUser.id,
         employeeName: state.currentUser.name,
         notes: notes.trim() || undefined,
@@ -338,7 +339,7 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
         photo: (type === 'money_kept' || type === 'money_returned') ? (photoFront || photoBack || undefined) : undefined
       };
 
-      if (cloudUser) {
+      if (isCloudMode) {
         try {
           console.log("BorrowKeepSection: Saving to Firestore:", record);
           await setDoc(doc(db, 'borrowKeep', transactionId), record);
@@ -402,7 +403,7 @@ export function BorrowKeepSection({ state, cloudUser }: { state: any; cloudUser:
   const handleDelete = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this record?")) return;
     
-    if (cloudUser) {
+    if (isCloudMode) {
       try {
         await deleteDoc(doc(db, 'borrowKeep', id));
         console.log("Firestore document deleted successfully:", id);

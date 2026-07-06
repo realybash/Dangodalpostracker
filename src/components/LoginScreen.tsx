@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { 
   Lock, 
   UserCheck, 
@@ -71,16 +73,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     return name.trim().split(/\s+/).map(n => n[0]).join('').substring(0, 2).toUpperCase() || '👤';
   };
 
-  const handleStaffLogin = (e: React.FormEvent) => {
+  const handleStaffLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
     
-    if (staffUsers.length === 0) {
-      setError('No employee accounts found. Please register an account first!');
-      return;
-    }
-
     if (!loginPhone.trim()) {
       setError('Please enter your registered Phone Number or Full Name.');
       return;
@@ -92,14 +89,35 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
     
     const inputIdentifier = loginPhone.trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
-    const user = staffUsers.find(u => {
+    let user = staffUsers.find(u => {
       const dbPhone = (u.phone || '').trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
       const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
       return dbPhone === inputIdentifier || dbName === inputIdentifier || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
     });
 
     if (!user) {
-      setError('Account not found. Ensure you typed the correct phone number or name.');
+      try {
+        const usersRef = collection(db, 'users');
+        // Try to find by phone
+        const qPhone = query(usersRef, where('phone', '==', loginPhone.trim()), where('role', '==', 'Employee'));
+        const snapPhone = await getDocs(qPhone);
+        if (!snapPhone.empty) {
+          user = snapPhone.docs[0].data() as User;
+        } else {
+          // Try to find by name
+          const qName = query(usersRef, where('name', '==', loginPhone.trim()), where('role', '==', 'Employee'));
+          const snapName = await getDocs(qName);
+          if (!snapName.empty) {
+            user = snapName.docs[0].data() as User;
+          }
+        }
+      } catch (err) {
+        console.warn('Global Firestore lookup failed', err);
+      }
+    }
+
+    if (!user) {
+      setError('Account not found. Ensure you typed the correct phone number or name, or that you are connected to the internet.');
       return;
     }
     
@@ -114,16 +132,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }, 800);
   };
 
-  const handleManagerLogin = (e: React.FormEvent) => {
+  const handleManagerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
     
-    if (managerUsers.length === 0) {
-      setError('No registered manager accounts. Please switch to the Register tab to create one!');
-      return;
-    }
-
     if (!managerPhone.trim()) {
       setError('Please enter your registered Manager Phone Number or Full Name.');
       return;
@@ -135,14 +148,35 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
 
     const inputIdentifier = managerPhone.trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
-    const matchedManager = managerUsers.find(m => {
+    let matchedManager = managerUsers.find(m => {
       const dbPhone = (m.phone || '').trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
       const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
       return dbPhone === inputIdentifier || dbName === inputIdentifier || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
     });
+
+    if (!matchedManager) {
+      try {
+        const usersRef = collection(db, 'users');
+        // Try to find by phone
+        const qPhone = query(usersRef, where('phone', '==', managerPhone.trim()), where('role', '==', 'Manager'));
+        const snapPhone = await getDocs(qPhone);
+        if (!snapPhone.empty) {
+          matchedManager = snapPhone.docs[0].data() as User;
+        } else {
+          // Try to find by name
+          const qName = query(usersRef, where('name', '==', managerPhone.trim()), where('role', '==', 'Manager'));
+          const snapName = await getDocs(qName);
+          if (!snapName.empty) {
+            matchedManager = snapName.docs[0].data() as User;
+          }
+        }
+      } catch (err) {
+        console.warn('Global Firestore lookup failed', err);
+      }
+    }
     
     if (!matchedManager) {
-      setError('Manager account not found. Ensure you typed the correct phone number or name.');
+      setError('Manager account not found. Ensure you typed the correct phone number or name, or that you are connected to the internet.');
       return;
     }
 

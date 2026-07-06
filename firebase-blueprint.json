@@ -57,10 +57,49 @@
         "cashierName": { "type": "string" },
         "areaOfWorking": { "type": "string" },
         "addedBy": { "type": "string" },
-        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "status": { "type": "string", "enum": ["Active", "Inactive", "Live"] },
         "timestamp": { "type": "string" }
       },
       "required": ["id", "name", "provider", "ownerId", "posAccountNo", "cashierName", "areaOfWorking", "addedBy", "status", "timestamp"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Business expense record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "notes": { "type": "string" },
+        "audioNote": { "type": "string" }
+      },
+      "required": ["id", "amount", "description", "timestamp", "ownerId"]
+    },
+    "BorrowKeep": {
+      "title": "BorrowKeep",
+      "description": "Loan or kept money record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["loan_given", "loan_repaid", "money_kept", "money_returned"] },
+        "timestamp": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "linkedTransactionId": { "type": "string" },
+        "repaidAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "partial", "settled"] },
+        "notes": { "type": "string" },
+        "audioNote": { "type": "string" },
+        "photo": { "type": "string" }
+      },
+      "required": ["id", "name", "amount", "type", "timestamp", "ownerId"]
     }
   },
   "firestore": {
@@ -75,6 +114,14 @@
     "pos_terminals/{terminalId}": {
       "schema": "PosTerminal",
       "description": "Collection of linked custom POS terminals"
+    },
+    "expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Collection of business expenses"
+    },
+    "borrowKeep/{recordId}": {
+      "schema": "BorrowKeep",
+      "description": "Collection of loans and kept money"
     },
     "test_connection/{documentId}": {
       "schema": {
