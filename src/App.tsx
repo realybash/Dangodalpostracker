@@ -586,7 +586,13 @@ export default function App() {
           let managerUser: User;
           
           if (snap.exists()) {
-            managerUser = snap.data() as User;
+            const data = snap.data();
+            managerUser = {
+              ...data,
+              id: data.uid || data.id || managerId,
+              name: data.fullName || data.name || user.displayName || 'Terminal Manager',
+              phone: data.phoneNumber || data.phone || user.phoneNumber || ''
+            } as User;
           } else {
             managerUser = {
               id: managerId,
@@ -1077,31 +1083,53 @@ export default function App() {
   useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded);
 
   const handleRegisterUser = async (newUser: User) => {
-    // Always persist locally first so user registrations never block on connection issues
+    // Local persistence
     setRegisteredUsers((prev) => {
       const next = prev.some(u => u.id === newUser.id) ? prev : [...prev, newUser];
       localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
       return next;
     });
 
-    // Attempt to save to Firestore for global access
+    // Cloud persistence
     try {
-      const userDocRef = doc(db, 'users', newUser.id);
-      await setDoc(userDocRef, newUser);
-    } catch (err) {
-      console.warn('Global Firestore sync failed during registration', err);
-    }
-
-    if (syncOwnerId) {
-      try {
-        const userWithOwner = { ...newUser, ownerId: syncOwnerId };
-        await setDoc(doc(db, 'users', newUser.id), userWithOwner);
-      } catch (err) {
-        console.warn('Firestore sync with owner ID failed during registration:', err);
+      let finalUid = newUser.id;
+      
+      // If Manager provides email/password, create real Firebase Auth account
+      if (newUser.role === 'Manager' && newUser.email && newUser.password) {
+        try {
+          const userCred = await createUserWithEmailAndPassword(auth, newUser.email, newUser.password);
+          finalUid = userCred.user.uid;
+          await updateProfile(userCred.user, { displayName: newUser.name });
+          console.log('Successfully created Firebase Auth account for Manager:', newUser.name);
+        } catch (authErr: any) {
+          // If user already exists in Auth, we might want to just link them, but for now we'll warn
+          if (authErr.code === 'auth/email-already-in-use') {
+             console.warn('Auth account already exists, continuing with Firestore doc only.');
+          } else {
+             throw authErr;
+          }
+        }
       }
-    }
 
-    showAppNotification(`New account for ${newUser.name} created successfully.`, 'success');
+      // Prepare document with requested field names
+      const firestoreDoc = {
+        ...newUser,
+        uid: finalUid,
+        fullName: newUser.name,
+        phoneNumber: newUser.phone,
+        ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || 'mgr_1')
+      };
+
+      const userDocRef = doc(db, 'users', finalUid);
+      await setDoc(userDocRef, firestoreDoc);
+      console.log('Successfully saved user document to Firestore:', finalUid);
+      
+      showAppNotification(`New account for ${newUser.name} created and synced to cloud.`, 'success');
+    } catch (err: any) {
+      console.error('Critical Firestore/Auth sync failed during registration:', err);
+      showAppNotification(`Cloud Sync Failed: ${err.message}. Account remains local only.`, 'error');
+      throw err; // Re-throw to let LoginScreen handle it
+    }
   };
 
   const handleUpdateUserPin = async (userId: string, newPin: string) => {

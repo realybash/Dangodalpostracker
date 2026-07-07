@@ -7,10 +7,13 @@ export type UserRole = 'Manager' | 'Employee';
 
 export interface User {
   id: string;
+  uid?: string; // Firebase Auth UID alias
   name: string;
+  fullName?: string; // Firestore field alias
   role: UserRole;
   pin?: string;
   phone?: string;
+  phoneNumber?: string; // Firestore field alias
   ownerId?: string;
   activated?: boolean;
   email?: string;

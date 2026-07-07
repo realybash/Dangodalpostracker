@@ -156,7 +156,15 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       try {
         const usersRef = collection(db, 'users');
         const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
-        const allEmployees = snap.docs.map(doc => doc.data() as User);
+        const allEmployees = snap.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            ...data,
+            id: data.uid || data.id || docSnap.id,
+            name: data.fullName || data.name || 'Unknown',
+            phone: data.phoneNumber || data.phone || ''
+          } as User;
+        });
 
         const matches = allEmployees.filter(u => {
           const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
@@ -247,7 +255,15 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       try {
         const usersRef = collection(db, 'users');
         const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
-        const allManagers = snap.docs.map(doc => doc.data() as User);
+        const allManagers = snap.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            ...data,
+            id: data.uid || data.id || docSnap.id,
+            name: data.fullName || data.name || 'Unknown',
+            phone: data.phoneNumber || data.phone || ''
+          } as User;
+        });
         
         console.log('DEBUG: Manager lookup failed locally. Cloud managers found:', allManagers.length);
         
@@ -769,7 +785,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                         <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
                           Manager Passcode (PIN)
                         </label>
-                        {managerUsers.length === 0 && (
+                        {isUsersLoaded && managerUsers.length === 0 && (
                           <span className="text-[10px] text-rose-600 font-bold">Please Register a Manager First</span>
                         )}
                       </div>
@@ -793,18 +809,23 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           {showPin ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
                         </button>
                       </div>
-                      {managerUsers.length > 0 ? (
+                    {isUsersLoaded && managerUsers.length > 0 ? (
                         <p className="text-[10px] text-neutral-400 mt-2 font-medium">
                           Hint: Use your registered 4-digit passcode PIN .
                         </p>
-                      ) : (
+                      ) : isUsersLoaded ? (
                         <p className="text-xs text-rose-600 font-bold mt-2 leading-relaxed">
                           No manager account exists yet. Click the <strong className="underline cursor-pointer" onClick={() => { setAuthMode('register'); setRegRole('Manager'); }}>Register Account</strong> tab above to configure your manager profile!
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-neutral-400 mt-2 font-medium flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                          Synchronizing cloud user accounts...
                         </p>
                       )}
                     </div>
 
-                    {managerUsers.length > 0 && (
+                    {isUsersLoaded && managerUsers.length > 0 && (
                       /* Tactile Virtual PIN Pad for Manager login */
                       <div className="bg-neutral-50/60 border border-neutral-100 p-4 rounded-3xl">
                         <div className="flex justify-between items-center mb-3">
