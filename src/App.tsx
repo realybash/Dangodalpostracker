@@ -1111,6 +1111,7 @@ export default function App() {
   });
 
   // Load registered users from Firestore on startup to handle new devices or cleared cache
+  const [isUsersLoaded, setIsUsersLoaded] = useState(false);
   useEffect(() => {
     const fetchUsersOnStartup = async () => {
       try {
@@ -1133,6 +1134,8 @@ export default function App() {
         }
       } catch (err) {
         console.warn('Silent startup cloud users fetch failed:', err);
+      } finally {
+        setIsUsersLoaded(true);
       }
     };
     
@@ -1610,6 +1613,7 @@ export default function App() {
         onLogin={handleLoginSuccess}
         onRegister={handleRegisterUser}
         onDeleteAllAccounts={handleDeleteAllUsers}
+        isUsersLoaded={isUsersLoaded}
       />
     );
   }

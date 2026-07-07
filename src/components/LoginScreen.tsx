@@ -31,9 +31,10 @@ interface LoginScreenProps {
   onLogin: (user: User) => void;
   onRegister: (user: User) => Promise<void>;
   onDeleteAllAccounts?: () => void;
+  isUsersLoaded: boolean;
 }
 
-export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts }: LoginScreenProps) {
+export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts, isUsersLoaded }: LoginScreenProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginTab, setLoginTab] = useState<'staff' | 'manager'>(() => {
     try {
@@ -237,6 +238,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
       const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
       
+      console.log(`DEBUG: Matching locally: ${m.name}, DBPhone: ${dbPhoneDigits}, InputPhone: ${inputPhoneDigits}, Name: ${dbName}, InputName: ${inputName}`);
+      
       return phoneMatches || nameMatches;
     });
 
@@ -245,7 +248,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         const usersRef = collection(db, 'users');
         const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
         const allManagers = snap.docs.map(doc => doc.data() as User);
-
+        
+        console.log('DEBUG: Manager lookup failed locally. Cloud managers found:', allManagers.length);
+        
         const matches = allManagers.filter(m => {
           const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
           const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
@@ -254,15 +259,21 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
           const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
           
+          console.log(`DEBUG: Matching in cloud: ${m.name}, DBPhone: ${dbPhoneDigits}, InputPhone: ${inputPhoneDigits}, Name: ${dbName}, InputName: ${inputName}`);
+          
+          if (phoneMatches || nameMatches) {
+            console.log('DEBUG: Manager match found in cloud!');
+          }
+          
           return phoneMatches || nameMatches;
         });
-
+        
         if (matches.length > 0) {
           const correctPinMatch = matches.find(m => m.pin === pin);
           matchedManager = correctPinMatch || matches[0];
         }
       } catch (err) {
-        console.warn('Global Firestore lookup failed', err);
+        console.error('Global Firestore manager login lookup failed', err);
       }
     }
     
@@ -332,17 +343,28 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
     let manager: User | undefined;
     if (regRole === 'Employee') {
-      manager = registeredUsers.find(u => u.referralCode === regReferralCode.trim());
+      const referralCode = regReferralCode.trim().toUpperCase();
+      console.log('DEBUG: Looking for manager with referral code (normalized):', referralCode);
+      
+      manager = registeredUsers.find(u => {
+        const dbReferralCode = u.referralCode ? u.referralCode.toUpperCase() : '';
+        console.log(`DEBUG: Checking local user: ${u.name}, referralCode: ${dbReferralCode}`);
+        return dbReferralCode === referralCode;
+      });
       
       if (!manager) {
         try {
           const usersRef = collection(db, 'users');
-          const snap = await getDocs(query(usersRef, where('referralCode', '==', regReferralCode.trim())));
+          console.log('DEBUG: Referral code lookup in cloud for:', referralCode);
+          const snap = await getDocs(query(usersRef, where('referralCode', '==', referralCode)));
           if (!snap.empty) {
             manager = snap.docs[0].data() as User;
+            console.log('DEBUG: Referral code match found in cloud!');
+          } else {
+            console.log('DEBUG: Referral code NOT found in cloud.');
           }
         } catch (err) {
-          console.warn('Global Firestore referral code lookup failed', err);
+          console.error('Global Firestore referral code lookup failed', err);
         }
       }
 
@@ -684,10 +706,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
                   <button
                     type="submit"
-                    className="w-full bg-[#00B87A] hover:bg-[#00a36c] text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-[#00B87A]/20 mt-4 cursor-pointer"
+                    disabled={!isUsersLoaded}
+                    className={`w-full bg-[#00B87A] hover:bg-[#00a36c] text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-[#00B87A]/20 mt-4 cursor-pointer ${!isUsersLoaded ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <span>Log in to POS Terminal</span>
-                    <ArrowRight className="w-4 h-4 stroke-[3]" />
+                    <span>{isUsersLoaded ? 'Log in to POS Terminal' : 'Loading Account Data...'}</span>
+                    {isUsersLoaded && <ArrowRight className="w-4 h-4 stroke-[3]" />}
                   </button>
                 </form>
               ) : (
@@ -849,10 +872,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
                   <button
                     type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-indigo-600/20 mt-4 cursor-pointer"
+                    disabled={!isUsersLoaded}
+                    className={`w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-indigo-600/20 mt-4 cursor-pointer ${!isUsersLoaded ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <span>Enter Manager Dashboard</span>
-                    <ArrowRight className="w-4 h-4 stroke-[3]" />
+                    <span>{isUsersLoaded ? 'Enter Manager Dashboard' : 'Loading Account Data...'}</span>
+                    {isUsersLoaded && <ArrowRight className="w-4 h-4 stroke-[3]" />}
                   </button>
                 </form>
               )}
