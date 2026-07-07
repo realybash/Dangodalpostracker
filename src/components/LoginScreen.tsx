@@ -102,6 +102,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
   const staffUsers = registeredUsers.filter(u => u.role === 'Employee');
   const managerUsers = registeredUsers.filter(u => u.role === 'Manager');
+  
+  console.log('LoginScreen registeredUsers:', registeredUsers);
+  console.log('LoginScreen managerUsers:', managerUsers);
 
   const avatarBgColors = [
     'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -330,6 +333,19 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     let manager: User | undefined;
     if (regRole === 'Employee') {
       manager = registeredUsers.find(u => u.referralCode === regReferralCode.trim());
+      
+      if (!manager) {
+        try {
+          const usersRef = collection(db, 'users');
+          const snap = await getDocs(query(usersRef, where('referralCode', '==', regReferralCode.trim())));
+          if (!snap.empty) {
+            manager = snap.docs[0].data() as User;
+          }
+        } catch (err) {
+          console.warn('Global Firestore referral code lookup failed', err);
+        }
+      }
+
       if (!manager) {
         setError('Invalid referral code. Please check and try again.');
         return;
