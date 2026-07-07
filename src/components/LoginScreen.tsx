@@ -355,13 +355,31 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       if (!manager) {
         try {
           const usersRef = collection(db, 'users');
-          console.log('DEBUG: Referral code lookup in cloud for:', referralCode);
-          const snap = await getDocs(query(usersRef, where('referralCode', '==', referralCode)));
+          // Referral codes are stored in uppercase, so search in uppercase
+          const referralCodeSearch = referralCode.toUpperCase();
+          console.log('DEBUG: Referral code lookup in cloud for:', referralCodeSearch);
+          
+          // Note: Firestore queries are case-sensitive. 
+          // We assume referral codes are stored exactly as generated (uppercase).
+          const snap = await getDocs(query(usersRef, where('referralCode', '==', referralCodeSearch)));
+          
           if (!snap.empty) {
             manager = snap.docs[0].data() as User;
-            console.log('DEBUG: Referral code match found in cloud!');
+            console.log('DEBUG: Referral code match found in cloud! User:', manager.name);
           } else {
             console.log('DEBUG: Referral code NOT found in cloud.');
+            
+            // Fallback: Try a case-insensitive search if standard search fails
+            // This is slower but safer for debugging
+            const allUsersSnap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
+            const managerInCloud = allUsersSnap.docs
+              .map(d => d.data() as User)
+              .find(u => u.referralCode?.toUpperCase() === referralCodeSearch);
+              
+            if (managerInCloud) {
+                manager = managerInCloud;
+                console.log('DEBUG: Referral code match found in cloud (fallback)! User:', manager.name);
+            }
           }
         } catch (err) {
           console.error('Global Firestore referral code lookup failed', err);
@@ -389,7 +407,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       email: regEmail.trim() || undefined,
       password: regPassword || undefined,
       referralCode: regRole === 'Manager' ? `MGR-${randomId.toUpperCase()}` : undefined,
-      referredBy: regRole === 'Employee' ? regReferralCode.trim() : undefined,
+      referredBy: regRole === 'Employee' ? regReferralCode.trim().toUpperCase() : undefined,
       areaOfWorking: regRole === 'Employee' ? regArea.trim() : undefined
     };
 

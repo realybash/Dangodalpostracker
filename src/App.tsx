@@ -39,6 +39,7 @@ import { EmployeeOversightBoard } from './components/EmployeeOversightBoard';
 import { EditEmployeeModal } from './components/EditEmployeeModal';
 import { CashierReconciliationCalculator } from './components/CashierReconciliationCalculator';
 import { LoginScreen } from './components/LoginScreen';
+import { useFirebasePersistence } from './hooks/useFirebasePersistence';
 import { 
   User as UserIcon,
   UserCheck, 
@@ -328,16 +329,6 @@ function initAppState(): AppState {
     if (saved) {
       const parsed = JSON.parse(saved);
       
-      // Aggressively check for demo users and clear if found
-      const demoIds = ['mgr_1', 'emp_1', 'emp_2', 'emp_3'];
-      const hasDemoUsers = (parsed.availableEmployees || []).some((u: any) => demoIds.includes(u.id)) || 
-                           (parsed.currentUser && demoIds.includes(parsed.currentUser.id));
-      
-      if (hasDemoUsers) {
-        localStorage.removeItem(LOCAL_STORAGE_KEY);
-        return DEFAULT_STATE;
-      }
-
       return {
         ...DEFAULT_STATE,
         ...parsed,
@@ -1080,66 +1071,10 @@ export default function App() {
   }, []);
 
   // Unified registered users pool
-  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
-    // Check if we need to perform a one-time clear of all previous accounts (both demo and realistic)
-    const wasCleared = localStorage.getItem('OPay_Accounts_Cleared_v2');
-    if (!wasCleared) {
-      localStorage.removeItem('OPay_Registered_Users_v4');
-      localStorage.removeItem('POSTrack_State_Store_v5');
-      localStorage.removeItem('OPay_Terminal_Locked');
-      localStorage.setItem('OPay_Accounts_Cleared_v2', 'true');
-    }
-
-    const saved = localStorage.getItem('OPay_Registered_Users_v4');
-    if (saved) {
-      try {
-        let parsed = JSON.parse(saved) as User[];
-        if (parsed && Array.isArray(parsed)) {
-          return parsed.map(p => ({
-            ...p,
-            pin: p.pin || '1111',
-            phone: p.phone || `080${Math.floor(10000000 + Math.random() * 90000000)}`
-          }));
-        }
-      } catch (err) {
-        console.warn('Recovering registered users failed', err);
-      }
-    }
-    // Only return empty if nothing was in localStorage, otherwise we might be overwriting valid but unparseable data
-    return [];
-  });
-
-  // Load registered users from Firestore on startup to handle new devices or cleared cache
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
   const [isUsersLoaded, setIsUsersLoaded] = useState(false);
-  useEffect(() => {
-    const fetchUsersOnStartup = async () => {
-      try {
-        const usersRef = collection(db, 'users');
-        const snap = await getDocs(usersRef);
-        if (!snap.empty) {
-          const cloudUsersList = snap.docs.map(docSnap => docSnap.data() as User);
-          
-          setRegisteredUsers((prev) => {
-            // Merge local and cloud users, preferring cloud data for duplicates by id
-            const mergedMap = new Map<string, User>();
-            prev.forEach(u => mergedMap.set(u.id, u));
-            cloudUsersList.forEach(u => mergedMap.set(u.id, u));
-            
-            const merged = Array.from(mergedMap.values());
-            localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(merged));
-            return merged;
-          });
-          console.log('Successfully synchronized registered users pool from cloud Firestore on startup');
-        }
-      } catch (err) {
-        console.warn('Silent startup cloud users fetch failed:', err);
-      } finally {
-        setIsUsersLoaded(true);
-      }
-    };
-    
-    fetchUsersOnStartup();
-  }, []);
+
+  useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded);
 
   const handleRegisterUser = async (newUser: User) => {
     // Always persist locally first so user registrations never block on connection issues
