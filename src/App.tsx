@@ -6,7 +6,7 @@
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut, sendPasswordResetEmail } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -578,6 +578,18 @@ export default function App() {
         const managerId = user.uid;
         const managerDocRef = doc(db, 'users', managerId);
         
+        const updatePoolAndDispatch = (mUser: User) => {
+          setRegisteredUsers((prev) => {
+            if (!prev.some(u => u.id === mUser.id)) {
+              const next = [...prev, mUser];
+              localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
+              return next;
+            }
+            return prev;
+          });
+          dispatch({ type: 'SWITCH_USER', payload: mUser });
+        };
+
         try {
           const snap = await getDoc(managerDocRef);
           let managerUser: User;
@@ -598,7 +610,7 @@ export default function App() {
             await setDoc(managerDocRef, managerUser);
           }
           
-          dispatch({ type: 'SWITCH_USER', payload: managerUser });
+          updatePoolAndDispatch(managerUser);
         } catch (err) {
           console.warn('Failed to sync cloud manager profile:', err);
           const fallbackManager: User = {
@@ -611,7 +623,7 @@ export default function App() {
             activated: true,
             referralCode: `MGR-${managerId.substring(0, 5).toUpperCase()}`
           };
-          dispatch({ type: 'SWITCH_USER', payload: fallbackManager });
+          updatePoolAndDispatch(fallbackManager);
         }
       } else {
         // If they sign out of Cloud Sync, switch to the default local manager
@@ -992,9 +1004,25 @@ export default function App() {
     }
   };
 
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLocked, setIsLocked] = useState(() => {
+    try {
+      const locked = localStorage.getItem('OPay_Terminal_Locked');
+      return locked !== 'false';
+    } catch (e) {
+      return true;
+    }
+  });
 
   const handleLoginSuccess = (user: User) => {
+    setRegisteredUsers((prev) => {
+      if (!prev.some(u => u.id === user.id)) {
+        const next = [...prev, user];
+        localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
+        return next;
+      }
+      return prev;
+    });
+
     dispatch({ type: 'SWITCH_USER', payload: user });
     setIsLocked(false);
     localStorage.setItem('OPay_Terminal_Locked', 'false');
@@ -1081,6 +1109,35 @@ export default function App() {
     localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(defaults));
     return defaults;
   });
+
+  // Load registered users from Firestore on startup to handle new devices or cleared cache
+  useEffect(() => {
+    const fetchUsersOnStartup = async () => {
+      try {
+        const usersRef = collection(db, 'users');
+        const snap = await getDocs(usersRef);
+        if (!snap.empty) {
+          const cloudUsersList = snap.docs.map(docSnap => docSnap.data() as User);
+          
+          setRegisteredUsers((prev) => {
+            // Merge local and cloud users, preferring cloud data for duplicates by id
+            const mergedMap = new Map<string, User>();
+            prev.forEach(u => mergedMap.set(u.id, u));
+            cloudUsersList.forEach(u => mergedMap.set(u.id, u));
+            
+            const merged = Array.from(mergedMap.values());
+            localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(merged));
+            return merged;
+          });
+          console.log('Successfully synchronized registered users pool from cloud Firestore on startup');
+        }
+      } catch (err) {
+        console.warn('Silent startup cloud users fetch failed:', err);
+      }
+    };
+    
+    fetchUsersOnStartup();
+  }, []);
 
   const handleRegisterUser = async (newUser: User) => {
     // Always attempt to save to Firestore for global access

@@ -29,13 +29,14 @@ import {
 interface LoginScreenProps {
   registeredUsers: User[];
   onLogin: (user: User) => void;
-  onRegister: (user: User) => void;
+  onRegister: (user: User) => Promise<void>;
   onDeleteAllAccounts?: () => void;
 }
 
 export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts }: LoginScreenProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginTab, setLoginTab] = useState<'staff' | 'manager'>('staff');
+  const [isRegistering, setIsRegistering] = useState(false);
   
   // Registration form states
   const [regName, setRegName] = useState('');
@@ -225,8 +226,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }, 800);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isRegistering) return;
     setError('');
     setSuccess('');
 
@@ -287,30 +289,38 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       areaOfWorking: regRole === 'Employee' ? regArea.trim() : undefined
     };
 
-    onRegister(newUser);
-    setSuccess(`Hooray! ${regRole} account created successfully for ${regName}!`);
-    
-    // Smooth reset and auto-select in Login screen
-    setTimeout(() => {
-      setAuthMode('login');
-      if (regRole === 'Employee') {
-        setLoginTab('staff');
-        setLoginPhone(newUser.phone || newUser.name);
-        setPin(newUser.pin || '');
-      } else {
-        setLoginTab('manager');
-        setManagerPhone(newUser.phone || newUser.name);
-        setPin(newUser.pin || '');
-      }
-      // Reset registration form
-      setRegName('');
-      setRegPin('');
-      setRegPhone('');
-      setRegEmail('');
-      setRegPassword('');
-      setError('');
-      setSuccess('');
-    }, 1800);
+    setIsRegistering(true);
+    try {
+      await onRegister(newUser);
+      setSuccess(`Hooray! ${regRole} account created successfully for ${regName}!`);
+      
+      // Smooth reset and auto-select in Login screen
+      setTimeout(() => {
+        setAuthMode('login');
+        if (regRole === 'Employee') {
+          setLoginTab('staff');
+          setLoginPhone(newUser.phone || newUser.name);
+          setPin(newUser.pin || '');
+        } else {
+          setLoginTab('manager');
+          setManagerPhone(newUser.phone || newUser.name);
+          setPin(newUser.pin || '');
+        }
+        // Reset registration form
+        setRegName('');
+        setRegPin('');
+        setRegPhone('');
+        setRegEmail('');
+        setRegPassword('');
+        setError('');
+        setSuccess('');
+        setIsRegistering(false);
+      }, 1800);
+    } catch (err) {
+      console.error('Registration failed:', err);
+      setError('Registration failed. Please verify your connection and try again.');
+      setIsRegistering(false);
+    }
   };
 
   return (
@@ -943,16 +953,23 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                 </div>
               </div>
 
-              <button
+               <button
                 type="submit"
+                disabled={isRegistering}
                 className={`w-full text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md mt-6 cursor-pointer ${
-                  regRole === 'Manager'
-                    ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
-                    : 'bg-[#00B87A] hover:bg-[#00a36c] shadow-[#00B87A]/20'
+                  isRegistering 
+                    ? 'bg-neutral-400 cursor-not-allowed shadow-none' 
+                    : regRole === 'Manager'
+                      ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+                      : 'bg-[#00B87A] hover:bg-[#00a36c] shadow-[#00B87A]/20'
                 }`}
               >
-                <span>Register {regRole}</span>
-                <ChevronRight className="w-4.5 h-4.5 stroke-[3]" />
+                <span>{isRegistering ? 'Registering...' : `Register ${regRole}`}</span>
+                {isRegistering ? (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ChevronRight className="w-4.5 h-4.5 stroke-[3]" />
+                )}
               </button>
             </form>
           )}
