@@ -1105,9 +1105,8 @@ export default function App() {
         console.warn('Recovering registered users failed', err);
       }
     }
-    const defaults: User[] = [];
-    localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(defaults));
-    return defaults;
+    // Only return empty if nothing was in localStorage, otherwise we might be overwriting valid but unparseable data
+    return [];
   });
 
   // Load registered users from Firestore on startup to handle new devices or cleared cache
