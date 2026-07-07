@@ -35,7 +35,14 @@ interface LoginScreenProps {
 
 export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts }: LoginScreenProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [loginTab, setLoginTab] = useState<'staff' | 'manager'>('staff');
+  const [loginTab, setLoginTab] = useState<'staff' | 'manager'>(() => {
+    try {
+      const savedTab = localStorage.getItem('OPay_Last_Login_Tab');
+      return (savedTab === 'staff' || savedTab === 'manager') ? savedTab : 'staff';
+    } catch (e) {
+      return 'staff';
+    }
+  });
   const [isRegistering, setIsRegistering] = useState(false);
   
   // Registration form states
@@ -50,12 +57,45 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
   const [showRegPin, setShowRegPin] = useState(false);
   
   // Login form states
-  const [loginPhone, setLoginPhone] = useState('');
-  const [managerPhone, setManagerPhone] = useState('');
-  const [pin, setPin] = useState('');
+  const [loginPhone, setLoginPhone] = useState(() => {
+    try {
+      return localStorage.getItem('OPay_Last_Staff_Phone') || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [managerPhone, setManagerPhone] = useState(() => {
+    try {
+      return localStorage.getItem('OPay_Last_Manager_Phone') || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [pin, setPin] = useState(() => {
+    try {
+      const remember = localStorage.getItem('OPay_Remember_Me') !== 'false';
+      if (!remember) return '';
+      const savedTab = localStorage.getItem('OPay_Last_Login_Tab');
+      if (savedTab === 'staff') {
+        return localStorage.getItem('OPay_Last_Staff_Pin') || '';
+      } else if (savedTab === 'manager') {
+        return localStorage.getItem('OPay_Last_Manager_Pin') || '';
+      }
+      return '';
+    } catch (e) {
+      return '';
+    }
+  });
   const [showPin, setShowPin] = useState(false);
   const [showDemoHelp, setShowDemoHelp] = useState(false);
   const [showForgotPasscode, setShowForgotPasscode] = useState(false);
+  const [rememberMe, setRememberMe] = useState(() => {
+    try {
+      return localStorage.getItem('OPay_Remember_Me') !== 'false';
+    } catch (e) {
+      return true;
+    }
+  });
   
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -146,6 +186,19 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
     
     setSuccess(`Welcome back, ${user.name}! Logging in...`);
+    try {
+      localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
+      if (rememberMe) {
+        localStorage.setItem('OPay_Last_Login_Tab', 'staff');
+        localStorage.setItem('OPay_Last_Staff_Phone', loginPhone);
+        localStorage.setItem('OPay_Last_Staff_Pin', pin);
+      } else {
+        localStorage.removeItem('OPay_Last_Staff_Phone');
+        localStorage.removeItem('OPay_Last_Staff_Pin');
+      }
+    } catch (e) {
+      console.warn('Failed to save login credentials', e);
+    }
     setTimeout(() => {
       onLogin(user);
     }, 800);
@@ -221,6 +274,19 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
     
     setSuccess(`Access Granted! Welcome back, Manager ${matchedManager.name}.`);
+    try {
+      localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
+      if (rememberMe) {
+        localStorage.setItem('OPay_Last_Login_Tab', 'manager');
+        localStorage.setItem('OPay_Last_Manager_Phone', managerPhone);
+        localStorage.setItem('OPay_Last_Manager_Pin', pin);
+      } else {
+        localStorage.removeItem('OPay_Last_Manager_Phone');
+        localStorage.removeItem('OPay_Last_Manager_Pin');
+      }
+    } catch (e) {
+      console.warn('Failed to save login credentials', e);
+    }
     setTimeout(() => {
       onLogin(matchedManager);
     }, 800);
@@ -301,10 +367,20 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           setLoginTab('staff');
           setLoginPhone(newUser.phone || newUser.name);
           setPin(newUser.pin || '');
+          try {
+            localStorage.setItem('OPay_Last_Login_Tab', 'staff');
+            localStorage.setItem('OPay_Last_Staff_Phone', newUser.phone || newUser.name);
+            localStorage.setItem('OPay_Last_Staff_Pin', newUser.pin || '');
+          } catch (e) {}
         } else {
           setLoginTab('manager');
           setManagerPhone(newUser.phone || newUser.name);
           setPin(newUser.pin || '');
+          try {
+            localStorage.setItem('OPay_Last_Login_Tab', 'manager');
+            localStorage.setItem('OPay_Last_Manager_Phone', newUser.phone || newUser.name);
+            localStorage.setItem('OPay_Last_Manager_Pin', newUser.pin || '');
+          } catch (e) {}
         }
         // Reset registration form
         setRegName('');
@@ -572,9 +648,27 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-2 px-1 mt-3">
+                    <input
+                      type="checkbox"
+                      id="rememberMeStaff"
+                      checked={rememberMe}
+                      onChange={(e) => {
+                        setRememberMe(e.target.checked);
+                        try {
+                          localStorage.setItem('OPay_Remember_Me', e.target.checked ? 'true' : 'false');
+                        } catch (err) {}
+                      }}
+                      className="w-4 h-4 text-[#00B87A] border-neutral-300 rounded focus:ring-[#00B87A] accent-[#00B87A] cursor-pointer"
+                    />
+                    <label htmlFor="rememberMeStaff" className="text-xs text-neutral-500 font-semibold cursor-pointer select-none">
+                      Remember login details on this device
+                    </label>
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full bg-[#00B87A] hover:bg-[#00a36c] text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-[#00B87A]/20 mt-6 cursor-pointer"
+                    className="w-full bg-[#00B87A] hover:bg-[#00a36c] text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-[#00B87A]/20 mt-4 cursor-pointer"
                   >
                     <span>Log in to POS Terminal</span>
                     <ArrowRight className="w-4 h-4 stroke-[3]" />
@@ -719,9 +813,27 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     )}
                   </div>
 
+                  <div className="flex items-center gap-2 px-1 mt-3">
+                    <input
+                      type="checkbox"
+                      id="rememberMeManager"
+                      checked={rememberMe}
+                      onChange={(e) => {
+                        setRememberMe(e.target.checked);
+                        try {
+                          localStorage.setItem('OPay_Remember_Me', e.target.checked ? 'true' : 'false');
+                        } catch (err) {}
+                      }}
+                      className="w-4 h-4 text-indigo-600 border-neutral-300 rounded focus:ring-indigo-600 accent-indigo-600 cursor-pointer"
+                    />
+                    <label htmlFor="rememberMeManager" className="text-xs text-neutral-500 font-semibold cursor-pointer select-none">
+                      Remember login details on this device
+                    </label>
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-indigo-600/20 mt-6 cursor-pointer"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition active:scale-[0.98] shadow-md shadow-indigo-600/20 mt-4 cursor-pointer"
                   >
                     <span>Enter Manager Dashboard</span>
                     <ArrowRight className="w-4 h-4 stroke-[3]" />
