@@ -1644,21 +1644,6 @@ export default function App() {
         </div>
       )}
 
-      {state.currentUser.role === 'Manager' && !cloudUser && (
-        <div className="bg-indigo-600 text-white text-[10px] font-black py-2 px-4 flex items-center justify-between shadow-lg sticky top-0 z-[60] uppercase tracking-widest">
-          <div className="flex items-center gap-2">
-            <CloudOff className="w-3.5 h-3.5 animate-pulse" />
-            <span>Local Mode: Multi-device sync is disabled. Enable Cloud for staff access on other phones.</span>
-          </div>
-          <button 
-            onClick={() => setIsCloudSyncFormOpen(true)}
-            className="bg-white text-indigo-600 px-3 py-1 rounded-full font-extrabold hover:bg-indigo-50 transition active:scale-95 cursor-pointer shadow-sm"
-          >
-            Enable Cloud Sync
-          </button>
-        </div>
-      )}
-
       {unpaidCount > 0 && (
         <div className="bg-amber-500 text-white p-3 flex items-center justify-between shadow-lg z-40 sticky top-0">
           <div className="text-xs font-bold flex items-center gap-2">

@@ -136,7 +136,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
 
     if (!user) {
-      setError('Account not found. If your manager registered you, ensure they have "Cloud Sync" enabled. Otherwise, double check the phone number or name.');
+      setError('Account not found. Please double check the phone number or name, or contact your manager.');
       return;
     }
     
@@ -211,7 +211,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
     
     if (!matchedManager) {
-      setError('Manager account not found. If you registered on another phone, ensure "Cloud Sync" was enabled. Check the phone number or name.');
+      setError('Manager account not found. Please double check the phone number or name.');
       return;
     }
 
