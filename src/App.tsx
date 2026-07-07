@@ -17,7 +17,9 @@ import {
   isSameMonth, 
   isSameYear, 
   calculateTerminalFee,
-  getProviderTransactionNumber
+  getProviderTransactionNumber,
+  mapFirestoreUser,
+  cleanPhoneForCompare
 } from './utils';
 import { MetricCards } from './components/MetricCards';
 import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
@@ -586,13 +588,8 @@ export default function App() {
           let managerUser: User;
           
           if (snap.exists()) {
-            const data = snap.data();
-            managerUser = {
-              ...data,
-              id: data.uid || data.id || managerId,
-              name: data.fullName || data.name || user.displayName || 'Terminal Manager',
-              phone: data.phoneNumber || data.phone || user.phoneNumber || ''
-            } as User;
+            managerUser = mapFirestoreUser(snap.data(), managerId);
+            console.log('[Auth] Manager document restored from Firestore:', managerUser.name);
           } else {
             managerUser = {
               id: managerId,
@@ -754,19 +751,6 @@ export default function App() {
       return;
     }
 
-    // Subscribe to Manager-owned employees
-    const usersQuery = query(collection(db, 'users'), where('ownerId', '==', syncOwnerId));
-    const unsubscribeUsers = onSnapshot(usersQuery, async (snapshot) => {
-      const usersList: User[] = [];
-      snapshot.forEach((docSnap) => {
-        usersList.push(docSnap.data() as User);
-      });
-
-      setRegisteredUsers(usersList);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'users');
-    });
-
     // Subscribe to transactions
     const updateCombinedTxs = () => {
       const combined = [...ownerTxsRef.current, ...cashierTxsRef.current];
@@ -815,7 +799,6 @@ export default function App() {
     });
 
     return () => {
-      unsubscribeUsers();
       unsubscribeOwner();
       unsubscribeCashier();
       unsubscribeExpenses();
@@ -1080,55 +1063,65 @@ export default function App() {
   const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
   const [isUsersLoaded, setIsUsersLoaded] = useState(false);
 
-  useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded);
+  useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded, dispatch);
 
   const handleRegisterUser = async (newUser: User) => {
-    // Local persistence
-    setRegisteredUsers((prev) => {
-      const next = prev.some(u => u.id === newUser.id) ? prev : [...prev, newUser];
-      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
-      return next;
-    });
-
+    console.log('[Registration] Starting registration for:', newUser.name, 'Role:', newUser.role);
+    
     // Cloud persistence
     try {
       let finalUid = newUser.id;
       
-      // If Manager provides email/password, create real Firebase Auth account
-      if (newUser.role === 'Manager' && newUser.email && newUser.password) {
+      // Managers MUST have a Firebase Auth account for persistence and security
+      if (newUser.role === 'Manager') {
+        const phoneKey = cleanPhoneForCompare(newUser.phone || '');
+        const authEmail = `${phoneKey}@opay-pos.com`;
+        const authPass = newUser.pin || '1111'; // Use PIN as password for consistency with login
+        
+        console.log('[Registration] Creating Auth account for Manager:', authEmail);
+        
         try {
-          const userCred = await createUserWithEmailAndPassword(auth, newUser.email, newUser.password);
+          const userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
           finalUid = userCred.user.uid;
           await updateProfile(userCred.user, { displayName: newUser.name });
-          console.log('Successfully created Firebase Auth account for Manager:', newUser.name);
+          console.log('[Registration] Firebase Auth account created:', finalUid);
         } catch (authErr: any) {
-          // If user already exists in Auth, we might want to just link them, but for now we'll warn
           if (authErr.code === 'auth/email-already-in-use') {
-             console.warn('Auth account already exists, continuing with Firestore doc only.');
+            console.warn('[Registration] Auth email already in use, checking for existing doc...');
+            // We'll proceed to try and overwrite/update the Firestore doc if they have the same phone
           } else {
-             throw authErr;
+            throw authErr;
           }
         }
       }
 
-      // Prepare document with requested field names
+      // Standardize document fields
       const firestoreDoc = {
         ...newUser,
         uid: finalUid,
+        id: finalUid,
         fullName: newUser.name,
         phoneNumber: newUser.phone,
-        ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || 'mgr_1')
+        ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || finalUid)
       };
 
+      console.log('[Registration] Writing to Firestore collection "users" at ID:', finalUid);
       const userDocRef = doc(db, 'users', finalUid);
       await setDoc(userDocRef, firestoreDoc);
-      console.log('Successfully saved user document to Firestore:', finalUid);
       
-      showAppNotification(`New account for ${newUser.name} created and synced to cloud.`, 'success');
+      showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
+      
+      // Update local state immediately with standardized fields
+      const standardizedUser = mapFirestoreUser(firestoreDoc, finalUid);
+      setRegisteredUsers(prev => {
+        const next = prev.filter(u => u.id !== standardizedUser.id && u.phone !== standardizedUser.phone);
+        return [...next, standardizedUser];
+      });
+
     } catch (err: any) {
-      console.error('Critical Firestore/Auth sync failed during registration:', err);
-      showAppNotification(`Cloud Sync Failed: ${err.message}. Account remains local only.`, 'error');
-      throw err; // Re-throw to let LoginScreen handle it
+      console.error('[Registration] Critical failure:', err);
+      showAppNotification(`Registration Failed: ${err.message}`, 'error');
+      throw err;
     }
   };
 
@@ -1229,96 +1222,6 @@ export default function App() {
       console.warn('LocalStorage save failed for registeredUsers:', err);
     }
   }, [registeredUsers]);
-
-  // Background migration/synchronization from local storage to cloud Firestore
-  useEffect(() => {
-    const syncLocalDataToCloud = async (ownerId: string) => {
-      if (!ownerId || ownerId === 'mgr_1' || ownerId === '') return;
-      
-      console.log('Starting background local-to-cloud sync for:', ownerId);
-      
-      // 1. Sync registered users/cashiers
-      const localUsersSaved = localStorage.getItem('OPay_Registered_Users_v4');
-      if (localUsersSaved) {
-        try {
-          const localUsers = JSON.parse(localUsersSaved) as User[];
-          if (Array.isArray(localUsers) && localUsers.length > 0) {
-            for (const u of localUsers) {
-              if (u.id === 'mgr_1') continue; // Don't upload local manager
-              
-              // Only sync if the user's ownerId is empty or local
-              const uOwner = u.ownerId;
-              if (!uOwner || uOwner === 'mgr_1' || uOwner === 'local_owner') {
-                const updatedUser = { ...u, ownerId };
-                await setDoc(doc(db, 'users', u.id), updatedUser, { merge: true });
-                console.log(`Cloud Synced cashier profile: ${u.name}`);
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Local users sync failed:', err);
-        }
-      }
-
-      // 2. Sync transactions
-      if (state.transactions && state.transactions.length > 0) {
-        try {
-          const localTxs = state.transactions.filter(
-            t => !t.ownerId || t.ownerId === 'local_owner' || t.ownerId === 'mgr_1'
-          );
-          if (localTxs.length > 0) {
-            console.log(`Cloud Synced ${localTxs.length} local transactions...`);
-            for (const tx of localTxs) {
-              const txWithOwner = { ...tx, ownerId };
-              await setDoc(doc(db, 'transactions', tx.id), txWithOwner, { merge: true });
-            }
-          }
-        } catch (err) {
-          console.warn('Local transactions sync failed:', err);
-        }
-      }
-
-      // 3. Sync expenses
-      if (state.expenses && state.expenses.length > 0) {
-        try {
-          const localExpenses = state.expenses.filter(
-            e => !e.ownerId || e.ownerId === 'local_owner' || e.ownerId === 'mgr_1'
-          );
-          if (localExpenses.length > 0) {
-            console.log(`Cloud Synced ${localExpenses.length} local expenses...`);
-            for (const exp of localExpenses) {
-              const expWithOwner = { ...exp, ownerId };
-              await setDoc(doc(db, 'expenses', exp.id), expWithOwner, { merge: true });
-            }
-          }
-        } catch (err) {
-          console.warn('Local expenses sync failed:', err);
-        }
-      }
-
-      // 4. Sync POS terminals
-      if (state.posTerminals && state.posTerminals.length > 0) {
-        try {
-          const localTerminals = state.posTerminals.filter(
-            pt => !pt.ownerId || pt.ownerId === 'local_owner' || pt.ownerId === 'mgr_1'
-          );
-          if (localTerminals.length > 0) {
-            console.log(`Cloud Synced ${localTerminals.length} local terminals...`);
-            for (const pt of localTerminals) {
-              const ptWithOwner = { ...pt, ownerId };
-              await setDoc(doc(db, 'pos_terminals', pt.id), ptWithOwner, { merge: true });
-            }
-          }
-        } catch (err) {
-          console.warn('Local terminals sync failed:', err);
-        }
-      }
-    };
-
-    if (syncOwnerId && syncOwnerId !== 'mgr_1' && syncOwnerId !== '') {
-      syncLocalDataToCloud(syncOwnerId);
-    }
-  }, [syncOwnerId, state.transactions, state.expenses, state.posTerminals]);
 
   const allUsersPool = useMemo(() => {
     return registeredUsers;

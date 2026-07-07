@@ -1,4 +1,4 @@
-import { Transaction } from './types';
+import { Transaction, User } from './types';
 
 // Existing phone/name normalization functions
 export function normalizePhone(phone: string): string {
@@ -151,6 +151,37 @@ export function getProviderTransactionNumber(tx: { id: string; provider: string;
   const numericId = hashStr.slice(0, 6).padEnd(6, '0');
   return `${prefix}${dateStr}${numericId}`;
 }
+
+/**
+ * Standardizes user object from Firestore data
+ */
+export function mapFirestoreUser(data: any, docId?: string): User {
+  const uid = data.uid || data.id || docId || 'unknown';
+  const rawName = data.fullName || data.name || data.displayName || 'Unknown User';
+  const rawPhone = data.phoneNumber || data.phone || '';
+  
+  return {
+    ...data,
+    id: uid,
+    uid: uid,
+    name: rawName.trim(),
+    fullName: rawName.trim(),
+    phone: rawPhone.trim(),
+    phoneNumber: rawPhone.trim(),
+    role: data.role || 'Employee',
+    pin: data.pin || '1111',
+    ownerId: data.ownerId || (data.role === 'Manager' ? uid : 'mgr_1')
+  } as User;
+}
+
+/**
+ * Standardizes phone numbers for comparison (last 10 digits only)
+ */
+export const cleanPhoneForCompare = (p: string) => {
+  if (!p) return '';
+  const cleaned = p.replace(/\D/g, '');
+  return cleaned.length >= 10 ? cleaned.slice(-10) : cleaned;
+};
 
 // Aggregated metrics calculator for transactions across different timeframes
 export function computeTxMetrics(

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { normalizePhone, normalizeName } from '../utils';
+import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { db, auth } from '../lib/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser } from '../utils';
 import { 
   Lock, 
   UserCheck, 
@@ -98,6 +99,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
   });
   
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -134,70 +136,61 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
     
-    const cleanPhoneForCompare = (p: string) => {
-      const digits = p.replace(/\D/g, '');
-      return digits.length >= 10 ? digits.slice(-10) : digits;
-    };
-    
     const inputPhoneDigits = cleanPhoneForCompare(loginPhone);
+    console.log('[Login] Staff attempt:', loginPhone, 'Digits:', inputPhoneDigits);
 
     let user = staffUsers.find(u => {
       const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
       const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-      const inputName = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
+      const inputNameNormalized = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
       
       const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-      const nameMatches = dbName === inputName || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
+      const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === loginPhone.trim().toLowerCase();
       
       return phoneMatches || nameMatches;
     });
 
     if (!user) {
+      console.log('[Login] Staff not found locally, checking Firestore...');
       try {
         const usersRef = collection(db, 'users');
         const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
-        const allEmployees = snap.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            ...data,
-            id: data.uid || data.id || docSnap.id,
-            name: data.fullName || data.name || 'Unknown',
-            phone: data.phoneNumber || data.phone || ''
-          } as User;
-        });
+        const allEmployees = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+        console.log(`[Login] Found ${allEmployees.length} employees in cloud`);
 
         const matches = allEmployees.filter(u => {
           const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
           const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-          const inputName = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
+          const inputNameNormalized = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
           
           const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-          const nameMatches = dbName === inputName || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
+          const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === loginPhone.trim().toLowerCase();
           
           return phoneMatches || nameMatches;
         });
 
         if (matches.length > 0) {
-          // Prioritize matching PIN if multiple exist
           const correctPinMatch = matches.find(u => u.pin === pin);
           user = correctPinMatch || matches[0];
+          console.log('[Login] Cloud match found:', user.name);
         }
       } catch (err) {
-        console.warn('Global Firestore lookup failed', err);
+        console.warn('[Login] Global Firestore lookup failed', err);
       }
     }
 
     if (!user) {
-      setError('Account not found. Please double check the phone number or name, or contact your manager.');
+      setError('Account not found. Please double check the phone number or name.');
       return;
     }
     
     if (user.pin && user.pin !== pin) {
-      setError('Incorrect 4-digit passcode PIN. Please try again.');
+      setError('Incorrect 4-digit passcode PIN.');
       return;
     }
     
     setSuccess(`Welcome back, ${user.name}! Logging in...`);
+    // ... rest of the logic
     try {
       localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
       if (rememberMe) {
@@ -208,9 +201,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         localStorage.removeItem('OPay_Last_Staff_Phone');
         localStorage.removeItem('OPay_Last_Staff_Pin');
       }
-    } catch (e) {
-      console.warn('Failed to save login credentials', e);
-    }
+    } catch (e) {}
+    
     setTimeout(() => {
       onLogin(user);
     }, 800);
@@ -231,95 +223,81 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
 
-    const cleanPhoneForCompare = (p: string) => {
-      const digits = p.replace(/\D/g, '');
-      return digits.length >= 10 ? digits.slice(-10) : digits;
-    };
+    const inputRaw = managerPhone.trim();
+    const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
+    const inputNameSearch = inputRaw.toLowerCase().replace(/\s+/g, '');
     
-    const inputPhoneDigits = cleanPhoneForCompare(managerPhone);
+    console.log('[Login] Manager login attempt:', inputRaw);
+    setIsSubmitting(true);
 
-    let matchedManager = managerUsers.find(m => {
-      const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
-      const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
-      const inputName = managerPhone.trim().toLowerCase().replace(/\s+/g, '');
-      
-      const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-      const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
-      
-      console.log(`DEBUG: Matching locally: ${m.name}, DBPhone: ${dbPhoneDigits}, InputPhone: ${inputPhoneDigits}, Name: ${dbName}, InputName: ${inputName}`);
-      
-      return phoneMatches || nameMatches;
-    });
-
-    if (!matchedManager) {
-      try {
-        const usersRef = collection(db, 'users');
-        const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
-        const allManagers = snap.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            ...data,
-            id: data.uid || data.id || docSnap.id,
-            name: data.fullName || data.name || 'Unknown',
-            phone: data.phoneNumber || data.phone || ''
-          } as User;
-        });
-        
-        console.log('DEBUG: Manager lookup failed locally. Cloud managers found:', allManagers.length);
-        
-        const matches = allManagers.filter(m => {
-          const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
-          const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
-          const inputName = managerPhone.trim().toLowerCase().replace(/\s+/g, '');
-          
-          const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-          const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
-          
-          console.log(`DEBUG: Matching in cloud: ${m.name}, DBPhone: ${dbPhoneDigits}, InputPhone: ${inputPhoneDigits}, Name: ${dbName}, InputName: ${inputName}`);
-          
-          if (phoneMatches || nameMatches) {
-            console.log('DEBUG: Manager match found in cloud!');
-          }
-          
-          return phoneMatches || nameMatches;
-        });
-        
-        if (matches.length > 0) {
-          const correctPinMatch = matches.find(m => m.pin === pin);
-          matchedManager = correctPinMatch || matches[0];
-        }
-      } catch (err) {
-        console.error('Global Firestore manager login lookup failed', err);
-      }
-    }
-    
-    if (!matchedManager) {
-      setError('Manager account not found. Please double check the phone number or name.');
-      return;
-    }
-
-    if (matchedManager.pin && matchedManager.pin !== pin) {
-      setError('Incorrect Manager Passcode PIN. Please verify your passcode.');
-      return;
-    }
-    
-    setSuccess(`Access Granted! Welcome back, Manager ${matchedManager.name}.`);
     try {
-      localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
-      if (rememberMe) {
-        localStorage.setItem('OPay_Last_Login_Tab', 'manager');
-        localStorage.setItem('OPay_Last_Manager_Phone', managerPhone);
-        localStorage.setItem('OPay_Last_Manager_Pin', pin);
-      } else {
-        localStorage.removeItem('OPay_Last_Manager_Phone');
-        localStorage.removeItem('OPay_Last_Manager_Pin');
+      // 1. Find the Manager document first (to get their UID and correct phone)
+      let matchedManager = managerUsers.find(m => {
+        const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
+        const dbName = m.name.toLowerCase().replace(/\s+/g, '');
+        
+        const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+        const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
+        
+        return phoneMatch || nameMatch;
+      });
+
+      if (!matchedManager && isUsersLoaded) {
+        console.log('[Login] Manager not found locally, checking Firestore...');
+        try {
+          const usersRef = collection(db, 'users');
+          const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
+          const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+          
+          matchedManager = allManagers.find(m => {
+            const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
+            const dbName = m.name.toLowerCase().replace(/\s+/g, '');
+            const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+            const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
+            return phoneMatch || nameMatch;
+          });
+        } catch (err) {
+          console.warn('[Login] Remote lookup failed:', err);
+        }
       }
-    } catch (e) {
-      console.warn('Failed to save login credentials', e);
+
+      if (!matchedManager) {
+        setError('Manager account not found. Please register first.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Attempt Firebase Auth sign-in using the Manager's phone
+      const managerPhoneKey = cleanPhoneForCompare(matchedManager.phone || '');
+      const authEmail = `${managerPhoneKey}@opay-pos.com`;
+      
+      console.log('[Login] Attempting Auth sign-in for:', matchedManager.name, 'Email:', authEmail);
+      
+      try {
+        await signInWithEmailAndPassword(auth, authEmail, pin);
+        console.log('[Login] Auth sign-in successful');
+        
+        setSuccess(`Access Granted! Welcome back, ${matchedManager.name}.`);
+        onLogin(matchedManager);
+      } catch (authErr: any) {
+        console.warn('[Login] Auth sign-in failed:', authErr.code);
+        
+        // Fallback: If it's a legacy user without Auth account, we might still allow doc-only login
+        // but only if the PIN matches the document
+        if (matchedManager.pin === pin) {
+          console.log('[Login] PIN matched document (Auth account may be missing), proceeding...');
+          setSuccess(`Access Granted! Welcome back, ${matchedManager.name}.`);
+          onLogin(matchedManager);
+        } else {
+          setError('Incorrect Manager Passcode PIN.');
+        }
+      }
+    } catch (err: any) {
+      console.error('[Login] Critical error during manager login:', err);
+      setError(`Login error: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
-    setTimeout(() => {
-      onLogin(matchedManager);
-    }, 800);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -333,6 +311,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
 
+    if (regRole === 'Manager' && !regPhone.trim()) {
+      setError('A valid Phone Number is required for Manager accounts.');
+      return;
+    }
+
     if (!regPin || regPin.length !== 4 || !/^\d+$/.test(regPin)) {
       setError('Please choose a secure 4-digit numeric passcode PIN.');
       return;
@@ -343,10 +326,19 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
 
-    // Check duplicate names to avoid confusion
-    const exists = registeredUsers.some(u => u.name.toLowerCase() === regName.trim().toLowerCase() && u.role === regRole);
+    // Check duplicate names or phones to avoid confusion
+    const exists = registeredUsers.some(u => 
+      u.role === regRole && 
+      (u.name.trim().toLowerCase() === regName.trim().toLowerCase() || 
+       (u.phone && cleanPhoneForCompare(u.phone) === cleanPhoneForCompare(regPhone)))
+    );
     if (exists) {
-      setError(`An account named "${regName}" already exists as a ${regRole}.`);
+      const existingUser = registeredUsers.find(u => 
+        u.role === regRole && 
+        (u.name.trim().toLowerCase() === regName.trim().toLowerCase() || 
+         (u.phone && cleanPhoneForCompare(u.phone) === cleanPhoneForCompare(regPhone)))
+      );
+      setError(`An account named "${existingUser?.name}" already exists as a ${regRole}.`);
       return;
     }
 
