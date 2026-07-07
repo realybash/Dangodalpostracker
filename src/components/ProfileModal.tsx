@@ -307,7 +307,8 @@ export function ProfileModal({
       role: newStaffRole,
       pin: newStaffPin,
       phone: newStaffPhone.trim() || undefined,
-      activated: newStaffActivated
+      activated: newStaffActivated,
+      ownerId: currentUser.role === 'Manager' ? currentUser.id : (currentUser.ownerId || 'mgr_1')
     };
 
     onRegisterUser(newStaff);

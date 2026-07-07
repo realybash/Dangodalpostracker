@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { normalizePhone, normalizeName } from '../utils';
 import { 
   Lock, 
   UserCheck, 
@@ -88,28 +89,45 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
     
-    const inputIdentifier = loginPhone.trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
+    const cleanPhoneForCompare = (p: string) => {
+      const digits = p.replace(/\D/g, '');
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    };
+    
+    const inputPhoneDigits = cleanPhoneForCompare(loginPhone);
+
     let user = staffUsers.find(u => {
-      const dbPhone = (u.phone || '').trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
+      const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
       const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-      return dbPhone === inputIdentifier || dbName === inputIdentifier || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
+      const inputName = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
+      
+      const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+      const nameMatches = dbName === inputName || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
+      
+      return phoneMatches || nameMatches;
     });
 
     if (!user) {
       try {
         const usersRef = collection(db, 'users');
-        // Try to find by phone
-        const qPhone = query(usersRef, where('phone', '==', loginPhone.trim()), where('role', '==', 'Employee'));
-        const snapPhone = await getDocs(qPhone);
-        if (!snapPhone.empty) {
-          user = snapPhone.docs[0].data() as User;
-        } else {
-          // Try to find by name
-          const qName = query(usersRef, where('name', '==', loginPhone.trim()), where('role', '==', 'Employee'));
-          const snapName = await getDocs(qName);
-          if (!snapName.empty) {
-            user = snapName.docs[0].data() as User;
-          }
+        const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
+        const allEmployees = snap.docs.map(doc => doc.data() as User);
+
+        const matches = allEmployees.filter(u => {
+          const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
+          const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
+          const inputName = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
+          
+          const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+          const nameMatches = dbName === inputName || u.name.toLowerCase() === loginPhone.trim().toLowerCase();
+          
+          return phoneMatches || nameMatches;
+        });
+
+        if (matches.length > 0) {
+          // Prioritize matching PIN if multiple exist
+          const correctPinMatch = matches.find(u => u.pin === pin);
+          user = correctPinMatch || matches[0];
         }
       } catch (err) {
         console.warn('Global Firestore lookup failed', err);
@@ -117,7 +135,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
 
     if (!user) {
-      setError('Account not found. Ensure you typed the correct phone number or name, or that you are connected to the internet.');
+      setError('Account not found. If your manager registered you, ensure they have "Cloud Sync" enabled. Otherwise, double check the phone number or name.');
       return;
     }
     
@@ -147,28 +165,44 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
 
-    const inputIdentifier = managerPhone.trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
+    const cleanPhoneForCompare = (p: string) => {
+      const digits = p.replace(/\D/g, '');
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    };
+    
+    const inputPhoneDigits = cleanPhoneForCompare(managerPhone);
+
     let matchedManager = managerUsers.find(m => {
-      const dbPhone = (m.phone || '').trim().toLowerCase().replace(/[^\da-zA-Z]/g, '');
+      const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
       const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
-      return dbPhone === inputIdentifier || dbName === inputIdentifier || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
+      const inputName = managerPhone.trim().toLowerCase().replace(/\s+/g, '');
+      
+      const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+      const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
+      
+      return phoneMatches || nameMatches;
     });
 
     if (!matchedManager) {
       try {
         const usersRef = collection(db, 'users');
-        // Try to find by phone
-        const qPhone = query(usersRef, where('phone', '==', managerPhone.trim()), where('role', '==', 'Manager'));
-        const snapPhone = await getDocs(qPhone);
-        if (!snapPhone.empty) {
-          matchedManager = snapPhone.docs[0].data() as User;
-        } else {
-          // Try to find by name
-          const qName = query(usersRef, where('name', '==', managerPhone.trim()), where('role', '==', 'Manager'));
-          const snapName = await getDocs(qName);
-          if (!snapName.empty) {
-            matchedManager = snapName.docs[0].data() as User;
-          }
+        const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
+        const allManagers = snap.docs.map(doc => doc.data() as User);
+
+        const matches = allManagers.filter(m => {
+          const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
+          const dbName = m.name.trim().toLowerCase().replace(/\s+/g, '');
+          const inputName = managerPhone.trim().toLowerCase().replace(/\s+/g, '');
+          
+          const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+          const nameMatches = dbName === inputName || m.name.toLowerCase() === managerPhone.trim().toLowerCase();
+          
+          return phoneMatches || nameMatches;
+        });
+
+        if (matches.length > 0) {
+          const correctPinMatch = matches.find(m => m.pin === pin);
+          matchedManager = correctPinMatch || matches[0];
         }
       } catch (err) {
         console.warn('Global Firestore lookup failed', err);
@@ -176,7 +210,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
     
     if (!matchedManager) {
-      setError('Manager account not found. Ensure you typed the correct phone number or name, or that you are connected to the internet.');
+      setError('Manager account not found. If you registered on another phone, ensure "Cloud Sync" was enabled. Check the phone number or name.');
       return;
     }
 
@@ -243,7 +277,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       name: regName.trim(),
       role: regRole,
       pin: regPin,
-      phone: regPhone.trim() || `080${Math.floor(10000000 + Math.random() * 90000000)}`,
+      phone: regPhone.trim() ? normalizePhone(regPhone) : `080${Math.floor(10000000 + Math.random() * 90000000)}`,
       ownerId: regRole === 'Manager' ? userId : (manager?.id || managerUsers[0]?.id || 'mgr_1'),
       activated: true,
       email: regEmail.trim() || undefined,
@@ -282,31 +316,30 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
   return (
     <div className="min-h-screen bg-gradient-to-tr from-emerald-50/40 via-neutral-50 to-indigo-50/40 flex flex-col justify-center items-center p-4 sm:p-6 font-sans selection:bg-[#00B87A]/20 relative overflow-hidden">
       
-      {/* Abstract Background Glows */}
-      <div className="absolute top-10 left-10 w-72 h-72 bg-[#00B87A]/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-80 h-80 bg-[#00B87A]/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
-      <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-10 left-10 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      <div className="absolute top-1/2 left-1/3 w-96 h-96 bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl shadow-emerald-950/5 overflow-hidden border border-neutral-100 z-10 transition-all">
+      <div className="w-full max-w-lg bg-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] overflow-hidden border border-white/60 z-10 transition-all">
         
         {/* Header Banner - OPay Styled Theme */}
-        <div className="bg-gradient-to-br from-[#00B87A] via-[#00a36c] to-emerald-800 p-6 sm:p-8 text-center text-white relative">
-          <div className="absolute top-4 right-4 bg-white/10 px-2.5 py-1 rounded-full text-[10px] font-mono tracking-widest uppercase font-bold flex items-center gap-1">
+        <div className="bg-gradient-to-br from-[#00B87A] via-[#00a36c] to-emerald-900 p-8 sm:p-12 text-center text-white relative">
+          <div className="absolute top-6 right-6 bg-white/15 px-3 py-1 rounded-full text-[10px] font-mono tracking-widest uppercase font-black flex items-center gap-1.5 backdrop-blur-md border border-white/10">
             <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
-            V2.5 Live
+            System Live
           </div>
 
           <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
+            initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-            className="w-16 h-16 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/20 backdrop-blur-md shadow-inner"
+            transition={{ type: 'spring', damping: 12 }}
+            className="w-20 h-20 bg-white/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 border border-white/20 backdrop-blur-xl shadow-2xl"
           >
-            <Smartphone className="w-9 h-9 text-white drop-shadow" />
+            <Smartphone className="w-10 h-10 text-white drop-shadow-lg" />
           </motion.div>
-          <h2 className="text-2xl font-black tracking-tight font-mono uppercase">Dan Godal Postracker</h2>
-          <p className="text-emerald-100 text-xs font-semibold mt-1 max-w-sm mx-auto">
-            A premium secure ledger to record POS payouts, cashout transactions, and cashflow profits.
+          <h2 className="text-3xl font-black tracking-tight font-sans uppercase">Dan Godal</h2>
+          <p className="text-emerald-100/80 text-[11px] font-bold mt-2 max-w-xs mx-auto uppercase tracking-[0.2em] leading-relaxed">
+            Premium POS Audit Terminal
           </p>
         </div>
 
@@ -477,7 +510,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           Forgot Passcode?
                         </button>
                       </div>
-                      <div className="grid grid-cols-3 gap-2.5 max-w-[240px] mx-auto">
+                      <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                           <button
                             key={num}
@@ -488,7 +521,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                                 setError('');
                               }
                             }}
-                            className="w-12 h-12 rounded-full border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-800 text-base font-black font-mono shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                           >
                             {num}
                           </button>
@@ -499,7 +532,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                             setPin('');
                             setError('');
                           }}
-                          className="w-12 h-12 rounded-full border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-bold font-sans shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-black font-sans shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase"
                         >
                           Clear
                         </button>
@@ -511,7 +544,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                               setError('');
                             }
                           }}
-                          className="w-12 h-12 rounded-full border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-800 text-base font-black font-mono shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                         >
                           0
                         </button>
@@ -521,7 +554,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                             setPin(prev => prev.slice(0, -1));
                             setError('');
                           }}
-                          className="w-12 h-12 rounded-full border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg font-bold shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer"
                         >
                           ⌫
                         </button>
@@ -623,7 +656,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                             Forgot Passcode?
                           </button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2.5 max-w-[240px] mx-auto">
+                        <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto">
                           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                             <button
                               key={num}
@@ -634,7 +667,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                                   setError('');
                                 }
                               }}
-                              className="w-12 h-12 rounded-full border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-800 text-base font-black font-mono shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                              className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                             >
                               {num}
                             </button>
@@ -645,7 +678,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                               setPin('');
                               setError('');
                             }}
-                            className="w-12 h-12 rounded-full border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-bold font-sans shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-black font-sans shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase"
                           >
                             Clear
                           </button>
@@ -657,7 +690,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                                 setError('');
                               }
                             }}
-                            className="w-12 h-12 rounded-full border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-800 text-base font-black font-mono shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                           >
                             0
                           </button>
@@ -667,7 +700,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                               setPin(prev => prev.slice(0, -1));
                               setError('');
                             }}
-                            className="w-12 h-12 rounded-full border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold shadow-xs active:scale-90 transition flex items-center justify-center mx-auto cursor-pointer"
+                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg font-bold shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer"
                           >
                             ⌫
                           </button>

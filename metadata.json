@@ -1,6 +1,6 @@
 {
-  "name": "DANGODALPOSTRACKER",
-  "description": "POS agent transaction and profit tracker with role-based filtering, advanced performance metrics, and transaction simulation.",
+  "name": "Dan Godal POS Tracker",
+  "description": "A premium secure ledger for POS payouts, cashflow auditing, and real-time terminal monitoring for OPay agents.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

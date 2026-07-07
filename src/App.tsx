@@ -6,7 +6,7 @@
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut, sendPasswordResetEmail } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -91,7 +91,10 @@ import {
   CheckCircle,
   XCircle,
   MapPin,
-  Building
+  Building,
+  Cloud,
+  CloudOff,
+  WifiOff
 } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'POSTrack_State_Store_v5';
@@ -421,6 +424,8 @@ export default function App() {
 
    // Manager Auth states
   const [cloudUser, setCloudUser] = useState<any>(null);
+  const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? window.navigator.onLine : true);
+
   const syncOwnerId = useMemo(() => {
     if (cloudUser) {
       return cloudUser.uid;
@@ -430,7 +435,41 @@ export default function App() {
     }
     return null;
   }, [cloudUser, state.currentUser]);
+
+  // Compute number of items currently pending cloud sync
+  const pendingSyncCount = useMemo(() => {
+    if (!syncOwnerId || syncOwnerId === 'mgr_1' || syncOwnerId === '') return 0;
+    
+    const unsyncedTxs = state.transactions.filter(
+      t => !t.ownerId || t.ownerId === 'local_owner' || t.ownerId === 'mgr_1'
+    ).length;
+    
+    const unsyncedExpenses = state.expenses.filter(
+      e => !e.ownerId || e.ownerId === 'local_owner' || e.ownerId === 'mgr_1'
+    ).length;
+    
+    const unsyncedTerminals = state.posTerminals.filter(
+      pt => !pt.ownerId || pt.ownerId === 'local_owner' || pt.ownerId === 'mgr_1'
+    ).length;
+
+    return unsyncedTxs + unsyncedExpenses + unsyncedTerminals;
+  }, [syncOwnerId, state.transactions, state.expenses, state.posTerminals]);
+
   const [cloudLoading, setCloudLoading] = useState(true);
+
+  // Sync network connectivity status listener
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Authentication form modal states
   const [isCloudSyncFormOpen, setIsCloudSyncFormOpen] = useState(false);
@@ -531,9 +570,64 @@ export default function App() {
 
   // Initialize Auth state listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCloudUser(user);
       setCloudLoading(false);
+      
+      if (user) {
+        const managerId = user.uid;
+        const managerDocRef = doc(db, 'users', managerId);
+        
+        try {
+          const snap = await getDoc(managerDocRef);
+          let managerUser: User;
+          
+          if (snap.exists()) {
+            managerUser = snap.data() as User;
+          } else {
+            managerUser = {
+              id: managerId,
+              name: user.displayName || 'Terminal Manager',
+              role: 'Manager',
+              email: user.email || '',
+              phone: user.phoneNumber || '',
+              ownerId: managerId,
+              activated: true,
+              referralCode: `MGR-${managerId.substring(0, 5).toUpperCase()}`
+            };
+            await setDoc(managerDocRef, managerUser);
+          }
+          
+          dispatch({ type: 'SWITCH_USER', payload: managerUser });
+        } catch (err) {
+          console.warn('Failed to sync cloud manager profile:', err);
+          const fallbackManager: User = {
+            id: managerId,
+            name: user.displayName || 'Terminal Manager',
+            role: 'Manager',
+            email: user.email || '',
+            phone: '',
+            ownerId: managerId,
+            activated: true,
+            referralCode: `MGR-${managerId.substring(0, 5).toUpperCase()}`
+          };
+          dispatch({ type: 'SWITCH_USER', payload: fallbackManager });
+        }
+      } else {
+        // If they sign out of Cloud Sync, switch to the default local manager
+        if (state.currentUser.role === 'Manager' && state.currentUser.id !== 'mgr_1') {
+          const localManager = {
+            id: 'mgr_1',
+            name: 'Terminal Manager',
+            role: 'Manager',
+            pin: '2026',
+            phone: '08123456789',
+            ownerId: 'mgr_1',
+            activated: true
+          };
+          dispatch({ type: 'SWITCH_USER', payload: localManager });
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -989,6 +1083,14 @@ export default function App() {
   });
 
   const handleRegisterUser = async (newUser: User) => {
+    // Always attempt to save to Firestore for global access
+    try {
+      const userDocRef = doc(db, 'users', newUser.id);
+      await setDoc(userDocRef, newUser);
+    } catch (err) {
+      console.warn('Global Firestore sync failed during registration', err);
+    }
+
     if (syncOwnerId) {
       try {
         const userWithOwner = { ...newUser, ownerId: syncOwnerId };
@@ -1094,6 +1196,105 @@ export default function App() {
       }
     }
   }, [registeredUsers, state.currentUser.id]);
+
+  // Keep local storage in sync with registeredUsers for offline startup access
+  useEffect(() => {
+    try {
+      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(registeredUsers));
+    } catch (err) {
+      console.warn('LocalStorage save failed for registeredUsers:', err);
+    }
+  }, [registeredUsers]);
+
+  // Background migration/synchronization from local storage to cloud Firestore
+  useEffect(() => {
+    const syncLocalDataToCloud = async (ownerId: string) => {
+      if (!ownerId || ownerId === 'mgr_1' || ownerId === '') return;
+      
+      console.log('Starting background local-to-cloud sync for:', ownerId);
+      
+      // 1. Sync registered users/cashiers
+      const localUsersSaved = localStorage.getItem('OPay_Registered_Users_v4');
+      if (localUsersSaved) {
+        try {
+          const localUsers = JSON.parse(localUsersSaved) as User[];
+          if (Array.isArray(localUsers) && localUsers.length > 0) {
+            for (const u of localUsers) {
+              if (u.id === 'mgr_1') continue; // Don't upload local manager
+              
+              // Only sync if the user's ownerId is empty or local
+              const uOwner = u.ownerId;
+              if (!uOwner || uOwner === 'mgr_1' || uOwner === 'local_owner') {
+                const updatedUser = { ...u, ownerId };
+                await setDoc(doc(db, 'users', u.id), updatedUser, { merge: true });
+                console.log(`Cloud Synced cashier profile: ${u.name}`);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Local users sync failed:', err);
+        }
+      }
+
+      // 2. Sync transactions
+      if (state.transactions && state.transactions.length > 0) {
+        try {
+          const localTxs = state.transactions.filter(
+            t => !t.ownerId || t.ownerId === 'local_owner' || t.ownerId === 'mgr_1'
+          );
+          if (localTxs.length > 0) {
+            console.log(`Cloud Synced ${localTxs.length} local transactions...`);
+            for (const tx of localTxs) {
+              const txWithOwner = { ...tx, ownerId };
+              await setDoc(doc(db, 'transactions', tx.id), txWithOwner, { merge: true });
+            }
+          }
+        } catch (err) {
+          console.warn('Local transactions sync failed:', err);
+        }
+      }
+
+      // 3. Sync expenses
+      if (state.expenses && state.expenses.length > 0) {
+        try {
+          const localExpenses = state.expenses.filter(
+            e => !e.ownerId || e.ownerId === 'local_owner' || e.ownerId === 'mgr_1'
+          );
+          if (localExpenses.length > 0) {
+            console.log(`Cloud Synced ${localExpenses.length} local expenses...`);
+            for (const exp of localExpenses) {
+              const expWithOwner = { ...exp, ownerId };
+              await setDoc(doc(db, 'expenses', exp.id), expWithOwner, { merge: true });
+            }
+          }
+        } catch (err) {
+          console.warn('Local expenses sync failed:', err);
+        }
+      }
+
+      // 4. Sync POS terminals
+      if (state.posTerminals && state.posTerminals.length > 0) {
+        try {
+          const localTerminals = state.posTerminals.filter(
+            pt => !pt.ownerId || pt.ownerId === 'local_owner' || pt.ownerId === 'mgr_1'
+          );
+          if (localTerminals.length > 0) {
+            console.log(`Cloud Synced ${localTerminals.length} local terminals...`);
+            for (const pt of localTerminals) {
+              const ptWithOwner = { ...pt, ownerId };
+              await setDoc(doc(db, 'pos_terminals', pt.id), ptWithOwner, { merge: true });
+            }
+          }
+        } catch (err) {
+          console.warn('Local terminals sync failed:', err);
+        }
+      }
+    };
+
+    if (syncOwnerId && syncOwnerId !== 'mgr_1' && syncOwnerId !== '') {
+      syncLocalDataToCloud(syncOwnerId);
+    }
+  }, [syncOwnerId, state.transactions, state.expenses, state.posTerminals]);
 
   const allUsersPool = useMemo(() => {
     return registeredUsers;
@@ -1275,6 +1476,74 @@ export default function App() {
     }, 150);
   };
 
+  const renderSyncStatusBadge = () => {
+    let status: 'offline' | 'synced' | 'syncing' | 'pending-offline' = 'offline';
+    
+    if (syncOwnerId && syncOwnerId !== 'mgr_1') {
+      if (!isOnline) {
+        status = 'pending-offline';
+      } else if (pendingSyncCount > 0) {
+        status = 'syncing';
+      } else {
+        status = 'synced';
+      }
+    }
+
+    const badgeConfig = {
+      'offline': {
+        bg: 'bg-neutral-100 border-neutral-200 text-neutral-600',
+        dotColor: 'bg-neutral-400',
+        label: 'Offline Mode (Local Only)',
+        icon: <CloudOff className="w-3.5 h-3.5 text-neutral-500" />,
+        tooltip: 'Running in offline mode. Your data is saved locally on this device. Setup Cloud Sync in the Settings/Cloud menu to back up and sync across devices.'
+      },
+      'synced': {
+        bg: 'bg-emerald-50 border-emerald-100 text-emerald-700',
+        dotColor: 'bg-[#00B87A]',
+        label: 'Cloud Synced',
+        icon: <Cloud className="w-3.5 h-3.5 text-[#00B87A]" />,
+        tooltip: 'All local modifications are successfully saved in the cloud. Your recent data is highly secure.'
+      },
+      'syncing': {
+        bg: 'bg-indigo-50 border-indigo-150 text-indigo-700',
+        dotColor: 'bg-indigo-500',
+        label: `Syncing (${pendingSyncCount} left)...`,
+        icon: <RefreshCw className="w-3.5 h-3.5 text-indigo-500 animate-spin" />,
+        tooltip: 'Currently uploading new records to the cloud database. Please keep the app open to complete synchronization.'
+      },
+      'pending-offline': {
+        bg: 'bg-amber-50 border-amber-150 text-amber-700',
+        dotColor: 'bg-amber-500',
+        label: 'Offline (Sync Pending)',
+        icon: <WifiOff className="w-3.5 h-3.5 text-amber-500" />,
+        tooltip: 'You are registered for Cloud Sync, but this device is currently offline. New changes are stored locally and will sync automatically when you reconnect.'
+      }
+    };
+
+    const current = badgeConfig[status];
+
+    return (
+      <div 
+        className={`inline-flex items-center gap-1.5 px-2 py-0.5 mt-1 text-[10px] font-semibold rounded-md border ${current.bg} w-fit transition duration-150 select-none cursor-help shadow-2xs`}
+        title={current.tooltip}
+      >
+        <span className="flex items-center gap-1">
+          {current.icon}
+          <span>{current.label}</span>
+        </span>
+        <span className="relative flex h-1.5 w-1.5">
+          {status === 'syncing' && (
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+          )}
+          {status === 'synced' && (
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00B87A]/50 opacity-75"></span>
+          )}
+          <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${current.dotColor}`}></span>
+        </span>
+      </div>
+    );
+  };
+
   if (isLocked || !activeUser || !activeUser.id) {
     return (
       <LoginScreen
@@ -1316,6 +1585,21 @@ export default function App() {
         </div>
       )}
 
+      {state.currentUser.role === 'Manager' && !cloudUser && (
+        <div className="bg-indigo-600 text-white text-[10px] font-black py-2 px-4 flex items-center justify-between shadow-lg sticky top-0 z-[60] uppercase tracking-widest">
+          <div className="flex items-center gap-2">
+            <CloudOff className="w-3.5 h-3.5 animate-pulse" />
+            <span>Local Mode: Multi-device sync is disabled. Enable Cloud for staff access on other phones.</span>
+          </div>
+          <button 
+            onClick={() => setIsCloudSyncFormOpen(true)}
+            className="bg-white text-indigo-600 px-3 py-1 rounded-full font-extrabold hover:bg-indigo-50 transition active:scale-95 cursor-pointer shadow-sm"
+          >
+            Enable Cloud Sync
+          </button>
+        </div>
+      )}
+
       {unpaidCount > 0 && (
         <div className="bg-amber-500 text-white p-3 flex items-center justify-between shadow-lg z-40 sticky top-0">
           <div className="text-xs font-bold flex items-center gap-2">
@@ -1347,12 +1631,13 @@ export default function App() {
                 O
               </div>
               <div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-base font-extrabold text-[#00B87A] tracking-tight">Dan Godal Postracker</span>
                   <span className="bg-[#00B87A]/10 text-[#00B87A] text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                    Manager App
+                    {activeUser.role === 'Manager' ? 'Manager App' : 'Cashier App'}
                   </span>
                 </div>
+                {renderSyncStatusBadge()}
               </div>
             </div>
           </div>
