@@ -1140,7 +1140,14 @@ export default function App() {
   }, []);
 
   const handleRegisterUser = async (newUser: User) => {
-    // Always attempt to save to Firestore for global access
+    // Always persist locally first so user registrations never block on connection issues
+    setRegisteredUsers((prev) => {
+      const next = prev.some(u => u.id === newUser.id) ? prev : [...prev, newUser];
+      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
+      return next;
+    });
+
+    // Attempt to save to Firestore for global access
     try {
       const userDocRef = doc(db, 'users', newUser.id);
       await setDoc(userDocRef, newUser);
@@ -1153,15 +1160,10 @@ export default function App() {
         const userWithOwner = { ...newUser, ownerId: syncOwnerId };
         await setDoc(doc(db, 'users', newUser.id), userWithOwner);
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${newUser.id}`);
+        console.warn('Firestore sync with owner ID failed during registration:', err);
       }
-    } else {
-      setRegisteredUsers((prev) => {
-        const next = [...prev, newUser];
-        localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
-        return next;
-      });
     }
+
     showAppNotification(`New account for ${newUser.name} created successfully.`, 'success');
   };
 
