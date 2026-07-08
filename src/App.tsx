@@ -993,7 +993,7 @@ export default function App() {
   const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
   const [isUsersLoaded, setIsUsersLoaded] = useState(false);
 
-  useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded, dispatch);
+  useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded, dispatch, syncOwnerId);
 
   const handleRegisterUser = async (newUser: User) => {
     console.log('[Registration] Starting registration for:', newUser.name, 'Role:', newUser.role);

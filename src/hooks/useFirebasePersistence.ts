@@ -8,10 +8,11 @@ import { mapFirestoreUser } from '../utils';
 export const useFirebasePersistence = (
   setRegisteredUsers: Dispatch<SetStateAction<User[]>>,
   setIsUsersLoaded: Dispatch<SetStateAction<boolean>>,
-  dispatch: Dispatch<AppAction>
+  dispatch: Dispatch<AppAction>,
+  syncOwnerId: string | null
 ) => {
   useEffect(() => {
-    console.log('[Persistence] Initializing real-time users sync');
+    console.log('[Persistence] Initializing real-time users sync with syncOwnerId:', syncOwnerId);
     
     const usersRef = collection(db, 'users');
     
@@ -20,10 +21,17 @@ export const useFirebasePersistence = (
       
       const cloudUsersList = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
       
-      setRegisteredUsers(cloudUsersList);
-      dispatch({ type: 'SET_REGISTERED_USERS', payload: cloudUsersList });
+      let filteredUsers = cloudUsersList;
+      if (syncOwnerId) {
+        filteredUsers = cloudUsersList.filter(user => 
+          user.id === syncOwnerId || user.ownerId === syncOwnerId
+        );
+      }
       
-      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(cloudUsersList));
+      setRegisteredUsers(filteredUsers);
+      dispatch({ type: 'SET_REGISTERED_USERS', payload: filteredUsers });
+      
+      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(filteredUsers));
       setIsUsersLoaded(true);
     }, (err) => {
       console.error('[Persistence] Users sync failed:', err);
@@ -31,7 +39,12 @@ export const useFirebasePersistence = (
       const saved = localStorage.getItem('OPay_Registered_Users_v4');
       if (saved) {
         try {
-          const list = JSON.parse(saved);
+          let list = JSON.parse(saved);
+          if (syncOwnerId) {
+            list = list.filter((user: User) => 
+              user.id === syncOwnerId || user.ownerId === syncOwnerId
+            );
+          }
           setRegisteredUsers(list);
           dispatch({ type: 'SET_REGISTERED_USERS', payload: list });
         } catch (e) {
@@ -53,5 +66,5 @@ export const useFirebasePersistence = (
       unsubscribeSnapshot();
       unsubscribeAuth();
     };
-  }, [setRegisteredUsers, setIsUsersLoaded]);
+  }, [setRegisteredUsers, setIsUsersLoaded, dispatch, syncOwnerId]);
 };
