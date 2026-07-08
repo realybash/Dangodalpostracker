@@ -949,16 +949,6 @@ export default function App() {
       return;
     }
 
-    // If it's an employee signing out, switch back to their manager
-    if (state.currentUser.role === 'Employee') {
-        const manager = registeredUsers.find(u => u.id === state.currentUser.ownerId);
-        if (manager) {
-            dispatch({ type: 'SWITCH_USER', payload: manager });
-            // Do NOT lock, they return to manager's dashboard
-            return;
-        }
-    }
-
     try {
       await signOut(auth);
       // Lock for cashiers on sign out
@@ -1628,14 +1618,7 @@ export default function App() {
             {/* Manager Account Session Status Button / Cashier Profile Button */}
             {state.currentUser.role === 'Manager' && (
                 <div className="flex items-center gap-2">
-                  {state.impersonatedUserId ? (
-                      <button
-                          onClick={handleCloudSignOut}
-                          className="flex items-center gap-1.5 text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-3 py-1.5 font-bold shadow-sm transition"
-                      >
-                          <span>← Exit {state.availableEmployees.find(e => e.id === state.impersonatedUserId)?.name || 'Cashier'} View</span>
-                      </button>
-                  ) : (
+                  {!state.impersonatedUserId && (
                       <select
                           value={state.impersonatedUserId || 'ALL'}
                           onChange={(e) => dispatch({ type: 'SET_IMPERSONATED_USER', payload: e.target.value === 'ALL' ? undefined : e.target.value } as any)}

@@ -226,6 +226,12 @@ export function ProfileModal({
       return;
     }
 
+    if (found.role === 'Manager') {
+      setManualError('Permission Denied: Cashiers cannot handover directly to Manager accounts.');
+      playStatusSound('Failed');
+      return;
+    }
+
     if (found.activated === false) {
       setManualError('Account is not activated. Please contact your Manager!');
       playStatusSound('Failed');
@@ -268,6 +274,12 @@ export function ProfileModal({
     const requiredPin = switchingUser.pin || '1111';
     
     if (pinPadInput === requiredPin) {
+      if (switchingUser.role === 'Manager') {
+        playStatusSound('Failed');
+        setPinPadError('Permission Denied: Cashiers cannot handover to Manager.');
+        setPinPadInput('');
+        return;
+      }
       playStatusSound('Success');
       onSwitchUser(switchingUser);
       setSwitchingUser(null);
