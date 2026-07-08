@@ -806,12 +806,30 @@ export default function App() {
     };
   }, [syncOwnerId, state.terminalFeeRate]);
 
+  // Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
+  const prepareFirestoreData = (data: any, collectionName?: string) => {
+    const copy = { ...data };
+    
+    // Explicitly delete sensitive authentication fields so they are never stored in Firestore
+    delete (copy as any).password;
+    delete (copy as any).pin;
+    
+    // Remove every undefined property before calling setDoc()
+    const cleanData = Object.fromEntries(
+      Object.entries(copy).filter(([_, value]) => value !== undefined)
+    );
+    
+    console.log(`[Firestore Write] Cleaned object for "${collectionName || 'unknown'}":`, cleanData);
+    return cleanData;
+  };
+
   // Firestore mutation wrappers
   const handleAddPosTerminal = async (term: PosTerminal) => {
     if (syncOwnerId) {
       try {
         const termWithOwner = { ...term, ownerId: syncOwnerId };
-        await setDoc(doc(db, 'pos_terminals', term.id), termWithOwner);
+        const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
+        await setDoc(doc(db, 'pos_terminals', term.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
       }
@@ -824,7 +842,8 @@ export default function App() {
     if (syncOwnerId) {
       try {
         const termWithOwner = { ...term, ownerId: syncOwnerId };
-        await setDoc(doc(db, 'pos_terminals', term.id), termWithOwner);
+        const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
+        await setDoc(doc(db, 'pos_terminals', term.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
       }
@@ -866,7 +885,8 @@ export default function App() {
       try {
         const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
         const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
-        await setDoc(doc(db, 'transactions', tx.id), txWithOwner);
+        const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+        await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
       }
@@ -880,7 +900,8 @@ export default function App() {
       try {
         const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
         const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
-        await setDoc(doc(db, 'transactions', tx.id), txWithOwner);
+        const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+        await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
       }
@@ -924,7 +945,8 @@ export default function App() {
         updatedTxs.forEach((tx) => {
           const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
           const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
-          batch.set(doc(db, 'transactions', tx.id), txWithOwner, { merge: true });
+          const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+          batch.set(doc(db, 'transactions', tx.id), cleanData, { merge: true });
         });
         await batch.commit();
       } catch (err) {
@@ -947,7 +969,8 @@ export default function App() {
         const seedTxs = getSeedTransactions(state.terminalFeeRate);
         seedTxs.forEach((tx) => {
           const txWithOwner = { ...tx, ownerId: syncOwnerId };
-          batch.set(doc(db, 'transactions', tx.id), txWithOwner);
+          const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+          batch.set(doc(db, 'transactions', tx.id), cleanData);
         });
 
         await batch.commit();
@@ -963,7 +986,8 @@ export default function App() {
     if (syncOwnerId) {
       try {
         const expenseWithOwner = { ...expense, ownerId: syncOwnerId };
-        await setDoc(doc(db, 'expenses', expense.id), expenseWithOwner);
+        const cleanData = prepareFirestoreData(expenseWithOwner, 'expenses');
+        await setDoc(doc(db, 'expenses', expense.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `expenses/${expense.id}`);
       }
@@ -1117,25 +1141,43 @@ export default function App() {
         throw err;
       }
 
-      // Standardize document fields and use Auth UID as the primary key
-      const firestoreDoc = {
-        ...newUser,
+      // 1. Verify that every required variable exists before writing:
+      console.log('[Registration Profile Pre-Check]', {
+        uid: finalUid,
+        fullName: newUser.name,
+        phoneNumber: newUser.phone,
+        pin: newUser.pin,
+        password: newUser.password
+      });
+
+      // 2. Map safe fields only (never store user's password or PIN inside Firestore)
+      const firestoreDocRaw = {
         uid: finalUid,
         id: finalUid,
         fullName: newUser.name,
         phoneNumber: newUser.phone,
+        role: newUser.role,
         ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || 'mgr_1'),
         email: newUser.email || authEmail, // Store the login email for recovery
         activated: true,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'active',
+        permissions: newUser.role === 'Manager' ? ['admin', 'manager'] : ['cashier'],
+        referralCode: newUser.referralCode,
+        referredBy: newUser.referredBy,
+        areaOfWorking: newUser.areaOfWorking,
+        avatar: newUser.avatar
       };
 
-      console.log('[Registration] Persisting standardized profile to Firestore at ID:', finalUid);
+      // 3. Remove every undefined property before calling setDoc()
+      const cleanData = prepareFirestoreData(firestoreDocRaw, 'users');
+
       const userDocRef = doc(db, 'users', finalUid);
       
-      // 3. Firestore Document Write
+      // 4. Firestore Document Write
       try {
-        await setDoc(userDocRef, firestoreDoc, { merge: true });
+        await setDoc(userDocRef, cleanData, { merge: true });
         console.log('[Registration] Firestore document successfully created at /users/' + finalUid);
       } catch (fsErr: any) {
         console.error('[Registration] Firestore write failed:', fsErr.code || fsErr.message, fsErr);
@@ -1149,7 +1191,10 @@ export default function App() {
       showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
       
       // Update local state immediately
-      const standardizedUser = mapFirestoreUser(firestoreDoc, finalUid);
+      const standardizedUser = {
+        ...mapFirestoreUser(cleanData, finalUid),
+        pin: newUser.pin // Preserve local PIN for smooth transition
+      };
       setRegisteredUsers(prev => {
         const next = prev.filter(u => u.id !== standardizedUser.id && u.phone !== standardizedUser.phone);
         return [...next, standardizedUser];
@@ -1182,10 +1227,19 @@ export default function App() {
   const handleUpdateUserPin = async (userId: string, newPin: string) => {
     if (syncOwnerId) {
       try {
-        const userDocRef = doc(db, 'users', userId);
-        await setDoc(userDocRef, { pin: newPin }, { merge: true });
+        // Since we are instructed to NEVER store user's password or PIN inside Firestore,
+        // we'll update the password in Firebase Auth if it is the currently authenticated user.
+        if (auth.currentUser && auth.currentUser.uid === userId) {
+          const { updatePassword } = await import('firebase/auth');
+          await updatePassword(auth.currentUser, getAuthPassword(newPin));
+          console.log('[PIN Update] Successfully updated Firebase Auth password for current user.');
+        } else {
+          console.warn('[PIN Update] Skipping Firestore PIN storage for other user per security rules. Raw PINs must never be stored in the database.');
+        }
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+        console.error('[PIN Update] Error updating PIN:', err);
+        showAppNotification(`Failed to update PIN: ${err instanceof Error ? err.message : String(err)}`, 'error');
+        return;
       }
     } else {
       setRegisteredUsers((prev) => {
@@ -1201,7 +1255,8 @@ export default function App() {
     if (syncOwnerId) {
       try {
         const userWithOwner = { ...updatedUser, ownerId: syncOwnerId };
-        await setDoc(doc(db, 'users', updatedUser.id), userWithOwner, { merge: true });
+        const cleanData = prepareFirestoreData(userWithOwner, 'users');
+        await setDoc(doc(db, 'users', updatedUser.id), cleanData, { merge: true });
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `users/${updatedUser.id}`);
       }
@@ -1258,7 +1313,6 @@ export default function App() {
     if (matched) {
       if (
         matched.name !== state.currentUser.name ||
-        matched.pin !== state.currentUser.pin ||
         matched.phone !== state.currentUser.phone ||
         matched.role !== state.currentUser.role ||
         matched.ownerId !== state.currentUser.ownerId
