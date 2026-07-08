@@ -840,13 +840,9 @@ export function ProfileModal({
                           key={u.id}
                           type="button"
                           onClick={() => {
-                            if (isActive) return;
-                            if (currentUser.role === 'Manager') {
-                              onSwitchUser(u);
-                              onClose();
-                            } else {
-                              setSwitchingUser(u);
-                            }
+                            if (isActive || currentUser.role !== 'Manager') return;
+                            onSwitchUser(u);
+                            onClose();
                           }}
                           className={`p-3 rounded-2xl text-left border transition flex items-center justify-between group ${
                             isActive

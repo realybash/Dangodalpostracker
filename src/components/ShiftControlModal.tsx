@@ -382,13 +382,11 @@ export function ShiftControlModal({
                         <div
                           key={u.id}
                           onClick={() => {
-                            if (isCurrent) return;
+                            if (isCurrent || currentUser.role !== 'Manager') return;
                             // If current operator is Manager, switch instantly with no PIN required!
                             if (currentUser.role === 'Manager') {
                               onSwitchUser(u);
                               onClose();
-                            } else {
-                              setPinConfirmUser(u);
                             }
                           }}
                           className={`flex items-center justify-between p-3 rounded-2xl cursor-pointer transition border ${
