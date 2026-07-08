@@ -28,8 +28,11 @@ import {
   
   Camera,
   KeyRound,
-  Copy
+  Copy,
+  LogOut
 } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 import { playStatusSound } from './TransactionForm';
 
 export function renderUserAvatar(
@@ -507,6 +510,23 @@ export function ProfileModal({
                   </div>
                 </div>
               </div>
+              
+              {/* Sign Out Action */}
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await signOut(auth);
+                    window.location.reload(); 
+                  } catch (err) {
+                    console.error('Failed to sign out:', err);
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 font-bold text-xs transition"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
 
               {/* Status Alerts */}
               {myProfileSuccess && (
