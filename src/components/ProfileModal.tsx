@@ -731,33 +731,7 @@ export function ProfileModal({
                 </div>
               )}
 
-              {/* Secure Log Out Terminal Session Action (Manager or Cashier) */}
-              {onLogout && (
-                <div className="border-t border-neutral-150 pt-5 mt-3 space-y-3">
-                  <div className="bg-rose-50/40 border border-rose-100 p-3.5 rounded-2xl flex items-start gap-3">
-                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-rose-800 block">Terminal Session Security</span>
-                      <p className="text-[10px] text-rose-650 font-semibold leading-normal">
-                        Logging out will securely lock this active OPay terminal session. The next operator must input their secure name and passcode PIN to begin transactions.
-                      </p>
-                    </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onLogout();
-                    }}
-                    className="w-full py-3.5 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-black rounded-2xl text-xs tracking-widest uppercase transition duration-150 flex items-center justify-center gap-2.5 shadow-md shadow-rose-550/10 active:scale-[0.98] font-mono cursor-pointer"
-                    title="Sign Out and Lock Terminal"
-                  >
-                    <LogOut className="w-4 h-4 text-white stroke-[3]" />
-                    <span>Log Out & Lock Terminal</span>
-                  </button>
-                </div>
-              )}
             </div>
           )}
 

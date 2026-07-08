@@ -454,23 +454,7 @@ export function ShiftControlModal({
             </div>
           )}
 
-          {/* Dedicated Terminal Lock / Log Out Button */}
-          {onLogout && (
-            <div className="border-t border-neutral-100 pt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onLogout();
-                }}
-                className="w-full py-3.5 bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-200 hover:border-rose-300 text-rose-600 hover:text-rose-700 font-black rounded-2xl text-xs uppercase tracking-wider font-mono flex items-center justify-center gap-2 transition duration-150 shadow-xs cursor-pointer"
-                title="Log Out of Active Terminal Session"
-              >
-                <LogOut className="w-4 h-4 text-rose-500 stroke-[2.5]" />
-                <span>Log Out of Terminal (Lock Session)</span>
-              </button>
-            </div>
-          )}
+
 
           {/* Bottom actions */}
           <div className="border-t border-neutral-100 pt-4 flex justify-between items-center text-[11px] font-bold">
