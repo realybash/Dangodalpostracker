@@ -247,6 +247,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const inputRaw = managerPhone.trim();
     const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
     const inputNameSearch = inputRaw.toLowerCase().replace(/\s+/g, '');
+    const normalizedInputPhone = normalizePhone(inputRaw);
     
     setIsSubmitting(true);
     console.log('[Login] Manager login attempt for:', inputRaw);
@@ -254,7 +255,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     try {
       // 1. Find the Manager document first
       let matchedManager = managerUsers.find(m => {
-        const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
+        const dbPhoneDigits = cleanPhoneForCompare(m.phone || m.phoneNumber || '');
         const dbName = m.name.toLowerCase().replace(/\s+/g, '');
         
         const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
@@ -263,40 +264,110 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         return phoneMatch || nameMatch;
       });
 
-      if (!matchedManager && isUsersLoaded) {
-        console.log('[Login] Manager not found locally, checking Firestore...');
+      console.log('[Login] Local match attempt result:', matchedManager ? `Found locally: ${matchedManager.name}` : 'Not found locally');
+
+      // 2. Direct Firestore query using exactly the same field 'phoneNumber' that registration saved
+      let fetchedDocsCount = 0;
+      if (!matchedManager) {
+        console.log('[Login] Manager not found locally. Querying Firestore directly from "users" collection...');
         try {
           const usersRef = collection(db, 'users');
-          const snap = await getDocs(query(usersRef, where('role', '==', 'Manager')));
-          const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
           
-          matchedManager = allManagers.find(m => {
-            const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
-            const dbName = m.name.toLowerCase().replace(/\s+/g, '');
-            const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-            const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
-            return phoneMatch || nameMatch;
+          console.log('[Login Audit - Direct Query Invariant]', {
+            collection: 'users',
+            queryFilters: {
+              role: 'Manager',
+              phoneNumber: normalizedInputPhone
+            }
           });
+
+          // Query by role and phoneNumber field
+          if (normalizedInputPhone) {
+            const q = query(usersRef, where('role', '==', 'Manager'), where('phoneNumber', '==', normalizedInputPhone));
+            const snap = await getDocs(q);
+            fetchedDocsCount = snap.size;
+            console.log(`[Login] Firestore query returned ${fetchedDocsCount} documents for phone ${normalizedInputPhone}`);
+            
+            if (!snap.empty) {
+              const docSnap = snap.docs[0];
+              matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
+              console.log('[Login] Matched manager via direct phoneNumber field:', matchedManager.name, 'UID:', matchedManager.uid);
+            }
+          }
+
+          // Fallback direct query by fullName
+          if (!matchedManager) {
+            console.log('[Login] Trying fallback query by fullName in Firestore...');
+            const q = query(usersRef, where('role', '==', 'Manager'), where('fullName', '==', inputRaw));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              const docSnap = snap.docs[0];
+              matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
+              console.log('[Login] Matched manager via direct fullName field:', matchedManager.name, 'UID:', matchedManager.uid);
+            }
+          }
+
+          // Fallback query all managers if queries didn't work (e.g. slight mismatch)
+          if (!matchedManager) {
+            console.log('[Login] Trying absolute fallback: fetching all Managers in Firestore...');
+            const q = query(usersRef, where('role', '==', 'Manager'));
+            const snap = await getDocs(q);
+            const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+            console.log('[Login] Retrieved all managers list size:', allManagers.length);
+            
+            matchedManager = allManagers.find(m => {
+              const dbPhoneDigits = cleanPhoneForCompare(m.phone || m.phoneNumber || '');
+              const dbName = m.name.toLowerCase().replace(/\s+/g, '');
+              const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+              const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
+              return phoneMatch || nameMatch;
+            });
+            if (matchedManager) {
+              console.log('[Login] Found matched manager in retrieved managers list:', matchedManager.name, 'UID:', matchedManager.uid);
+            }
+          }
         } catch (err) {
-          console.warn('[Login] Remote manager lookup failed:', err);
+          console.warn('[Login] Firestore manager query/lookup failed:', err);
         }
       }
 
+      // Print comprehensive report of Firestore lookup parameters (Task 7)
+      console.log('--- FIRESTORE AUTH AUDIT REPORT ---');
+      console.log('Firestore collection: "users"');
+      console.log('Document ID (located):', matchedManager ? matchedManager.uid : 'N/A (Not Found)');
+      console.log('Phone number entered:', inputRaw);
+      console.log('Normalized phone:', normalizedInputPhone);
+      console.log('UID of located profile:', matchedManager ? matchedManager.uid : 'N/A');
+      console.log('Query Filters:', {
+        role: 'Manager',
+        phoneNumber: normalizedInputPhone,
+        fullName: inputRaw
+      });
+      console.log('Query Returned Documents Count:', fetchedDocsCount);
+      console.log('Matched Manager Profile:', matchedManager);
+      console.log('------------------------------------');
+
       if (!matchedManager) {
         setError('Manager account not found. Please register first.');
+        console.log('[Login Result] FAILURE: Manager profile not found in "users" collection.');
         setIsSubmitting(false);
         return;
       }
 
-      // 2. Attempt Firebase Auth sign-in
-      const managerPhoneKey = cleanPhoneForCompare(matchedManager.phone || '');
+      // 3. Attempt Firebase Auth sign-in
+      const managerPhoneKey = cleanPhoneForCompare(matchedManager.phone || matchedManager.phoneNumber || '');
       const authEmail = `${managerPhoneKey}@opay-pos.com`;
       
       console.log('[Login] Attempting Auth sign-in for manager:', matchedManager.name, 'Email:', authEmail);
       
       try {
         await signInWithEmailAndPassword(auth, authEmail, getAuthPassword(pin));
-        console.log('[Login] Manager Auth sign-in successful');
+        console.log('[Login] Manager Auth sign-in successful. UID:', auth.currentUser?.uid);
+        console.log('[Login Result] SUCCESS', {
+          name: matchedManager.name,
+          uid: matchedManager.uid,
+          email: authEmail
+        });
         
         // Persist preferences
         try {
@@ -315,6 +386,10 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         onLogin(matchedManager);
       } catch (authErr: any) {
         console.warn('[Login] Manager Auth failed:', authErr.code);
+        console.log('[Login Result] FAILURE: Firebase Auth authentication error.', {
+          code: authErr.code,
+          message: authErr.message
+        });
         if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
           setError('Incorrect Manager Passcode PIN.');
         } else if (authErr.code === 'auth/network-request-failed') {
@@ -327,6 +402,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       }
     } catch (err: any) {
       console.error('[Login] Critical manager login error:', err);
+      console.log('[Login Result] FAILURE: Critical logic execution error.', {
+        message: err.message
+      });
       setError(`Login error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
