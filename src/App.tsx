@@ -1761,15 +1761,7 @@ export default function App() {
                   <span>Switch Shift</span>
                 </button>
                 
-                <button
-                  type="button"
-                  onClick={handleLockTerminal}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 hover:text-rose-700 rounded-xl text-[11px] font-black transition cursor-pointer select-none active:scale-[0.98] shadow-xs uppercase tracking-wider font-mono"
-                  title="Log out of active session and lock OPay POS terminal"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-rose-500 stroke-[2.5]" />
-                  <span>Log Out Terminal</span>
-                </button>
+                {/* Dedicated Terminal Lock / Log Out Button - REMOVED */}
               </div>
             </div>
           </div>
@@ -3640,7 +3632,6 @@ export default function App() {
             dispatch({ type: 'SWITCH_USER', payload: user });
           }}
           onClose={() => setIsProfileModalOpen(false)}
-          onLogout={handleLockTerminal}
         />
       )}
 
@@ -3657,7 +3648,6 @@ export default function App() {
           onOpenStaffDirectory={() => {
             setIsProfileModalOpen(true);
           }}
-          onLogout={handleLockTerminal}
         />
       )}
 
