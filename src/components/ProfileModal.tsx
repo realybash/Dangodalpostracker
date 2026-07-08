@@ -25,7 +25,7 @@ import {
   Activity,
   AlertCircle,
   ArrowRight,
-  LogOut,
+  
   Camera,
   KeyRound,
   Copy
@@ -79,7 +79,6 @@ interface ProfileModalProps {
   onDeleteUser: (userId: string) => void;
   onSwitchUser: (user: User) => void;
   onClose: () => void;
-  onLogout?: () => void;
 }
 
 export function ProfileModal({
@@ -92,7 +91,6 @@ export function ProfileModal({
   onDeleteUser,
   onSwitchUser,
   onClose,
-  onLogout
 }: ProfileModalProps) {
   const [activeTab, setActiveTab] = useState<'my-profile' | 'switch-shift' | 'staff-directory'>('my-profile');
   

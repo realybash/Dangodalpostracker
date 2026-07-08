@@ -13,7 +13,7 @@ import {
   ChevronRight,
   Check,
   Lock,
-  LogOut,
+  
   Unlock,
   ShieldAlert
 } from 'lucide-react';
@@ -30,7 +30,6 @@ interface ShiftControlModalProps {
   };
   onSwitchUser: (user: User) => void;
   onOpenStaffDirectory: () => void;
-  onLogout?: () => void;
 }
 
 export function ShiftControlModal({
@@ -41,7 +40,6 @@ export function ShiftControlModal({
   currentShiftStats,
   onSwitchUser,
   onOpenStaffDirectory,
-  onLogout
 }: ShiftControlModalProps) {
   const [pinConfirmUser, setPinConfirmUser] = useState<User | null>(null);
   const [pinInput, setPinInput] = useState('');
@@ -74,6 +72,11 @@ export function ShiftControlModal({
 
     if (!found) {
       setManualError('Authentication failed: Invalid credentials or PIN.');
+      return;
+    }
+
+    if (found.role === 'Manager') {
+      setManualError('Permission Denied: Cashiers cannot handover directly to Manager accounts.');
       return;
     }
 
@@ -131,6 +134,11 @@ export function ShiftControlModal({
     const requiredPin = pinConfirmUser.pin || '1111';
     
     if (pinInput === requiredPin) {
+      if (pinConfirmUser.role === 'Manager') {
+        setPinError(true);
+        setPinInput('');
+        return;
+      }
       onSwitchUser(pinConfirmUser);
       setPinConfirmUser(null);
       setPinInput('');

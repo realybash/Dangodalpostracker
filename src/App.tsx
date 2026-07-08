@@ -5,7 +5,7 @@
 
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut, sendPasswordResetEmail } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from 'firebase/auth';
 import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
@@ -78,7 +78,7 @@ import {
   Unlock,
   Key,
   ShieldAlert, AlertTriangle,
-  LogOut,
+  
   Calendar,
   FileText,
   Copy,
@@ -943,21 +943,6 @@ export default function App() {
     localStorage.setItem('OPay_Terminal_Locked', 'true');
   };
 
-  const handleCloudSignOut = async () => {
-    if (state.impersonatedUserId) {
-      dispatch({ type: 'SET_IMPERSONATED_USER', payload: undefined } as any);
-      return;
-    }
-
-    try {
-      await signOut(auth);
-      // Lock for cashiers on sign out
-      setIsLocked(true);
-      localStorage.setItem('OPay_Terminal_Locked', 'true');
-    } catch (err) {
-      console.error('Sign-Out Failed:', err);
-    }
-  };
   const personaSectionRef = useRef<HTMLDivElement>(null);
   const targetSectionRef = useRef<HTMLDivElement>(null);
   const historySectionRef = useRef<HTMLDivElement>(null);
