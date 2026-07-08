@@ -4,7 +4,7 @@ import { User, UserRole } from '../types';
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser } from '../utils';
+import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser, getAuthPassword } from '../utils';
 import { 
   Lock, 
   UserCheck, 
@@ -190,7 +190,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       console.log('[Login] Attempting Auth sign-in for staff:', user.name, 'Email:', authEmail);
       
       try {
-        await signInWithEmailAndPassword(auth, authEmail, pin);
+        await signInWithEmailAndPassword(auth, authEmail, getAuthPassword(pin));
         console.log('[Login] Staff Auth sign-in successful');
         setSuccess(`Welcome back, ${user.name}!`);
         
@@ -295,7 +295,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       console.log('[Login] Attempting Auth sign-in for manager:', matchedManager.name, 'Email:', authEmail);
       
       try {
-        await signInWithEmailAndPassword(auth, authEmail, pin);
+        await signInWithEmailAndPassword(auth, authEmail, getAuthPassword(pin));
         console.log('[Login] Manager Auth sign-in successful');
         
         // Persist preferences
@@ -489,9 +489,23 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         setSuccess('');
         setIsRegistering(false);
       }, 1800);
-    } catch (err) {
-      console.error('Registration failed:', err);
-      setError('Registration failed. Please verify your connection and try again.');
+    } catch (err: any) {
+      console.error('[Registration] Failed with error details:', err);
+      const errorCode = err.code || 'unknown-error';
+      const errorMessage = err.message || String(err);
+      
+      let userFriendlyMsg = errorMessage;
+      if (errorCode === 'auth/weak-password') {
+        userFriendlyMsg = 'The passcode/PIN is too weak (minimum 6 characters required by Firebase Authentication).';
+      } else if (errorCode === 'auth/email-already-in-use') {
+        userFriendlyMsg = 'This phone number (or recovery email) is already registered under an existing authentication account.';
+      } else if (errorCode === 'auth/network-request-failed') {
+        userFriendlyMsg = 'A network error occurred. Please verify your internet connection and try again.';
+      } else if (errorCode === 'permission-denied') {
+        userFriendlyMsg = 'Firestore Security Rules blocked this operation: Permission denied writing to the "users" collection.';
+      }
+      
+      setError(`Registration Failed [${errorCode}]: ${userFriendlyMsg}`);
       setIsRegistering(false);
     }
   };

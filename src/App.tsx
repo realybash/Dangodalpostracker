@@ -19,7 +19,8 @@ import {
   calculateTerminalFee,
   getProviderTransactionNumber,
   mapFirestoreUser,
-  cleanPhoneForCompare
+  cleanPhoneForCompare,
+  getAuthPassword
 } from './utils';
 import { MetricCards } from './components/MetricCards';
 import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
@@ -1075,24 +1076,45 @@ export default function App() {
       // Fallback to random if phone is missing (should not happen with validation)
       const loginIdentifier = phoneKey || Math.random().toString(36).substring(7);
       const authEmail = `${loginIdentifier}@opay-pos.com`;
-      const authPass = newUser.pin || '1111'; 
+      // Use getAuthPassword helper to ensure it satisfies Firebase Auth's minimum password length constraint of 6 characters
+      const authPass = getAuthPassword(newUser.pin || '1111'); 
       
       console.log(`[Registration] Creating Auth account for ${newUser.role}:`, authEmail);
       
+      // 1. Verify duplicate email or duplicate phone in local state first
+      if (phoneKey) {
+        const phoneExists = registeredUsers.some(u => cleanPhoneForCompare(u.phone || '') === phoneKey);
+        if (phoneExists) {
+          const dupError = new Error(`Phone number ${newUser.phone} is already registered to another account.`);
+          (dupError as any).code = 'already-exists';
+          console.error('[Registration] Pre-check failed: Phone already exists', phoneKey);
+          throw dupError;
+        }
+      }
+
+      if (newUser.email) {
+        const emailExists = registeredUsers.some(u => u.email && u.email.trim().toLowerCase() === newUser.email?.trim().toLowerCase());
+        if (emailExists) {
+          const dupError = new Error(`Email ${newUser.email} is already registered to another account.`);
+          (dupError as any).code = 'already-exists';
+          console.error('[Registration] Pre-check failed: Email already exists', newUser.email);
+          throw dupError;
+        }
+      }
+
+      // 2. Firebase Authentication User Creation
+      let userCred;
       try {
-        const userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
+        userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
         finalUid = userCred.user.uid;
         await updateProfile(userCred.user, { displayName: newUser.name });
-        console.log('[Registration] Firebase Auth account created:', finalUid);
+        console.log('[Registration] Firebase Auth account successfully created with UID:', finalUid);
       } catch (authErr: any) {
-        if (authErr.code === 'auth/email-already-in-use') {
-          console.warn('[Registration] Auth email already in use. Attempting to link with existing Auth account.');
-          // If already in use, we'll try to find the existing UID if possible, 
-          // or just proceed and let the Firestore write handle the document sync.
-          // Note: In a production app, we might want to verify identity here.
-        } else {
-          throw authErr;
-        }
+        console.error('[Registration] Firebase Authentication failed:', authErr.code || authErr.message, authErr);
+        // Map common auth errors to clean, informative errors
+        const err = new Error(authErr.message || 'Firebase Authentication user creation failed');
+        (err as any).code = authErr.code || 'auth-error';
+        throw err;
       }
 
       // Standardize document fields and use Auth UID as the primary key
@@ -1110,7 +1132,19 @@ export default function App() {
 
       console.log('[Registration] Persisting standardized profile to Firestore at ID:', finalUid);
       const userDocRef = doc(db, 'users', finalUid);
-      await setDoc(userDocRef, firestoreDoc, { merge: true });
+      
+      // 3. Firestore Document Write
+      try {
+        await setDoc(userDocRef, firestoreDoc, { merge: true });
+        console.log('[Registration] Firestore document successfully created at /users/' + finalUid);
+      } catch (fsErr: any) {
+        console.error('[Registration] Firestore write failed:', fsErr.code || fsErr.message, fsErr);
+        // Check for specific error codes like permission-denied (Security Rules violation)
+        const code = fsErr.code || 'permission-denied';
+        const err = new Error(fsErr.message || 'Firestore database write operation failed.');
+        (err as any).code = code;
+        throw err;
+      }
       
       showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
       
@@ -1122,12 +1156,23 @@ export default function App() {
       });
 
     } catch (err: any) {
-      console.error('[Registration] Critical failure during user creation:', err);
-      let errorMsg = 'Registration Failed. Please check your internet connection.';
-      if (err.code === 'auth/weak-password') errorMsg = 'The PIN/Password is too weak.';
-      if (err.code === 'auth/network-request-failed') errorMsg = 'Network error. Please try again.';
+      console.error('[Registration Flow] Critical error captured:', err.code || 'unknown', err.message);
+      // Construct specific detailed message for feedback
+      let friendlyMsg = err.message;
+      if (err.code === 'auth/weak-password') {
+        friendlyMsg = 'The passcode/PIN is too weak (minimum 6 characters required by Firebase Authentication).';
+      } else if (err.code === 'auth/email-already-in-use') {
+        friendlyMsg = 'This phone number (or recovery email) is already registered under an existing authentication account.';
+      } else if (err.code === 'auth/network-request-failed') {
+        friendlyMsg = 'A network error occurred. Please verify your internet connection and try again.';
+      } else if (err.code === 'permission-denied') {
+        friendlyMsg = 'Firestore Security Rules blocked the operation: Permission denied writing to the "users" collection.';
+      } else if (err.code === 'already-exists') {
+        friendlyMsg = err.message;
+      }
       
-      showAppNotification(errorMsg, 'error');
+      showAppNotification(`Error [${err.code || 'unknown'}]: ${friendlyMsg}`, 'error');
+      // Re-throw so LoginScreen can handle and display the exact error to the user
       throw err;
     } finally {
       isRegisteringUser.current = false;

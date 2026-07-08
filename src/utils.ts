@@ -152,6 +152,11 @@ export function getProviderTransactionNumber(tx: { id: string; provider: string;
   return `${prefix}${dateStr}${numericId}`;
 }
 
+export function getAuthPassword(pin: string): string {
+  // Pad the 4-digit PIN to satisfy Firebase Auth's 6+ character password requirement
+  return `opay_${pin}_secure`;
+}
+
 /**
  * Standardizes user object from Firestore data
  */
