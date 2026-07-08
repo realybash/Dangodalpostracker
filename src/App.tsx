@@ -5,7 +5,7 @@
 
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
 import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
@@ -96,6 +96,7 @@ import {
   XCircle,
   MapPin,
   Building,
+  LogOut,
   Cloud,
   CloudOff,
   WifiOff
@@ -1701,18 +1702,39 @@ export default function App() {
                     {formatNaira(currentShiftStats.volume)}
                   </span>
                 </div>
-                <div className="bg-neutral-50/80 border border-neutral-150 p-2.5 rounded-2xl relative">
-                  <span className="text-[9px] text-neutral-400 block font-bold uppercase tracking-wider leading-none">Net Profit</span>
-                  <span className="text-xs font-black font-mono text-indigo-650 block mt-1 truncate" title={formatNaira(currentShiftStats.profit)}>
-                    {formatNaira(currentShiftStats.profit)}
-                  </span>
-                  {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
-                    <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
-                      {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
+                <div className="bg-neutral-50/80 border border-neutral-150 p-2.5 rounded-2xl relative flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] text-neutral-400 block font-bold uppercase tracking-wider leading-none">Net Profit</span>
+                    <span className="text-xs font-black font-mono text-indigo-650 block mt-1 truncate" title={formatNaira(currentShiftStats.profit)}>
+                      {formatNaira(currentShiftStats.profit)}
+                    </span>
+                    {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
+                      <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
+                        {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
+                      </div>
+                    )}
+                    <div className="mt-1 text-[9px] text-neutral-400 font-mono">
+                      Projected: {formatNaira(currentShiftStats.profit * (8 / Math.max(1, new Date().getHours() - 8)))}
                     </div>
-                  )}
-                  <div className="mt-1 text-[9px] text-neutral-400 font-mono">
-                    Projected: {formatNaira(currentShiftStats.profit * (8 / Math.max(1, new Date().getHours() - 8)))}
+                  </div>
+                  <div className="mt-2 pt-1.5 border-t border-neutral-200/50 flex justify-between items-center">
+                    <span className="text-[8px] text-neutral-400 font-mono font-bold">SESSION</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (window.confirm('Are you sure you want to log out of your manager account?')) {
+                          try {
+                            await signOut(auth);
+                            window.location.reload();
+                          } catch (err) {
+                            console.error('Failed to sign out:', err);
+                          }
+                        }
+                      }}
+                      className="text-[9px] font-black uppercase text-rose-600 hover:text-rose-700 flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <LogOut className="w-2.5 h-2.5 text-rose-500" /> Logout
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1729,7 +1751,24 @@ export default function App() {
                   <span>Switch Shift</span>
                 </button>
                 
-                {/* Dedicated Terminal Lock / Log Out Button - REMOVED */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Are you sure you want to log out of your manager account?')) {
+                      try {
+                        await signOut(auth);
+                        window.location.reload();
+                      } catch (err) {
+                        console.error('Failed to sign out:', err);
+                      }
+                    }
+                  }}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 rounded-xl text-[11px] font-black transition cursor-pointer select-none active:scale-[0.98] border border-rose-200/40 uppercase tracking-wider"
+                  title="Log out of Manager Account"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Log Out</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1816,18 +1855,39 @@ export default function App() {
                       {currentShiftStats.volume > 0 ? formatNaira(currentShiftStats.volume).replace('₦', '') : '0'}
                     </span>
                   </div>
-                  <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-2xl text-center relative">
-                    <span className="text-[8.5px] text-neutral-400 block font-bold uppercase tracking-wider">
-                      Agent profit
-                    </span>
-                    <span className="text-sm font-black font-mono text-indigo-400 block mt-1.5 truncate" title={formatNaira(currentShiftStats.profit)}>
-                      {currentShiftStats.profit > 0 ? formatNaira(currentShiftStats.profit).replace('₦', '') : '0'}
-                    </span>
-                    {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
-                      <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
-                        {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
-                      </div>
-                    )}
+                  <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-2xl text-center relative flex flex-col justify-between min-h-[84px]">
+                    <div>
+                      <span className="text-[8.5px] text-neutral-400 block font-bold uppercase tracking-wider">
+                        Agent profit
+                      </span>
+                      <span className="text-sm font-black font-mono text-indigo-400 block mt-1.5 truncate" title={formatNaira(currentShiftStats.profit)}>
+                        {currentShiftStats.profit > 0 ? formatNaira(currentShiftStats.profit).replace('₦', '') : '0'}
+                      </span>
+                      {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
+                        <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
+                          {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-2 pt-1 border-t border-neutral-800 flex justify-between items-center text-[8.5px]">
+                      <span className="text-neutral-500 font-mono font-bold">SESSION</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to log out of your cashier account?')) {
+                            try {
+                              await signOut(auth);
+                              window.location.reload();
+                            } catch (err) {
+                              console.error('Failed to sign out:', err);
+                            }
+                          }
+                        }}
+                        className="font-black uppercase text-rose-400 hover:text-rose-300 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <LogOut className="w-2.5 h-2.5 text-rose-400" /> Logout
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1836,7 +1896,7 @@ export default function App() {
                   {myTerminal ? (
                     <div className="flex items-center gap-1.5 font-mono">
                       <Smartphone className="w-3.5 h-3.5 text-[#00B87A]" />
-                      <span className="truncate max-w-[150px]" title={myTerminal.name}>
+                      <span className="truncate max-w-[130px]" title={myTerminal.name}>
                         {myTerminal.provider} ({myTerminal.serialNumber?.slice(-6) || 'Active'})
                       </span>
                     </div>
@@ -1844,13 +1904,35 @@ export default function App() {
                     <span className="text-neutral-500 font-mono">No Terminal Linked</span>
                   )}
                   
-                  <button
-                    type="button"
-                    onClick={() => setIsProfileModalOpen(true)}
-                    className="text-[9.5px] font-black uppercase text-[#00B87A] hover:text-emerald-400 hover:underline transition cursor-pointer"
-                  >
-                    {activeUser?.role === 'Manager' ? 'Manage Station \u2192' : 'View Station Metrics \u2192'}
-                  </button>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileModalOpen(true)}
+                      className="text-[9.5px] font-black uppercase text-[#00B87A] hover:text-emerald-400 hover:underline transition cursor-pointer"
+                    >
+                      {activeUser?.role === 'Manager' ? 'Manage \u2192' : 'Metrics \u2192'}
+                    </button>
+                    
+                    <span className="text-neutral-700 font-bold select-none">|</span>
+                    
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (window.confirm('Are you sure you want to log out of your cashier account?')) {
+                          try {
+                            await signOut(auth);
+                            window.location.reload();
+                          } catch (err) {
+                            console.error('Failed to sign out:', err);
+                          }
+                        }
+                      }}
+                      className="text-[9.5px] font-black uppercase text-rose-400 hover:text-rose-300 hover:underline transition cursor-pointer flex items-center gap-1"
+                    >
+                      <LogOut className="w-3 h-3 text-rose-400" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

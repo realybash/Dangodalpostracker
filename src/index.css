@@ -9,11 +9,15 @@
 /* Enable class-based manual dark mode in Tailwind v4 if used */
 @variant dark (&:where(.dark, .dark *));
 
+:root {
+  color-scheme: light !important;
+}
+
 /* Custom styles for professional light financial applet dashboard (OPay styled) */
 body {
   font-family: var(--font-sans);
-  background-color: #f3f4f6; /* Off-white light background matching mobile apps */
-  color: #111827; /* Rich gray-900 */
+  background-color: #ffffff !important; /* Explicit high-contrast white background */
+  color: #000000 !important; /* Explicit high-contrast black text */
 }
 
 /* Scrollbar styling for professional financial metrics list */
