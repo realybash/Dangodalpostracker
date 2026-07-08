@@ -1664,7 +1664,7 @@ export default function App() {
 
 
             {/* Sign Out / Lock / Exit View Button (Only shown for Manager or if Impersonating) */}
-            {(state.currentUser?.role === 'Manager' || state.impersonatedUserId) && (
+            {(state.currentUser?.role === 'Manager' || state.impersonatedUserId) && state.currentUser?.role !== 'Employee' && (
               <button
                 onClick={
                   state.impersonatedUserId 

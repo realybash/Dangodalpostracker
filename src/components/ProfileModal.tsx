@@ -731,8 +731,8 @@ export function ProfileModal({
                 </div>
               )}
 
-              {/* Secure Log Out Terminal Session Action (Manager Only) */}
-              {onLogout && currentUser.role === 'Manager' && (
+              {/* Secure Log Out Terminal Session Action (Manager or Cashier) */}
+              {onLogout && (
                 <div className="border-t border-neutral-150 pt-5 mt-3 space-y-3">
                   <div className="bg-rose-50/40 border border-rose-100 p-3.5 rounded-2xl flex items-start gap-3">
                     <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
