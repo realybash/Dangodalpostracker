@@ -381,25 +381,25 @@ export function ProfileModal({
           </button>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex bg-neutral-100 p-1 mx-5 mt-4 rounded-xl border border-neutral-200 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('my-profile');
-              setSwitchingUser(null);
-            }}
-            className={`flex-grow flex-1 text-center py-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-              activeTab === 'my-profile'
-                ? 'bg-white text-[#00B87A] shadow-sm font-black'
-                : 'text-neutral-500 hover:text-neutral-800'
-            }`}
-          >
-            <UserIcon className="w-3.5 h-3.5" />
-            <span>My Profile</span>
-          </button>
-          
-          {currentUser.role === 'Manager' && (
+        {/* Tab Selection (Only shown for Manager) */}
+        {currentUser.role === 'Manager' && (
+          <div className="flex bg-neutral-100 p-1 mx-5 mt-4 rounded-xl border border-neutral-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('my-profile');
+                setSwitchingUser(null);
+              }}
+              className={`flex-grow flex-1 text-center py-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                activeTab === 'my-profile'
+                  ? 'bg-white text-[#00B87A] shadow-sm font-black'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>My Profile</span>
+            </button>
+            
             <button
               type="button"
               onClick={() => {
@@ -415,9 +415,7 @@ export function ProfileModal({
               <Key className="w-3.5 h-3.5" />
               <span>Switch Shift</span>
             </button>
-          )}
 
-          {currentUser.role === 'Manager' && (
             <button
               type="button"
               onClick={() => {
@@ -433,8 +431,8 @@ export function ProfileModal({
               <Users className="w-3.5 h-3.5" />
               <span>Staff Registry</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Body content */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
@@ -574,165 +572,167 @@ export function ProfileModal({
                 </div>
               </div>
 
-              {/* Toggle Form to edit Profile details */}
-              <div className="border-t border-neutral-150 pt-4">
-                {!isEditingMyProfile ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingMyProfile(true)}
-                    className="w-full py-3 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-700 font-extrabold rounded-2xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-xs active:scale-[0.99]"
-                  >
-                    <Pencil className="w-3.5 h-3.5 text-neutral-400 stroke-[2.5]" />
-                    <span>Edit Profile Details & PIN</span>
-                  </button>
-                ) : (
-                  <form onSubmit={handleUpdateMyProfile} className="space-y-4 bg-neutral-50/50 border border-neutral-200 p-4 rounded-2xl animate-fade-in">
-                    <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
-                      <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-wider font-mono">
-                        Update Account Fields
-                      </h4>
-                      <span className="text-[9px] text-amber-600 font-bold font-mono">Requires current terminal auth</span>
-                    </div>
-
-                    {/* PROFILE PICTURE EDITING CORE SECTION */}
-                    <div className="flex flex-col items-center justify-center py-4 bg-white border border-neutral-150 rounded-2xl p-4 gap-3">
-                      <span className="text-[10px] font-black uppercase text-neutral-400 tracking-widest font-mono">Profile Picture / Avatar</span>
-                      <div className="relative group">
-                        <div className="w-20 h-20 rounded-full overflow-hidden border-4 border-emerald-50/80 group-hover:border-emerald-100 transition duration-150 relative shadow-md">
-                          {renderUserAvatar(editAvatar, editName, "w-full h-full", "rounded-full", "text-2xl font-black")}
-                        </div>
-                        <label className="absolute bottom-0 right-0 w-7 h-7 bg-[#00B87A] hover:bg-emerald-600 border border-white rounded-full flex items-center justify-center cursor-pointer shadow-sm text-white transition active:scale-90">
-                          <Camera className="w-3.5 h-3.5 text-white" />
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setEditAvatar(reader.result as string);
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }} 
-                            className="hidden" 
-                          />
-                        </label>
+              {/* Toggle Form to edit Profile details (Manager Only) */}
+              {currentUser.role === 'Manager' && (
+                <div className="border-t border-neutral-150 pt-4">
+                  {!isEditingMyProfile ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingMyProfile(true)}
+                      className="w-full py-3 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-700 font-extrabold rounded-2xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-xs active:scale-[0.99]"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-neutral-400 stroke-[2.5]" />
+                      <span>Edit Profile Details & PIN</span>
+                    </button>
+                  ) : (
+                    <form onSubmit={handleUpdateMyProfile} className="space-y-4 bg-neutral-50/50 border border-neutral-200 p-4 rounded-2xl animate-fade-in">
+                      <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                        <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-wider font-mono">
+                          Update Account Fields
+                        </h4>
+                        <span className="text-[9px] text-amber-600 font-bold font-mono">Requires current terminal auth</span>
                       </div>
-                      
-                      {/* Predefined Beautiful Avatars for Quick Tap */}
-                      <div className="w-full space-y-2 mt-1">
-                        <span className="text-[9px] text-neutral-450 uppercase font-mono font-bold text-center block">Or choose an avatar preset:</span>
-                        <div className="flex items-center justify-center gap-2 flex-wrap">
-                          {[
-                            { icon: '🦊', bg: 'from-orange-400 to-amber-500' },
-                            { icon: '🦁', bg: 'from-yellow-400 to-amber-600' },
-                            { icon: '🐼', bg: 'from-neutral-400 to-neutral-600' },
-                            { icon: '🦉', bg: 'from-blue-400 to-indigo-500' },
-                            { icon: '🦄', bg: 'from-purple-400 to-pink-500' },
-                            { icon: '🦸', bg: 'from-emerald-400 to-teal-600' }
-                          ].map((avatarItem, idx) => {
-                            return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => setEditAvatar(`preset:${avatarItem.icon}:${avatarItem.bg}`)}
-                                className="w-8 h-8 rounded-full flex items-center justify-center text-sm shadow-xs border border-neutral-200 transition active:scale-90 hover:scale-105 cursor-pointer hover:border-[#00B87A]"
-                                style={{
-                                  background: `linear-gradient(135deg, ${
-                                    avatarItem.bg.includes('orange') ? '#fb923c, #f59e0b' : 
-                                    avatarItem.bg.includes('yellow') ? '#fbbf24, #d97706' : 
-                                    avatarItem.bg.includes('neutral') ? '#9ca3af, #4b5563' : 
-                                    avatarItem.bg.includes('blue') ? '#60a5fa, #6366f1' : 
-                                    avatarItem.bg.includes('purple') ? '#c084fc, #ec4899' : 
-                                    '#34d399, #0d9488'
-                                  })`
-                                }}
-                              >
-                                {avatarItem.icon}
-                              </button>
-                            );
-                          })}
+
+                      {/* PROFILE PICTURE EDITING CORE SECTION */}
+                      <div className="flex flex-col items-center justify-center py-4 bg-white border border-neutral-150 rounded-2xl p-4 gap-3">
+                        <span className="text-[10px] font-black uppercase text-neutral-400 tracking-widest font-mono">Profile Picture / Avatar</span>
+                        <div className="relative group">
+                          <div className="w-20 h-20 rounded-full overflow-hidden border-4 border-emerald-50/80 group-hover:border-emerald-100 transition duration-150 relative shadow-md">
+                            {renderUserAvatar(editAvatar, editName, "w-full h-full", "rounded-full", "text-2xl font-black")}
+                          </div>
+                          <label className="absolute bottom-0 right-0 w-7 h-7 bg-[#00B87A] hover:bg-emerald-600 border border-white rounded-full flex items-center justify-center cursor-pointer shadow-sm text-white transition active:scale-90">
+                            <Camera className="w-3.5 h-3.5 text-white" />
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setEditAvatar(reader.result as string);
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }} 
+                              className="hidden" 
+                            />
+                          </label>
                         </div>
                         
-                        {editAvatar && (
-                          <button
-                            type="button"
-                            onClick={() => setEditAvatar('')}
-                            className="text-[10px] text-rose-500 hover:text-rose-600 font-extrabold block mx-auto mt-1 hover:underline cursor-pointer transition uppercase tracking-wider font-mono"
-                          >
-                            Remove Avatar
-                          </button>
-                        )}
+                        {/* Predefined Beautiful Avatars for Quick Tap */}
+                        <div className="w-full space-y-2 mt-1">
+                          <span className="text-[9px] text-neutral-450 uppercase font-mono font-bold text-center block">Or choose an avatar preset:</span>
+                          <div className="flex items-center justify-center gap-2 flex-wrap">
+                            {[
+                              { icon: '🦊', bg: 'from-orange-400 to-amber-500' },
+                              { icon: '🦁', bg: 'from-yellow-400 to-amber-600' },
+                              { icon: '🐼', bg: 'from-neutral-400 to-neutral-600' },
+                              { icon: '🦉', bg: 'from-blue-400 to-indigo-500' },
+                              { icon: '🦄', bg: 'from-purple-400 to-pink-500' },
+                              { icon: '🦸', bg: 'from-emerald-400 to-teal-600' }
+                            ].map((avatarItem, idx) => {
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setEditAvatar(`preset:${avatarItem.icon}:${avatarItem.bg}`)}
+                                  className="w-8 h-8 rounded-full flex items-center justify-center text-sm shadow-xs border border-neutral-200 transition active:scale-90 hover:scale-105 cursor-pointer hover:border-[#00B87A]"
+                                  style={{
+                                    background: `linear-gradient(135deg, ${
+                                      avatarItem.bg.includes('orange') ? '#fb923c, #f59e0b' : 
+                                      avatarItem.bg.includes('yellow') ? '#fbbf24, #d97706' : 
+                                      avatarItem.bg.includes('neutral') ? '#9ca3af, #4b5563' : 
+                                      avatarItem.bg.includes('blue') ? '#60a5fa, #6366f1' : 
+                                      avatarItem.bg.includes('purple') ? '#c084fc, #ec4899' : 
+                                      '#34d399, #0d9488'
+                                    })`
+                                  }}
+                                >
+                                  {avatarItem.icon}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          
+                          {editAvatar && (
+                            <button
+                              type="button"
+                              onClick={() => setEditAvatar('')}
+                              className="text-[10px] text-rose-500 hover:text-rose-600 font-extrabold block mx-auto mt-1 hover:underline cursor-pointer transition uppercase tracking-wider font-mono"
+                            >
+                              Remove Avatar
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3.5">
+                      
+                      <div className="grid grid-cols-2 gap-3.5">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">My Display Name</label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-bold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A]"
+                            placeholder="Operator Name"
+                            required
+                          />
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">Phone Number</label>
+                          <input
+                            type="text"
+                            value={editPhone}
+                            onChange={(e) => setEditPhone(e.target.value)}
+                            className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-bold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] font-mono"
+                            placeholder="e.g. 08123456789"
+                          />
+                        </div>
+                      </div>
+
                       <div className="space-y-1">
-                        <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">My Display Name</label>
+                        <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">4-Digit Shift Passkey (PIN)</label>
                         <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-bold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A]"
-                          placeholder="Operator Name"
+                          type="password"
+                          maxLength={4}
+                          value={editPin}
+                          onChange={(e) => setEditPin(e.target.value.replace(/\D/g, ''))}
+                          className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-extrabold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] font-mono tracking-widest text-center"
+                          placeholder="••••"
                           required
                         />
                       </div>
-                      
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">Phone Number</label>
-                        <input
-                          type="text"
-                          value={editPhone}
-                          onChange={(e) => setEditPhone(e.target.value)}
-                          className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-bold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] font-mono"
-                          placeholder="e.g. 08123456789"
-                        />
+
+                      <div className="flex gap-2.5 pt-1.5 select-none">
+                        <button
+                          type="submit"
+                          className="flex-1 py-2.5 px-3.5 bg-[#00B87A] hover:bg-emerald-600 text-white font-extrabold rounded-xl text-xs shadow-xs transition cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          Save Changes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingMyProfile(false);
+                            setEditName(currentUser.name);
+                            setEditPhone(currentUser.phone || '');
+                            setEditPin(currentUser.pin || '');
+                          }}
+                          className="py-2.5 px-4 bg-white hover:bg-neutral-100 border border-neutral-250 text-neutral-600 font-bold rounded-xl text-xs transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
                       </div>
-                    </div>
+                    </form>
+                  )}
+                </div>
+              )}
 
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-[#888888] uppercase tracking-wider font-mono">4-Digit Shift Passkey (PIN)</label>
-                      <input
-                        type="password"
-                        maxLength={4}
-                        value={editPin}
-                        onChange={(e) => setEditPin(e.target.value.replace(/\D/g, ''))}
-                        className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 font-extrabold text-xs focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] font-mono tracking-widest text-center"
-                        placeholder="••••"
-                        required
-                      />
-                    </div>
-
-                    <div className="flex gap-2.5 pt-1.5 select-none">
-                      <button
-                        type="submit"
-                        className="flex-1 py-2.5 px-3.5 bg-[#00B87A] hover:bg-emerald-600 text-white font-extrabold rounded-xl text-xs shadow-xs transition cursor-pointer flex items-center justify-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        Save Changes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditingMyProfile(false);
-                          setEditName(currentUser.name);
-                          setEditPhone(currentUser.phone || '');
-                          setEditPin(currentUser.pin || '');
-                        }}
-                        className="py-2.5 px-4 bg-white hover:bg-neutral-100 border border-neutral-250 text-neutral-600 font-bold rounded-xl text-xs transition cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-              {/* Secure Log Out Terminal Session Action */}
-              {onLogout && (
+              {/* Secure Log Out Terminal Session Action (Manager Only) */}
+              {onLogout && currentUser.role === 'Manager' && (
                 <div className="border-t border-neutral-150 pt-5 mt-3 space-y-3">
                   <div className="bg-rose-50/40 border border-rose-100 p-3.5 rounded-2xl flex items-start gap-3">
                     <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />

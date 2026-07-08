@@ -24,7 +24,11 @@ export const useFirebasePersistence = (
       let filteredUsers = cloudUsersList;
       if (syncOwnerId) {
         filteredUsers = cloudUsersList.filter(user => 
-          user.id === syncOwnerId || user.ownerId === syncOwnerId
+          user.id === syncOwnerId || 
+          user.ownerId === syncOwnerId || 
+          user.ownerId === 'mgr_1' || 
+          user.ownerId === 'local_owner' ||
+          !user.ownerId
         );
       }
       
@@ -42,7 +46,11 @@ export const useFirebasePersistence = (
           let list = JSON.parse(saved);
           if (syncOwnerId) {
             list = list.filter((user: User) => 
-              user.id === syncOwnerId || user.ownerId === syncOwnerId
+              user.id === syncOwnerId || 
+              user.ownerId === syncOwnerId || 
+              user.ownerId === 'mgr_1' || 
+              user.ownerId === 'local_owner' ||
+              !user.ownerId
             );
           }
           setRegisteredUsers(list);

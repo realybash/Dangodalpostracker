@@ -1243,7 +1243,10 @@ export default function App() {
   }, [registeredUsers]);
 
   const availableEmployees = useMemo(() => {
-    return registeredUsers.filter(u => u.role === 'Employee' && u.ownerId === state.currentUser.id);
+    return registeredUsers.filter(u => 
+      u.role === 'Employee' && 
+      (u.ownerId === state.currentUser.id || u.ownerId === 'mgr_1' || u.ownerId === 'local_owner' || !u.ownerId)
+    );
   }, [registeredUsers, state.currentUser.id]);
 
   // Compute metrics dynamically from visible transactions based on active permissions
@@ -1660,27 +1663,29 @@ export default function App() {
             
 
 
-            {/* Sign Out / Lock / Exit View Button */}
-            <button
-              onClick={
-                state.impersonatedUserId 
-                  ? () => dispatch({ type: 'SET_IMPERSONATED_USER', payload: undefined }) 
-                  : (cloudUser ? handleCloudSignOut : handleLockTerminal)
-              }
-              className="px-2.5 py-1.5 text-[11px] font-bold bg-neutral-100 hover:bg-red-50 border border-neutral-200 hover:border-red-250 text-neutral-600 hover:text-red-150 rounded-xl transition cursor-pointer flex items-center gap-1 shadow-xs"
-              title={
-                state.impersonatedUserId 
-                  ? "Sign Out of Cashier View & Return to Manager Dashboard" 
-                  : (cloudUser ? "Sign Out of Cloud Session" : "Lock POS Terminal")
-              }
-            >
-              <LogOut className="w-3.5 h-3.5 text-red-500" />
-              <span>
-                {state.impersonatedUserId 
-                  ? "Sign Out & Return" 
-                  : (cloudUser ? "Sign Out" : "Lock Terminal")}
-              </span>
-            </button>
+            {/* Sign Out / Lock / Exit View Button (Only shown for Manager or if Impersonating) */}
+            {(state.currentUser?.role === 'Manager' || state.impersonatedUserId) && (
+              <button
+                onClick={
+                  state.impersonatedUserId 
+                    ? () => dispatch({ type: 'SET_IMPERSONATED_USER', payload: undefined }) 
+                    : (cloudUser ? handleCloudSignOut : handleLockTerminal)
+                }
+                className="px-2.5 py-1.5 text-[11px] font-bold bg-neutral-100 hover:bg-red-50 border border-neutral-200 hover:border-red-250 text-neutral-600 hover:text-red-150 rounded-xl transition cursor-pointer flex items-center gap-1 shadow-xs"
+                title={
+                  state.impersonatedUserId 
+                    ? "Sign Out of Cashier View & Return to Manager Dashboard" 
+                    : (cloudUser ? "Sign Out of Cloud Session" : "Lock POS Terminal")
+                }
+              >
+                <LogOut className="w-3.5 h-3.5 text-red-500" />
+                <span>
+                  {state.impersonatedUserId 
+                    ? "Sign Out & Return" 
+                    : (cloudUser ? "Sign Out" : "Lock Terminal")}
+                </span>
+              </button>
+            )}
 
             <button 
               onClick={() => alert("Alert Notification: Gateway connection is extremely stable. High velocity is active.")}
@@ -1908,7 +1913,7 @@ export default function App() {
                     onClick={() => setIsProfileModalOpen(true)}
                     className="text-[9.5px] font-black uppercase text-[#00B87A] hover:text-emerald-400 hover:underline transition cursor-pointer"
                   >
-                    Manage Station &rarr;
+                    {activeUser?.role === 'Manager' ? 'Manage Station \u2192' : 'View Station Metrics \u2192'}
                   </button>
                 </div>
               </div>
@@ -3345,7 +3350,7 @@ export default function App() {
 
         {dashboardTab === 'reports' && (state.currentUser.role === 'Manager' || state.impersonatedUserId) && (
           <EmployeeOversightBoard
-            currentUser={activeUser}
+            currentUser={state.currentUser}
             registeredUsers={registeredUsers}
             transactions={state.transactions}
             posTerminals={state.posTerminals}
