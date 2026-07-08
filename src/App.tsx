@@ -1664,7 +1664,7 @@ export default function App() {
 
 
             {/* Sign Out / Lock / Exit View Button (Only shown for Manager or if Impersonating) */}
-            {(state.currentUser?.role === 'Manager' || state.impersonatedUserId) && state.currentUser?.role !== 'Employee' && (
+            {/* {(state.currentUser?.role === 'Manager' || state.impersonatedUserId) && state.currentUser?.role !== 'Employee' && (
               <button
                 onClick={
                   state.impersonatedUserId 
@@ -1685,7 +1685,7 @@ export default function App() {
                     : (cloudUser ? "Sign Out" : "Lock Terminal")}
                 </span>
               </button>
-            )}
+            )} */}
 
             <button 
               onClick={() => alert("Alert Notification: Gateway connection is extremely stable. High velocity is active.")}
