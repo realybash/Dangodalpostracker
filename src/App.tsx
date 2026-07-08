@@ -266,9 +266,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
       break;
     }
     case 'SET_REGISTERED_USERS': {
+      const ownerId = state.currentUser.role === 'Manager' ? state.currentUser.id : state.currentUser.ownerId;
       nextState = {
         ...state,
-        availableEmployees: action.payload.filter(u => u.role === 'Employee' && u.ownerId === state.currentUser.id)
+        availableEmployees: action.payload.filter(u => u.role === 'Employee' && u.ownerId === ownerId)
       };
       break;
     }
@@ -420,11 +421,13 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? window.navigator.onLine : true);
 
   const syncOwnerId = useMemo(() => {
+    // If we have a profile loaded in state, that's the most reliable source for ownerId
+    if (state.currentUser && state.currentUser.id && state.currentUser.id !== '' && state.currentUser.id !== 'mgr_1') {
+      return state.currentUser.role === 'Manager' ? state.currentUser.id : state.currentUser.ownerId;
+    }
+    // Fallback to Auth UID if no profile yet (initial load)
     if (cloudUser) {
       return cloudUser.uid;
-    }
-    if (state.currentUser && state.currentUser.id && state.currentUser.id !== '') {
-      return state.currentUser.role === 'Manager' ? state.currentUser.id : state.currentUser.ownerId;
     }
     return null;
   }, [cloudUser, state.currentUser]);
@@ -494,6 +497,7 @@ export default function App() {
   const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings'>('pos');
   const ownerTxsRef = useRef<Transaction[]>([]);
   const cashierTxsRef = useRef<Transaction[]>([]);
+  const isRegisteringUser = useRef(false);
 
   // Compute individual stats for each linked terminal
   const terminalStats = useMemo(() => {
@@ -563,13 +567,21 @@ export default function App() {
 
   // Initialize Auth state listener
   useEffect(() => {
+    console.log('[Auth] Initializing onAuthStateChanged listener');
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCloudUser(user);
       setCloudLoading(false);
       
       if (user) {
-        const managerId = user.uid;
-        const managerDocRef = doc(db, 'users', managerId);
+        console.log('[Auth] User detected:', user.uid, user.email);
+        
+        // If registration is in progress, bypass the auto-restoration flow
+        if (isRegisteringUser.current) {
+          console.log('[Auth] Registration in progress, bypassing auto-restoration in auth listener');
+          return;
+        }
+
+        const userDocRef = doc(db, 'users', user.uid);
         
         const updatePoolAndDispatch = (mUser: User) => {
           setRegisteredUsers((prev) => {
@@ -584,55 +596,42 @@ export default function App() {
         };
 
         try {
-          const snap = await getDoc(managerDocRef);
-          let managerUser: User;
-          
+          const snap = await getDoc(userDocRef);
           if (snap.exists()) {
-            managerUser = mapFirestoreUser(snap.data(), managerId);
-            console.log('[Auth] Manager document restored from Firestore:', managerUser.name);
+            const mUser = mapFirestoreUser(snap.data(), user.uid);
+            console.log('[Auth] Profile restored from Firestore:', mUser.name, 'Role:', mUser.role);
+            updatePoolAndDispatch(mUser);
           } else {
-            managerUser = {
-              id: managerId,
-              name: user.displayName || 'Terminal Manager',
-              role: 'Manager',
-              email: user.email || '',
-              phone: user.phoneNumber || '',
-              ownerId: managerId,
-              activated: true,
-              referralCode: `MGR-${managerId.substring(0, 5).toUpperCase()}`
+            console.warn('[Auth] Auth account exists but Firestore document is missing for UID:', user.uid);
+            // Fallback for newly created accounts where Firestore write might be slightly delayed
+            // or if the account was created without a document (should not happen now)
+            const fallback: User = {
+              id: user.uid,
+              name: user.displayName || 'User',
+              role: 'Employee', // Default to employee if unknown
+              phone: user.email?.split('@')[0] || '',
+              ownerId: 'mgr_1',
+              activated: true
             };
-            await setDoc(managerDocRef, managerUser);
+            updatePoolAndDispatch(fallback);
           }
-          
-          updatePoolAndDispatch(managerUser);
         } catch (err) {
-          console.warn('Failed to sync cloud manager profile:', err);
-          const fallbackManager: User = {
-            id: managerId,
-            name: user.displayName || 'Terminal Manager',
-            role: 'Manager',
-            email: user.email || '',
-            phone: '',
-            ownerId: managerId,
-            activated: true,
-            referralCode: `MGR-${managerId.substring(0, 5).toUpperCase()}`
-          };
-          updatePoolAndDispatch(fallbackManager);
+          console.error('[Auth] Failed to retrieve user profile:', err);
+          // Don't log out, maybe it's just a network glitch
         }
       } else {
-        // If they sign out of Cloud Sync, switch to the default local manager
-        if (state.currentUser.role === 'Manager' && state.currentUser.id !== 'mgr_1') {
-          const localManager = {
-            id: 'mgr_1',
-            name: 'Terminal Manager',
-            role: 'Manager',
-            pin: '2026',
-            phone: '08123456789',
-            ownerId: 'mgr_1',
-            activated: true
-          };
-          dispatch({ type: 'SWITCH_USER', payload: localManager });
-        }
+        console.log('[Auth] No active session. Reverting to login state.');
+        // Reset to default empty user to trigger LoginScreen
+        const emptyUser: User = {
+          id: '',
+          name: 'Please Login',
+          role: 'Employee',
+          pin: '',
+          phone: '',
+          ownerId: ''
+        };
+        dispatch({ type: 'SWITCH_USER', payload: emptyUser });
+        setIsLocked(true);
       }
     });
     return () => unsubscribe();
@@ -1067,51 +1066,55 @@ export default function App() {
 
   const handleRegisterUser = async (newUser: User) => {
     console.log('[Registration] Starting registration for:', newUser.name, 'Role:', newUser.role);
-    
-    // Cloud persistence
+    isRegisteringUser.current = true;
     try {
       let finalUid = newUser.id;
       
-      // Managers MUST have a Firebase Auth account for persistence and security
-      if (newUser.role === 'Manager') {
-        const phoneKey = cleanPhoneForCompare(newUser.phone || '');
-        const authEmail = `${phoneKey}@opay-pos.com`;
-        const authPass = newUser.pin || '1111'; // Use PIN as password for consistency with login
-        
-        console.log('[Registration] Creating Auth account for Manager:', authEmail);
-        
-        try {
-          const userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
-          finalUid = userCred.user.uid;
-          await updateProfile(userCred.user, { displayName: newUser.name });
-          console.log('[Registration] Firebase Auth account created:', finalUid);
-        } catch (authErr: any) {
-          if (authErr.code === 'auth/email-already-in-use') {
-            console.warn('[Registration] Auth email already in use, checking for existing doc...');
-            // We'll proceed to try and overwrite/update the Firestore doc if they have the same phone
-          } else {
-            throw authErr;
-          }
+      // All users MUST have a Firebase Auth account for standardized single-provider authentication
+      const phoneKey = cleanPhoneForCompare(newUser.phone || '');
+      // Fallback to random if phone is missing (should not happen with validation)
+      const loginIdentifier = phoneKey || Math.random().toString(36).substring(7);
+      const authEmail = `${loginIdentifier}@opay-pos.com`;
+      const authPass = newUser.pin || '1111'; 
+      
+      console.log(`[Registration] Creating Auth account for ${newUser.role}:`, authEmail);
+      
+      try {
+        const userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
+        finalUid = userCred.user.uid;
+        await updateProfile(userCred.user, { displayName: newUser.name });
+        console.log('[Registration] Firebase Auth account created:', finalUid);
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          console.warn('[Registration] Auth email already in use. Attempting to link with existing Auth account.');
+          // If already in use, we'll try to find the existing UID if possible, 
+          // or just proceed and let the Firestore write handle the document sync.
+          // Note: In a production app, we might want to verify identity here.
+        } else {
+          throw authErr;
         }
       }
 
-      // Standardize document fields
+      // Standardize document fields and use Auth UID as the primary key
       const firestoreDoc = {
         ...newUser,
         uid: finalUid,
         id: finalUid,
         fullName: newUser.name,
         phoneNumber: newUser.phone,
-        ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || finalUid)
+        ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || 'mgr_1'),
+        email: newUser.email || authEmail, // Store the login email for recovery
+        activated: true,
+        createdAt: new Date().toISOString()
       };
 
-      console.log('[Registration] Writing to Firestore collection "users" at ID:', finalUid);
+      console.log('[Registration] Persisting standardized profile to Firestore at ID:', finalUid);
       const userDocRef = doc(db, 'users', finalUid);
-      await setDoc(userDocRef, firestoreDoc);
+      await setDoc(userDocRef, firestoreDoc, { merge: true });
       
       showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
       
-      // Update local state immediately with standardized fields
+      // Update local state immediately
       const standardizedUser = mapFirestoreUser(firestoreDoc, finalUid);
       setRegisteredUsers(prev => {
         const next = prev.filter(u => u.id !== standardizedUser.id && u.phone !== standardizedUser.phone);
@@ -1119,9 +1122,15 @@ export default function App() {
       });
 
     } catch (err: any) {
-      console.error('[Registration] Critical failure:', err);
-      showAppNotification(`Registration Failed: ${err.message}`, 'error');
+      console.error('[Registration] Critical failure during user creation:', err);
+      let errorMsg = 'Registration Failed. Please check your internet connection.';
+      if (err.code === 'auth/weak-password') errorMsg = 'The PIN/Password is too weak.';
+      if (err.code === 'auth/network-request-failed') errorMsg = 'Network error. Please try again.';
+      
+      showAppNotification(errorMsg, 'error');
       throw err;
+    } finally {
+      isRegisteringUser.current = false;
     }
   };
 
@@ -1470,6 +1479,15 @@ export default function App() {
       </div>
     );
   };
+
+  if (cloudLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-50 flex-col gap-4">
+        <div className="w-12 h-12 border-4 border-[#00B87A] border-t-transparent rounded-full animate-spin" />
+        <p className="text-neutral-500 font-bold animate-pulse text-sm">Synchronizing your session...</p>
+      </div>
+    );
+  }
 
   if (isLocked || !activeUser || !activeUser.id) {
     return (

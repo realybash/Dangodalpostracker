@@ -123,11 +123,12 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
   const handleStaffLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError('');
     setSuccess('');
-    
+
     if (!loginPhone.trim()) {
-      setError('Please enter your registered Phone Number or Full Name.');
+      setError('Please enter your Registered Phone Number or Full Name.');
       return;
     }
 
@@ -136,80 +137,100 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       return;
     }
     
-    const inputPhoneDigits = cleanPhoneForCompare(loginPhone);
-    console.log('[Login] Staff attempt:', loginPhone, 'Digits:', inputPhoneDigits);
-
-    let user = staffUsers.find(u => {
-      const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
-      const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-      const inputNameNormalized = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
-      
-      const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-      const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === loginPhone.trim().toLowerCase();
-      
-      return phoneMatches || nameMatches;
-    });
-
-    if (!user) {
-      console.log('[Login] Staff not found locally, checking Firestore...');
-      try {
-        const usersRef = collection(db, 'users');
-        const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
-        const allEmployees = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
-        console.log(`[Login] Found ${allEmployees.length} employees in cloud`);
-
-        const matches = allEmployees.filter(u => {
-          const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
-          const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-          const inputNameNormalized = loginPhone.trim().toLowerCase().replace(/\s+/g, '');
-          
-          const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-          const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === loginPhone.trim().toLowerCase();
-          
-          return phoneMatches || nameMatches;
-        });
-
-        if (matches.length > 0) {
-          const correctPinMatch = matches.find(u => u.pin === pin);
-          user = correctPinMatch || matches[0];
-          console.log('[Login] Cloud match found:', user.name);
-        }
-      } catch (err) {
-        console.warn('[Login] Global Firestore lookup failed', err);
-      }
-    }
-
-    if (!user) {
-      setError('Account not found. Please double check the phone number or name.');
-      return;
-    }
+    const inputRaw = loginPhone.trim();
+    const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
+    const inputNameNormalized = inputRaw.toLowerCase().replace(/\s+/g, '');
     
-    if (user.pin && user.pin !== pin) {
-      setError('Incorrect 4-digit passcode PIN.');
-      return;
-    }
-    
-    setSuccess(`Welcome back, ${user.name}! Logging in...`);
-    // ... rest of the logic
+    setIsSubmitting(true);
+    console.log('[Login] Staff login attempt for:', inputRaw);
+
     try {
-      localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
-      if (rememberMe) {
-        localStorage.setItem('OPay_Last_Login_Tab', 'staff');
-        localStorage.setItem('OPay_Last_Staff_Phone', loginPhone);
-        localStorage.setItem('OPay_Last_Staff_Pin', pin);
-      } else {
-        localStorage.removeItem('OPay_Last_Staff_Phone');
-        localStorage.removeItem('OPay_Last_Staff_Pin');
+      // 1. Find the Employee document first (to get their Auth email and UID)
+      let user = staffUsers.find(u => {
+        const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
+        const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
+        
+        const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+        const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === inputRaw.toLowerCase();
+        
+        return phoneMatches || nameMatches;
+      });
+
+      if (!user && isUsersLoaded) {
+        console.log('[Login] Staff not found locally, checking Firestore...');
+        try {
+          const usersRef = collection(db, 'users');
+          const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
+          const allEmployees = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+          
+          user = allEmployees.find(u => {
+            const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
+            const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
+            
+            const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+            const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === inputRaw.toLowerCase();
+            
+            return phoneMatches || nameMatches;
+          });
+        } catch (err) {
+          console.warn('[Login] Remote staff lookup failed:', err);
+        }
       }
-    } catch (e) {}
-    
-    setTimeout(() => {
-      onLogin(user);
-    }, 800);
+
+      if (!user) {
+        setError('Staff account not found. Please verify the name or phone.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Attempt Firebase Auth sign-in
+      const userPhoneKey = cleanPhoneForCompare(user.phone || '');
+      const authEmail = `${userPhoneKey}@opay-pos.com`;
+      
+      console.log('[Login] Attempting Auth sign-in for staff:', user.name, 'Email:', authEmail);
+      
+      try {
+        await signInWithEmailAndPassword(auth, authEmail, pin);
+        console.log('[Login] Staff Auth sign-in successful');
+        setSuccess(`Welcome back, ${user.name}!`);
+        
+        // Persist preferences
+        try {
+          localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
+          if (rememberMe) {
+            localStorage.setItem('OPay_Last_Login_Tab', 'staff');
+            localStorage.setItem('OPay_Last_Staff_Phone', loginPhone);
+            localStorage.setItem('OPay_Last_Staff_Pin', pin);
+          } else {
+            localStorage.removeItem('OPay_Last_Staff_Phone');
+            localStorage.removeItem('OPay_Last_Staff_Pin');
+          }
+        } catch (e) {}
+
+        onLogin(user);
+      } catch (authErr: any) {
+        console.warn('[Login] Staff Auth failed:', authErr.code);
+        if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
+          setError('Incorrect 4-digit PIN Passcode.');
+        } else if (authErr.code === 'auth/network-request-failed') {
+          setError('Network error. Please check your internet connection.');
+        } else if (authErr.code === 'auth/user-not-found') {
+          setError('Employee authentication account is missing. Please contact your manager to recreate your profile.');
+        } else {
+          setError(`Login Error: ${authErr.message || authErr.code}`);
+        }
+      }
+    } catch (err: any) {
+      console.error('[Login] Critical staff login error:', err);
+      setError(`Login failed: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleManagerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError('');
     setSuccess('');
     
@@ -227,11 +248,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
     const inputNameSearch = inputRaw.toLowerCase().replace(/\s+/g, '');
     
-    console.log('[Login] Manager login attempt:', inputRaw);
     setIsSubmitting(true);
+    console.log('[Login] Manager login attempt for:', inputRaw);
 
     try {
-      // 1. Find the Manager document first (to get their UID and correct phone)
+      // 1. Find the Manager document first
       let matchedManager = managerUsers.find(m => {
         const dbPhoneDigits = cleanPhoneForCompare(m.phone || '');
         const dbName = m.name.toLowerCase().replace(/\s+/g, '');
@@ -257,7 +278,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
             return phoneMatch || nameMatch;
           });
         } catch (err) {
-          console.warn('[Login] Remote lookup failed:', err);
+          console.warn('[Login] Remote manager lookup failed:', err);
         }
       }
 
@@ -267,33 +288,45 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         return;
       }
 
-      // 2. Attempt Firebase Auth sign-in using the Manager's phone
+      // 2. Attempt Firebase Auth sign-in
       const managerPhoneKey = cleanPhoneForCompare(matchedManager.phone || '');
       const authEmail = `${managerPhoneKey}@opay-pos.com`;
       
-      console.log('[Login] Attempting Auth sign-in for:', matchedManager.name, 'Email:', authEmail);
+      console.log('[Login] Attempting Auth sign-in for manager:', matchedManager.name, 'Email:', authEmail);
       
       try {
         await signInWithEmailAndPassword(auth, authEmail, pin);
-        console.log('[Login] Auth sign-in successful');
+        console.log('[Login] Manager Auth sign-in successful');
         
+        // Persist preferences
+        try {
+          localStorage.setItem('OPay_Remember_Me', rememberMe ? 'true' : 'false');
+          if (rememberMe) {
+            localStorage.setItem('OPay_Last_Login_Tab', 'manager');
+            localStorage.setItem('OPay_Last_Manager_Phone', managerPhone);
+            localStorage.setItem('OPay_Last_Manager_Pin', pin);
+          } else {
+            localStorage.removeItem('OPay_Last_Manager_Phone');
+            localStorage.removeItem('OPay_Last_Manager_Pin');
+          }
+        } catch (e) {}
+
         setSuccess(`Access Granted! Welcome back, ${matchedManager.name}.`);
         onLogin(matchedManager);
       } catch (authErr: any) {
-        console.warn('[Login] Auth sign-in failed:', authErr.code);
-        
-        // Fallback: If it's a legacy user without Auth account, we might still allow doc-only login
-        // but only if the PIN matches the document
-        if (matchedManager.pin === pin) {
-          console.log('[Login] PIN matched document (Auth account may be missing), proceeding...');
-          setSuccess(`Access Granted! Welcome back, ${matchedManager.name}.`);
-          onLogin(matchedManager);
-        } else {
+        console.warn('[Login] Manager Auth failed:', authErr.code);
+        if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
           setError('Incorrect Manager Passcode PIN.');
+        } else if (authErr.code === 'auth/network-request-failed') {
+          setError('Network error. Please check your internet connection.');
+        } else if (authErr.code === 'auth/user-not-found') {
+          setError('Manager authentication account is missing. Please re-register or use a different phone number.');
+        } else {
+          setError(`Login Error: ${authErr.message || authErr.code}`);
         }
       }
     } catch (err: any) {
-      console.error('[Login] Critical error during manager login:', err);
+      console.error('[Login] Critical manager login error:', err);
       setError(`Login error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
