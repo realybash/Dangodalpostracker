@@ -95,7 +95,12 @@ export function calculateTerminalFee(
   if (amt <= 0) return 0;
 
   if (type === 'Withdrawal') {
-    // Percentage fee (terminalFeeRate is in percent, so divide by 100)
+    if (subType === 'SameBank') {
+      // Same bank card withdrawal on POS (e.g., OPay Card on OPay POS) is highly subsidized
+      const rate = 0.25 / 100; // 0.25% SameBank rate
+      return Math.min(amt * rate, 50); // Capped at ₦50
+    }
+    // Percentage fee for OtherBank / Interbank withdrawals
     const rate = (terminalFeeRate || 0.5) / 100;
     const computed = amt * rate;
     // OPay / Moniepoint standard cap for withdrawal is ₦100
@@ -130,11 +135,18 @@ export function getRecommendedAgentFee(amount: number, type: string, subType?: s
   if (amt <= 0) return 0;
 
   if (type === 'Withdrawal') {
+    if (subType === 'SameBank') {
+      if (amt <= 5000) return 100;
+      if (amt <= 10000) return 150;
+      if (amt <= 20000) return 200; // Perfect match for ₦20,000 Same-Bank (OPay native card)
+      if (amt <= 50000) return 400;
+      return Math.round(amt * 0.008); // subsidized rate (0.8%)
+    }
     if (amt <= 5000) return 100;
     if (amt <= 10000) return 200;
     if (amt <= 20000) return 300;
     if (amt <= 50000) return 500;
-    return Math.round(amt * 0.01);
+    return Math.round(amt * 0.01); // 1% for standard interbank card withdrawals
   } else {
     if (subType === 'SameBank') {
       if (amt <= 5000) return 100;
