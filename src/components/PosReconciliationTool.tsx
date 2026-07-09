@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, User, ProviderType } from '../types';
-import { formatNaira, getProviderTransactionNumber, generateId } from '../utils';
+import { formatNaira, getProviderTransactionNumber, generateId, calculateTerminalFee, calculateCBNCharge } from '../utils';
 import { 
   FileText, 
   Upload, 
@@ -231,8 +231,8 @@ export function PosReconciliationTool({
         // Calculate standard fees
         const isWithdrawal = missing.type === 'Withdrawal';
         const customerFee = isWithdrawal ? Math.round(missing.amount * 0.01) : 150;
-        const terminalFee = isWithdrawal ? Math.round(missing.amount * 0.005) : 100;
-        const cbnCharge = missing.amount >= 10000 ? 50 : 0;
+        const terminalFee = calculateTerminalFee(missing.amount, missing.type, missing.provider, 0.5, 'OtherBank');
+        const cbnCharge = calculateCBNCharge(missing.amount, missing.type);
         const profit = customerFee - terminalFee - cbnCharge;
 
         const newTx: Transaction = {

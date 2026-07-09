@@ -402,7 +402,7 @@ export function TransactionForm({
 
     const amountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
     const terminalFee = calculateTerminalFee(amountForTerminalFee, type, provider, activeFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amountForTerminalFee);
+    const cbnCharge = calculateCBNCharge(amountForTerminalFee, type);
     
     // For unpaid charges, we do not collect any fee initially, so actual customerFee is 0
     const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : customerFee;
@@ -613,7 +613,7 @@ export function TransactionForm({
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
   const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, type, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee);
+  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, type);
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 

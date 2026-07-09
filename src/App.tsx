@@ -555,19 +555,6 @@ export default function App() {
     };
   }, [state.transactions]);
 
-  // Compute today's statistics for active shift operator
-  const currentShiftStats = useMemo(() => {
-    const todayStr = new Date().toDateString();
-    const targetUserId = state.impersonatedUserId || state.currentUser.id;
-    const myTxs = (state.transactions || []).filter(t => t.employeeId === targetUserId && t.status === 'Success');
-    const todayTxs = myTxs.filter(t => new Date(t.timestamp).toDateString() === todayStr);
-    return {
-      count: todayTxs.length,
-      volume: todayTxs.reduce((sum, t) => sum + t.amount, 0),
-      profit: todayTxs.reduce((sum, t) => sum + t.profit, 0)
-    };
-  }, [state.transactions, state.currentUser.id, state.impersonatedUserId]);
-
   // Initialize Auth state listener
   useEffect(() => {
     console.log('[Auth] Initializing onAuthStateChanged listener');
@@ -972,6 +959,32 @@ export default function App() {
 
   useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded, dispatch, syncOwnerId);
 
+  // Compute today's statistics for active shift operator
+  const currentShiftStats = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    const targetUserId = state.impersonatedUserId || state.currentUser.id;
+    const myTxs = (state.transactions || []).filter(t => t.employeeId === targetUserId && t.status === 'Success');
+    const todayTxs = myTxs.filter(t => new Date(t.timestamp).toDateString() === todayStr);
+    
+    const targetUser = state.currentUser.role === 'Manager' && state.impersonatedUserId
+      ? (registeredUsers || []).find(u => u.id === state.impersonatedUserId)
+      : state.currentUser;
+    const isEmployee = targetUser?.role === 'Employee';
+
+    return {
+      count: todayTxs.length,
+      volume: todayTxs.reduce((sum, t) => sum + t.amount, 0),
+      profit: todayTxs.reduce((sum, t) => {
+        if (isEmployee) {
+          const fee = t.chargesStatus === 'Unpaid' ? 0 : (t.customerFee || 0);
+          return sum + fee;
+        } else {
+          return sum + t.profit;
+        }
+      }, 0)
+    };
+  }, [state.transactions, state.currentUser, state.impersonatedUserId, registeredUsers]);
+
   const handleRegisterUser = async (newUser: User) => {
     console.log('[Registration] Starting registration for:', newUser.name, 'Role:', newUser.role);
     isRegisteringUser.current = true;
@@ -1319,7 +1332,7 @@ export default function App() {
     // Nigeria Agent fee practices standard calculation
     const customerFee = isWithdrawal ? Math.round(amount * 0.01) : 150; 
     const terminalFee = calculateTerminalFee(amount, type, provider, state.terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount);
+    const cbnCharge = calculateCBNCharge(amount, type);
     const profit = customerFee - terminalFee - cbnCharge;
 
     const newSimTx: Transaction = {

@@ -77,8 +77,9 @@ export function isSameYear(d1: Date | string | number, d2: Date | string | numbe
   return date1.getFullYear() === date2.getFullYear();
 }
 
-// CBN EMTL Charge calculation helper (₦50 on transactions of 10,000+)
-export function calculateCBNCharge(amount: number): number {
+// CBN EMTL Charge calculation helper (₦50 on withdrawal transactions of 10,000+)
+export function calculateCBNCharge(amount: number, type?: string): number {
+  if (type && type !== 'Withdrawal') return 0;
   const amt = Number(amount || 0);
   return amt >= 10000 ? 50 : 0;
 }
@@ -102,11 +103,25 @@ export function calculateTerminalFee(
     return Math.min(computed, 100);
   } else {
     // Deposit or Transfer
-    if (subType === 'SameBank') {
-      return 10; // Standard same-bank deposits on POS agent terminals carry a flat 10 Naira fee
+    const pvd = (provider || 'Moniepoint').toLowerCase();
+    if (pvd === 'opay' || pvd === 'palmpay') {
+      if (subType === 'SameBank') {
+        return 10;
+      }
+      if (amt <= 5000) {
+        return 10;
+      } else if (amt <= 50000) {
+        return 20;
+      } else {
+        return 50;
+      }
+    } else {
+      // Moniepoint / other standard interbank and samebank transfer charges
+      if (subType === 'SameBank') {
+        return 10;
+      }
+      return 20;
     }
-    // Interbank flat transfer fee (standard is 10 Naira)
-    return 10;
   }
 }
 
@@ -277,7 +292,7 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
     notes: string = ''
   ): Transaction => {
     const termFee = calculateTerminalFee(amount, type, provider, terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount);
+    const cbnCharge = calculateCBNCharge(amount, type);
     return {
       id,
       employeeId: 'EMP-001',

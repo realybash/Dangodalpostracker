@@ -164,7 +164,15 @@ export function ProfileModal({
     const todayShiftTxs = myShiftTxs.filter(t => new Date(t.timestamp).toDateString() === todayStr);
 
     const volume = todayShiftTxs.reduce((sum, t) => sum + t.amount, 0);
-    const profit = todayShiftTxs.reduce((sum, t) => sum + t.profit, 0);
+    const isEmployee = currentUser.role === 'Employee';
+    const profit = todayShiftTxs.reduce((sum, t) => {
+      if (isEmployee) {
+        const fee = t.chargesStatus === 'Unpaid' ? 0 : (t.customerFee || 0);
+        return sum + fee;
+      } else {
+        return sum + t.profit;
+      }
+    }, 0);
     const count = todayShiftTxs.length;
 
     return { volume, profit, count, totalAllTime: myShiftTxs.length };
