@@ -51,11 +51,23 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
   // Compute overall totals for today
   const grandTotals = useMemo(() => {
     const todayTxs = transactions.filter(tx => isToday(tx.timestamp));
-    const volume = todayTxs.reduce((sum, tx) => sum + tx.amount, 0);
-    const profit = todayTxs.reduce((sum, tx) => sum + tx.profit, 0);
+    const volume = todayTxs.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    const profit = todayTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
     const count = todayTxs.length;
+    
+    const customerCharges = todayTxs.reduce((sum, tx) => sum + (tx.customerCharge || tx.customerFee || 0), 0);
+    const providerCharges = todayTxs.reduce((sum, tx) => sum + (tx.providerCharge || tx.terminalFee || 0), 0);
+    const vat = todayTxs.reduce((sum, tx) => sum + (tx.vatAmount || 0), 0);
+    const cashback = todayTxs.reduce((sum, tx) => sum + (tx.cashback || 0), 0);
+    
+    const typeBreakdown = todayTxs.reduce((acc, tx) => {
+      if (!acc[tx.type]) acc[tx.type] = { profit: 0, count: 0 };
+      acc[tx.type].profit += tx.profit || 0;
+      acc[tx.type].count += 1;
+      return acc;
+    }, {} as Record<string, { profit: number, count: number }>);
 
-    return { volume, profit, count };
+    return { volume, profit, count, customerCharges, providerCharges, vat, cashback, typeBreakdown };
   }, [transactions]);
 
   return (
@@ -74,67 +86,53 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
           </div>
           <div>
             <h3 className="text-sm font-extrabold text-neutral-850 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-              <Sparkles className="w-3.5 h-3.5 text-[#00B87A] animate-pulse" /> Cashier Live Activity Hub
+              <Sparkles className="w-3.5 h-3.5 text-[#00B87A] animate-pulse" /> Moniepoint 2026 Ledger hub
             </h3>
             <p className="text-[11px] text-neutral-500 font-semibold mt-0.5">
-              Instantly monitor transaction activity, total cashout volumes, and live profit margins per cashier today.
+              Live profit margins, provider charges, and agent cashback rewards tracking.
             </p>
           </div>
         </div>
         <div className="text-right">
           <span className="text-[10px] font-mono font-bold bg-[#00B87A]/10 text-[#00B87A] px-2.5 py-1 rounded-full uppercase">
-            {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+            Today: {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
         </div>
       </div>
 
-      {/* Aggregate Grand Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Total Earned (Profit) Today */}
-        <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100/50 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-emerald-700">
-            <span className="text-[10px] font-black uppercase tracking-wider font-mono">Grand Earned Profit</span>
-            <DollarSign className="w-4 h-4 stroke-[2.5]" />
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-mono font-black text-emerald-950 tracking-tight">
-              {formatNaira(grandTotals.profit)}
-            </p>
-            <p className="text-[9px] text-emerald-600 font-bold mt-1">Total revenue from all active shifts today</p>
-          </div>
+      {/* Financial Overview Matrix */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-neutral-50 p-3 rounded-2xl border border-neutral-100">
+          <p className="text-[9px] font-bold text-neutral-400 uppercase font-mono mb-1">Total Customer Charges</p>
+          <p className="text-sm font-black text-neutral-800">{formatNaira(grandTotals.customerCharges)}</p>
         </div>
-
-        {/* Total Volume Today */}
-        <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-blue-700">
-            <span className="text-[10px] font-black uppercase tracking-wider font-mono">Grand Cashout Flow</span>
-            <Activity className="w-4 h-4" />
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-mono font-black text-blue-950 tracking-tight">
-              {formatNaira(grandTotals.volume)}
-            </p>
-            <p className="text-[9px] text-blue-600 font-bold mt-1">Total transacted volume across all terminals</p>
-          </div>
+        <div className="bg-red-50 p-3 rounded-2xl border border-red-100">
+          <p className="text-[9px] font-bold text-red-400 uppercase font-mono mb-1">Total Provider Fees</p>
+          <p className="text-sm font-black text-red-800">{formatNaira(grandTotals.providerCharges)}</p>
         </div>
-
-        {/* Total Receipts Today */}
-        <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100/50 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-purple-700">
-            <span className="text-[10px] font-black uppercase tracking-wider font-mono">Aggr. Slip Count</span>
-            <Award className="w-4 h-4" />
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-mono font-black text-purple-950 tracking-tight">
-              {grandTotals.count} Receipts
-            </p>
-            <p className="text-[9px] text-purple-600 font-bold mt-1">Successful slips printed by cashiers today</p>
-          </div>
+        <div className="bg-blue-50 p-3 rounded-2xl border border-blue-100">
+          <p className="text-[9px] font-bold text-blue-400 uppercase font-mono mb-1">Total Agent Cashback</p>
+          <p className="text-sm font-black text-blue-800">{formatNaira(grandTotals.cashback)}</p>
+        </div>
+        <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100">
+          <p className="text-[9px] font-bold text-emerald-400 uppercase font-mono mb-1">Net Agent Profit</p>
+          <p className="text-sm font-black text-emerald-800">{formatNaira(grandTotals.profit)}</p>
         </div>
       </div>
 
+      {/* Transaction Type Profits */}
+      <div className="flex flex-wrap gap-2 pt-2">
+        {(Object.entries(grandTotals.typeBreakdown) as [string, { profit: number; count: number }][]).map(([type, data]) => (
+          <div key={type} className="flex items-center gap-2 bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-100">
+            <span className="text-[10px] font-bold text-neutral-500 uppercase">{type}</span>
+            <span className="text-xs font-black text-neutral-800">{formatNaira(data.profit)}</span>
+            <span className="text-[9px] font-mono text-neutral-400">({data.count})</span>
+          </div>
+        ))}
+      </div>
+
       {/* Cashier List Details Table / Cards */}
-      <div className="space-y-3">
+      <div className="space-y-3 pt-2">
         <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-450 uppercase block">
           Individual Cashier Ledger Performance:
         </span>

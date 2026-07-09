@@ -1229,54 +1229,49 @@ export function TransactionList({
                         className={`border-t border-neutral-100/80 ${cardSize === 'small' ? 'pt-2 mt-2 space-y-2' : 'pt-3 mt-2.5 space-y-3'} text-xs`}
                         onClick={(e) => e.stopPropagation()} // Stop propagation so inner interactions don't trigger parent card toggle
                       >
-                        {/* Compact Stats Grid */}
-                        <div className={`grid grid-cols-3 gap-1 bg-neutral-50/80 border border-neutral-100 p-2 rounded-lg ${cardSize === 'small' ? 'text-[9px]' : 'text-[10.5px]'}`}>
+                        {/* Detailed Stats Grid */}
+                        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-neutral-50/80 border border-neutral-100 p-2.5 rounded-lg ${cardSize === 'small' ? 'text-[9px]' : 'text-[10.5px]'}`}>
                           {/* Box 1: Customer Pays */}
-                          <div className="text-center sm:text-left px-1">
+                          <div className="px-1">
                             <span className="text-[8px] font-mono font-black text-neutral-400 tracking-wider uppercase block">
                               💰 Cust. Pays
                             </span>
                             <div className={`font-bold text-neutral-800 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'}`}>
                               {formatNaira(tx.totalCustomerCharged || tx.amount)}
                             </div>
-                            <span className="text-[8px] text-neutral-400 font-medium block mt-0.5 leading-none">
-                              (Base + Fee)
-                            </span>
                           </div>
  
-                          {/* Box 2: Fee collected */}
-                          <div className="border-l border-neutral-200/50 text-center sm:text-left px-2">
+                          {/* Box 2: Provider Cost */}
+                          <div className="border-l border-neutral-200/50 px-2">
                             <span className="text-[8px] font-mono font-black text-neutral-400 tracking-wider uppercase block">
-                              ⚡ Fee Recv'd
+                              🏢 Prov. Cost
                             </span>
-                            <div className={`font-bold text-neutral-800 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'} flex items-center justify-center sm:justify-start gap-1 flex-wrap leading-none`}>
-                              {formatNaira(tx.customerFee)}
-                              <span className="text-[7.5px] font-mono font-black px-1 bg-neutral-200 text-neutral-600 rounded">
-                                {tx.feeMethod === 'CardDebit' ? 'CARD' : 'CASH'}
-                              </span>
+                            <div className={`font-bold text-red-600 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'}`}>
+                              {formatNaira((tx.providerCharge || tx.terminalFee || 0) + (tx.vatAmount || 0))}
                             </div>
-                            {tx.chargesStatus === 'Unpaid' ? (
-                              <span className="text-[8px] text-red-500 font-black block mt-0.5 leading-none">
-                                ⏳ Debt Owed
-                              </span>
-                            ) : (
-                              <span className="text-[8px] text-emerald-600 font-black block mt-0.5 leading-none">
-                                ✅ Paid Cashier
-                              </span>
-                            )}
+                            <span className="text-[7.5px] text-neutral-400 font-medium block leading-none">
+                              Incl. {formatNaira(tx.vatAmount || 0)} VAT
+                            </span>
                           </div>
 
-                          {/* Box 3: Profit */}
-                          <div className="border-l border-neutral-200/50 text-center sm:text-left px-2">
+                          {/* Box 3: Cashback */}
+                          <div className="border-l border-neutral-200/50 px-2">
                             <span className="text-[8px] font-mono font-black text-neutral-400 tracking-wider uppercase block">
-                              📈 Realized Profit
+                              🎁 Cashback
+                            </span>
+                            <div className={`font-bold text-blue-600 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'}`}>
+                              {formatNaira(tx.cashback || 0)}
+                            </div>
+                          </div>
+
+                          {/* Box 4: Net Profit */}
+                          <div className="border-l border-neutral-200/50 px-2">
+                            <span className="text-[8px] font-mono font-black text-neutral-400 tracking-wider uppercase block">
+                              📈 Net Profit
                             </span>
                             <div className={`font-black text-emerald-600 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'}`}>
                               {formatNaira(tx.profit)}
                             </div>
-                            <span className="text-[8px] text-emerald-500 font-bold block mt-0.5 leading-none bg-emerald-50 px-1 py-0.5 rounded">
-                              Direct Gain
-                            </span>
                           </div>
                         </div>
 

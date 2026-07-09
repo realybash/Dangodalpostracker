@@ -96,40 +96,14 @@ export function calculateTerminalFee(
   if (amt <= 0) return 0;
 
   if (type === 'Withdrawal') {
-    if (subType === 'SameBank') {
-      // Same bank card withdrawal on POS (e.g., OPay Card on OPay POS) is highly subsidized
-      const roundedAmt = Math.ceil(amt / 1000) * 1000;
-      const rate = 0.25 / 100; // 0.25% SameBank rate
-      return Math.min(roundedAmt * rate, 50); // Capped at ₦50
-    }
-    // Percentage fee for OtherBank / Interbank withdrawals
-    // To match real POS terminal behavior perfectly, we round up the amount to the next thousand before multiplying by the rate.
+    // Percentage fee for card withdrawals (Standard Interbank/OtherBank rate)
     const roundedAmt = Math.ceil(amt / 1000) * 1000;
     const rate = (terminalFeeRate || 0.5) / 100;
     const computed = roundedAmt * rate;
-    // OPay / Moniepoint standard cap for withdrawal is ₦100
     return Math.min(computed, 100);
   } else {
-    // Deposit or Transfer
-    const pvd = (provider || 'Moniepoint').toLowerCase();
-    if (pvd === 'opay' || pvd === 'palmpay') {
-      if (subType === 'SameBank') {
-        return 20; // OPay updated Same-Bank transfer POS charge to ₦20
-      }
-      if (amt <= 5000) {
-        return 20; // OPay and other POS terminals updated minimum transfer charge to ₦20
-      } else if (amt <= 50000) {
-        return 20;
-      } else {
-        return 50;
-      }
-    } else {
-      // Moniepoint / other standard interbank and samebank transfer charges
-      if (subType === 'SameBank') {
-        return 20; // Moniepoint Same-Bank transfer POS charge is now ₦20
-      }
-      return 20;
-    }
+    // Deposit or Transfer - Standard flat rate
+    return 20;
   }
 }
 
@@ -139,29 +113,16 @@ export function getRecommendedAgentFee(amount: number, type: string, subType?: s
   if (amt <= 0) return 0;
 
   if (type === 'Withdrawal') {
-    if (subType === 'SameBank') {
-      if (amt <= 5000) return 100;
-      if (amt <= 10000) return 150;
-      if (amt <= 20000) return 200; // Perfect match for ₦20,000 Same-Bank (OPay native card)
-      if (amt <= 50000) return 400;
-      return Math.round(amt * 0.008); // subsidized rate (0.8%)
-    }
     if (amt <= 5000) return 100;
     if (amt <= 10000) return 200;
     if (amt <= 20000) return 300;
     if (amt <= 50000) return 500;
-    return Math.round(amt * 0.01); // 1% for standard interbank card withdrawals
+    return Math.round(amt * 0.01); // 1% for standard card withdrawals
   } else {
-    if (subType === 'SameBank') {
-      if (amt <= 5000) return 100;
-      if (amt <= 10000) return 150;
-      return 200;
-    } else {
-      if (amt <= 5000) return 150;
-      if (amt <= 10000) return 200;
-      if (amt <= 20000) return 250;
-      return 300;
-    }
+    if (amt <= 5000) return 150;
+    if (amt <= 10000) return 200;
+    if (amt <= 20000) return 250;
+    return 300;
   }
 }
 
@@ -246,11 +207,19 @@ export function computeTxMetrics(
   let terminalFees = 0;
   let cbnCharges = 0;
   let profit = 0;
+  let totalCustomerCharges = 0;
+  let totalProviderCharges = 0;
+  let totalVat = 0;
+  let totalCashback = 0;
+  let totalCommission = 0;
   
   const breakdowns = {
-    Deposit: { count: 0, profit: 0 },
-    Withdrawal: { count: 0, profit: 0 },
-    Transfer: { count: 0, profit: 0 }
+    Deposit: { count: 0, profit: 0, volume: 0 },
+    Withdrawal: { count: 0, profit: 0, volume: 0 },
+    Transfer: { count: 0, profit: 0, volume: 0 },
+    Airtime: { count: 0, profit: 0, volume: 0 },
+    Data: { count: 0, profit: 0, volume: 0 },
+    Bills: { count: 0, profit: 0, volume: 0 }
   };
 
   filtered.forEach((tx) => {
@@ -258,16 +227,26 @@ export function computeTxMetrics(
     terminalFees += tx.terminalFee || 0;
     cbnCharges += tx.cbnCharge || 0;
     profit += tx.profit || 0;
+    
+    // New fields aggregation
+    totalCustomerCharges += tx.customerCharge || tx.customerFee || 0;
+    totalProviderCharges += tx.providerCharge || tx.terminalFee || 0;
+    totalVat += tx.vatAmount || 0;
+    totalCashback += tx.cashback || 0;
+    totalCommission += tx.commissionAmount || 0;
 
     const tType = tx.type;
-    if (breakdowns[tType]) {
-      breakdowns[tType].count += 1;
-      breakdowns[tType].profit += tx.profit || 0;
+    if (breakdowns[tType as keyof typeof breakdowns]) {
+      const b = breakdowns[tType as keyof typeof breakdowns];
+      b.count += 1;
+      b.profit += tx.profit || 0;
+      b.volume += tx.amount || 0;
     }
   });
 
   const count = filtered.length;
   const averageTxSize = count > 0 ? volume / count : 0;
+  const averageProfit = count > 0 ? profit / count : 0;
 
   return {
     count,
@@ -275,7 +254,13 @@ export function computeTxMetrics(
     terminalFees,
     cbnCharges,
     profit,
+    totalCustomerCharges,
+    totalProviderCharges,
+    totalVat,
+    totalCashback,
+    totalCommission,
     averageTxSize,
+    averageProfit,
     breakdowns
   };
 }
@@ -342,8 +327,8 @@ import { TransactionType, ProviderType, AppSettings, PricingProfile, ChargeRange
 
 export function getDefaultPricingProfiles(): PricingProfile[] {
   const providers: { id: string; name: string }[] = [
+    { id: 'Moniepoint', name: 'Moniepoint 2026' },
     { id: 'OPay', name: 'OPay Pricing Profile' },
-    { id: 'Moniepoint', name: 'Moniepoint Pricing Profile' },
     { id: 'PalmPay', name: 'PalmPay Pricing Profile' },
     { id: 'Nomba', name: 'Nomba Pricing Profile' }
   ];
@@ -354,26 +339,40 @@ export function getDefaultPricingProfiles(): PricingProfile[] {
     const ranges: { [txType: string]: ChargeRange[] } = {};
     
     defaultTypes.forEach(t => {
-      if (t === 'Withdrawal' || t === 'Cash Out') {
-        ranges[t] = [
-          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 1000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 5, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r2`, minAmount: 1001, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 15, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r3`, minAmount: 5001, maxAmount: 10000, customerCharge: 150, customerChargeType: 'flat', providerCharge: 25, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r4`, minAmount: 10001, maxAmount: 20000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 50, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r5`, minAmount: 20001, maxAmount: 50000, customerCharge: 400, customerChargeType: 'flat', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r6`, minAmount: 50001, maxAmount: 99999999, customerCharge: 1, customerChargeType: 'percent', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 }
-        ];
-      } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
-        ranges[t] = [
-          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 10, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r2`, minAmount: 5001, maxAmount: 10000, customerCharge: 150, customerChargeType: 'flat', providerCharge: 10, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r3`, minAmount: 10001, maxAmount: 50000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
-          { id: `${p.id}_${t}_r4`, minAmount: 50001, maxAmount: 99999999, customerCharge: 300, customerChargeType: 'flat', providerCharge: 50, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 }
-        ];
+      if (p.id === 'Moniepoint') {
+        if (t === 'Withdrawal' || t === 'Cash Out') {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 0, maxAmount: 20000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 20 },
+            { id: `${p.id}_${t}_r2`, minAmount: 20000.01, maxAmount: 99999999, customerCharge: 300, customerChargeType: 'flat', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 20 }
+          ];
+        } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 0, maxAmount: 99999999, customerCharge: 100, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: t === 'Transfer' ? 5 : 0 }
+          ];
+        } else if (t === 'Airtime' || t === 'Data') {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 0, maxAmount: 99999999, customerCharge: 0, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 2, cashback: 0 }
+          ];
+        } else {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 99999999, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 10, cashback: 0 }
+          ];
+        }
       } else {
-        ranges[t] = [
-          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 99999999, customerCharge: t === 'Bills' ? 100 : 0, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: t === 'Bills' ? 10 : 2 }
-        ];
+        // Generic defaults for other providers
+        if (t === 'Withdrawal' || t === 'Cash Out') {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 10000000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 }
+          ];
+        } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 10000000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 10, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 }
+          ];
+        } else {
+          ranges[t] = [
+            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 10000000, customerCharge: 0, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 2, cashback: 0 }
+          ];
+        }
       }
     });
     
@@ -393,6 +392,9 @@ export function getCalculatedFinancials(
 ): {
   customerCharge: number;
   providerCharge: number;
+  vatAmount: number;
+  cashback: number;
+  commissionAmount: number;
   agentProfit: number;
   netProfit: number;
   settlementCharge: number;
@@ -400,11 +402,11 @@ export function getCalculatedFinancials(
 } {
   const amt = Number(amount || 0);
   const profiles = settings?.pricingProfiles || getDefaultPricingProfiles();
-  const selectedProfileId = settings?.selectedProfileId || provider || 'OPay';
+  const selectedProfileId = settings?.selectedProfileId || provider || 'Moniepoint';
   
   let profile = profiles.find(p => p.id === selectedProfileId);
   if (!profile) {
-    profile = profiles.find(p => p.id === 'OPay') || profiles[0];
+    profile = profiles.find(p => p.id === 'Moniepoint') || profiles[0];
   }
   
   const ranges = profile?.ranges?.[type] || [];
@@ -420,17 +422,23 @@ export function getCalculatedFinancials(
       : matchedRange.providerCharge;
       
     const settlement = matchedRange.settlementCharge || 0;
-    const vatAmount = matchedRange.vat || 0;
-    const comm = matchedRange.commission || 0;
+    const vatRate = matchedRange.vat || 0;
+    const vatAmount = (provCharge * vatRate) / 100;
+    const commRate = matchedRange.commission || 0;
+    const commissionAmount = (amt * commRate) / 100;
+    const cashback = matchedRange.cashback || 0;
     
-    // Formula: Agent Profit = Customer Charge - Provider Charge
-    const agentProfit = custCharge - provCharge;
-    const netProfit = agentProfit - settlement - vatAmount - comm;
+    // Formula: Agent Profit = (Customer Charge - Provider Charge - VAT) + Cashback + Commission
+    const agentProfit = (custCharge - provCharge - vatAmount) + cashback + commissionAmount;
+    const netProfit = agentProfit - settlement;
     const merchantProfit = netProfit;
     
     return {
       customerCharge: custCharge,
       providerCharge: provCharge,
+      vatAmount: vatAmount,
+      cashback: cashback,
+      commissionAmount: commissionAmount,
       agentProfit: agentProfit,
       netProfit: netProfit,
       settlementCharge: settlement,
@@ -440,16 +448,19 @@ export function getCalculatedFinancials(
   
   // Legacy fallback
   const custCharge = getRecommendedAgentFee(amt, type);
-  const provRate = selectedProfileId === 'OPay' ? 0.5 : 0.25;
+  const provRate = 0.5;
   const provCharge = type === 'Withdrawal'
-    ? Math.min(Math.ceil(amt / 1000) * 1000 * (provRate / 100), 100)
-    : 10;
+    ? Math.min(amt * (provRate / 100), 100)
+    : 20;
     
   const agentProfit = custCharge - provCharge;
   
   return {
     customerCharge: custCharge,
     providerCharge: provCharge,
+    vatAmount: 0,
+    cashback: 0,
+    commissionAmount: 0,
     agentProfit: agentProfit,
     netProfit: agentProfit,
     settlementCharge: 0,

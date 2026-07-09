@@ -75,6 +75,7 @@ export interface ChargeRange {
   settlementCharge: number;
   vat: number;
   commission: number;
+  cashback: number;
   agentProfitFormula?: string;
 }
 
@@ -113,6 +114,8 @@ export interface Transaction {
   agentProfit?: number;
   netProfit?: number;
   settlementCharge?: number;
+  vatAmount?: number;
+  cashback?: number;
   merchantProfit?: number;
   balanceBefore?: number;
   balanceAfter?: number;
@@ -125,6 +128,7 @@ export interface Transaction {
   // New fields for split withdrawals
   mode?: 'Standard' | 'SplitWithdrawal';
   subTransfers?: SubTransfer[];
+  commissionAmount?: number;
   remainingBalance?: number;
   chargesStatus?: 'Paid' | 'Unpaid' | 'PartiallyPaid';
   customerName?: string;

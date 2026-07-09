@@ -115,15 +115,8 @@ export function TransactionForm({
   const [provider, setProvider] = useState<ProviderType>(
     initialTransaction ? initialTransaction.provider : (settings?.defaultProvider || 'OPay')
   );
-  const [subType, setSubType] = useState<'SameBank' | 'OtherBank'>(
-    initialTransaction ? (initialTransaction.subType || 'OtherBank') : 'OtherBank'
-  );
-  const [destinationBank, setDestinationBank] = useState<ProviderType>(() => {
-    if (initialTransaction && initialTransaction.subType === 'SameBank') {
-      return initialTransaction.provider;
-    }
-    return 'OPay';
-  });
+  const [subType, setSubType] = useState<'OtherBank'>('OtherBank');
+  const [destinationBank, setDestinationBank] = useState<ProviderType>('OPay');
   const [amount, setAmount] = useState<number>(
     initialTransaction ? initialTransaction.amount : 10000
   );
@@ -217,9 +210,7 @@ export function TransactionForm({
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>(
     initialTransaction ? (initialTransaction.terminalId || '') : ''
   );
-  const [isNetworkLocked, setIsNetworkLocked] = useState<boolean>(
-    initialTransaction ? initialTransaction.subType !== 'OtherBank' : true
-  );
+  const [isNetworkLocked, setIsNetworkLocked] = useState<boolean>(false);
   const [basket, setBasket] = useState<Transaction[]>([]);
 
   // Unified Web Speech API Integration
@@ -316,15 +307,6 @@ export function TransactionForm({
       setRemainingBalance(0);
     }
   }, [amount, subTransfers, mode, customerFee]);
-
-  // Sync destination bank with subType
-  useEffect(() => {
-    if (destinationBank === provider) {
-      setSubType('SameBank');
-    } else {
-      setSubType('OtherBank');
-    }
-  }, [destinationBank, provider]);
 
   // Sync destination bank to provider if network is locked (Prevents Cashier Fraud/Mismatch)
   useEffect(() => {
@@ -461,6 +443,9 @@ export function TransactionForm({
       providerCharge: financials.providerCharge,
       agentProfit: financials.agentProfit,
       netProfit: financials.netProfit,
+      vatAmount: financials.vatAmount,
+      cashback: financials.cashback,
+      commissionAmount: financials.commissionAmount,
       settlementCharge: financials.settlementCharge,
       merchantProfit: financials.merchantProfit,
       balanceBefore: 0, // Should be populated by backend later
@@ -920,120 +905,49 @@ export function TransactionForm({
             </div>
           </div>
 
-          {/* Destination Network selection block with Secure Smart-Lock */}
+          {/* Destination Network selection block */}
           <div className="mt-6 mb-2">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                {type === 'Withdrawal' && 'Card Issuer Bank (Cash out Source)'}
-                {type === 'Transfer' && 'Destination Bank (Transfer Recipient)'}
+                {type === 'Withdrawal' && 'Card Issuer Bank'}
+                {type === 'Transfer' && 'Destination Bank'}
                 {type === 'Deposit' && 'Wallet Destination Network'}
               </label>
-
-              {isNetworkLocked ? (
-                <span className="flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold font-mono">
-                  <ShieldCheck className="w-3 h-3" /> SECURE SYNCED
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold font-mono animate-pulse">
-                  <AlertTriangle className="w-3 h-3" /> OVERRIDDEN
-                </span>
-              )}
             </div>
 
-            {isNetworkLocked ? (
-              <div className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 ${
-                provider === 'Moniepoint'
-                  ? 'bg-blue-50/60 border-blue-200/80 text-blue-900'
-                  : provider === 'OPay'
-                  ? 'bg-emerald-50/60 border-emerald-200/80 text-emerald-900'
-                  : 'bg-orange-50/50 border-orange-200/80 text-orange-900'
-              }`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
-                    provider === 'Moniepoint' ? 'bg-blue-600 text-white' : provider === 'OPay' ? 'bg-[#00B87A] text-white' : 'bg-orange-500 text-white'
-                  }`}>
-                    <Lock className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-extrabold tracking-tight flex items-center gap-1.5">
-                      <span>{provider} Card / Wallet Locked</span>
-                      <span className="text-[9px] uppercase tracking-wider bg-white/80 border border-current px-1.5 py-0.2 rounded-md font-mono font-black">
-                        Same-Bank (🔄 ₦0 - ₦50 Cap)
-                      </span>
-                    </h4>
-                    <p className="text-[10.5px] leading-relaxed text-neutral-550 mt-1">
-                      Enforcing Same-Bank settlement to prevent cashier charge manipulation or accounting errors.
-                    </p>
-                  </div>
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={() => setIsNetworkLocked(false)}
-                  className="shrink-0 text-[10px] font-black uppercase tracking-wider bg-white/90 hover:bg-white text-neutral-700 hover:text-neutral-900 px-3.5 py-2 rounded-xl shadow-xs border border-neutral-200 transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 self-end sm:self-center"
-                >
-                  <Unlock className="w-3.5 h-3.5 text-neutral-500" />
-                  Allow Interbank
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {/* Manual override warning */}
-                <div className="bg-amber-50/80 border border-amber-200 p-3 rounded-xl flex items-center justify-between gap-3 text-xs text-amber-900 font-medium">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>
-                      Manual Routing Active. Interbank rates (up to <strong>₦100 cap</strong>) will apply if networks do not match.
-                    </span>
-                  </div>
+            <div className="grid grid-cols-3 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
+              {([
+                { id: 'Moniepoint', title: 'Moniepoint', color: 'border-blue-200 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-md' },
+                { id: 'OPay', title: 'OPay', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-md' },
+                { id: 'PalmPay', title: 'PalmPay', color: 'border-orange-200 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-500 border-orange-500 text-white shadow-md' }
+              ] as const).map((opt) => {
+                const isActive = destinationBank === opt.id;
+
+                return (
                   <button
+                    key={opt.id}
                     type="button"
-                    onClick={() => setIsNetworkLocked(true)}
-                    className="text-[9px] font-black uppercase tracking-wider bg-amber-600 text-white hover:bg-amber-700 px-2.5 py-1.5 rounded-lg shadow-xs transition cursor-pointer shrink-0"
+                    onClick={() => setDestinationBank(opt.id)}
+                    className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
+                      isActive 
+                        ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ${opt.id === 'Moniepoint' ? 'ring-blue-600' : opt.id === 'OPay' ? 'ring-[#00B87A]' : 'ring-orange-500'}` 
+                        : `${opt.color}`
+                    }`}
                   >
-                    🔒 Relock Sync
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
+                        isActive ? 'bg-white text-black' : 
+                        opt.id === 'Moniepoint' ? 'bg-blue-600 text-white' : 
+                        opt.id === 'OPay' ? 'bg-[#00B87A] text-white' : 'bg-orange-500 text-white'
+                      }`}>
+                        {opt.id[0]}
+                      </div>
+                      <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
+                    </div>
                   </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
-                  {([
-                    { id: 'Moniepoint', title: 'Moniepoint', color: 'border-blue-200 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-md' },
-                    { id: 'OPay', title: 'OPay', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-md' },
-                    { id: 'PalmPay', title: 'PalmPay', color: 'border-orange-200 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-500 border-orange-500 text-white shadow-md' }
-                  ] as const).map((opt) => {
-                    const isActive = destinationBank === opt.id;
-                    const isSame = opt.id === provider;
-
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setDestinationBank(opt.id)}
-                        className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
-                          isActive 
-                            ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ${opt.id === 'Moniepoint' ? 'ring-blue-600' : opt.id === 'OPay' ? 'ring-[#00B87A]' : 'ring-orange-500'}` 
-                            : `${opt.color}`
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                            isActive ? 'bg-white text-black' : 
-                            opt.id === 'Moniepoint' ? 'bg-blue-600 text-white' : 
-                            opt.id === 'OPay' ? 'bg-[#00B87A] text-white' : 'bg-orange-500 text-white'
-                          }`}>
-                            {opt.id[0]}
-                          </div>
-                          <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
-                        </div>
-                        <span className={`text-[9px] tracking-wider block font-mono font-bold uppercase ${isActive ? 'text-white/90' : 'text-neutral-500'}`}>
-                          {isSame ? '🔄 Same Bank' : '🌐 Interbank'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                );
+              })}
+            </div>
           </div>
 
           {/* Amount and Pre-Set Quick Selectors */}
