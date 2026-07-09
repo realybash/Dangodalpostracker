@@ -895,7 +895,19 @@ export function TransactionForm({
                   <button
                     key={pvd}
                     type="button"
-                    onClick={() => setProvider(pvd)}
+                    onClick={() => {
+                      setProvider(pvd);
+                      if (posTerminals && posTerminals.length > 0) {
+                        const matchingTerminal = posTerminals.find(
+                          t => t.provider.toLowerCase() === pvd.toLowerCase()
+                        );
+                        if (matchingTerminal) {
+                          setSelectedTerminalId(matchingTerminal.id);
+                        } else {
+                          setSelectedTerminalId('');
+                        }
+                      }
+                    }}
                     className={`py-2 px-1 rounded-xl text-[11px] sm:text-sm font-extrabold border transition cursor-pointer flex flex-col items-center justify-center gap-1 ${
                       isSelected 
                         ? brandColors[pvd]
