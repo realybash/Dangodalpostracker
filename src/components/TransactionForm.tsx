@@ -132,7 +132,7 @@ export function TransactionForm({
       ? (initialTransaction.chargesStatus === 'Unpaid' 
           ? (initialTransaction.unpaidFeeAmount ?? initialTransaction.customerFee) 
           : initialTransaction.customerFee) 
-      : 200
+      : 0
   );
   const [employeeId, setEmployeeId] = useState<string>(
     initialTransaction ? initialTransaction.employeeId : currentUser.id
@@ -366,7 +366,7 @@ export function TransactionForm({
 
   const isFirstRender = useRef(true);
 
-  // Re-run recommended fee suggestion on type/amount/subType shift to keep experience streamlined and automated
+  // Ensure fee is synchronized if fee is waived, but do NOT automatically overwrite fee input when typing the amount to avoid unwanted automatic charges
   useEffect(() => {
     if (initialTransaction && isFirstRender.current) {
       isFirstRender.current = false;
@@ -380,18 +380,8 @@ export function TransactionForm({
     if (isFeeWaived) {
       setFeeInput('0');
       setCustomerFee(0);
-      return;
     }
-
-    if (amount > 0) {
-      const recommended = getRecommendedAgentFee(amount, type, subType);
-      setFeeInput(recommended.toString());
-      setCustomerFee(recommended);
-    } else {
-      setFeeInput('');
-      setCustomerFee(0);
-    }
-  }, [amount, type, subType, isFeeWaived, initialTransaction]);
+  }, [isFeeWaived, initialTransaction]);
 
   const getTransactionObject = (finalStatus: 'Success' | 'Failed'): Transaction => {
     const activeTerminal = posTerminals?.find(t => t.id === selectedTerminalId);
@@ -1096,6 +1086,7 @@ export function TransactionForm({
                   type="button"
                   onClick={() => {
                     setIsFeeWaived(false);
+                    applyRecommendedFee();
                   }}
                   className={`py-2 px-1 rounded-xl text-[11px] font-extrabold border transition cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 ${
                     !isFeeWaived
@@ -1126,6 +1117,13 @@ export function TransactionForm({
                 <div className="space-y-2 animate-in slide-in-from-top-1 duration-150">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] text-neutral-400 font-bold uppercase font-mono">Custom Fee Amount (₦)</span>
+                    <button
+                      type="button"
+                      onClick={applyRecommendedFee}
+                      className="text-[9px] text-[#00B87A] hover:text-[#009b66] font-mono font-extrabold bg-[#00B87A]/10 hover:bg-[#00B87A]/15 px-2 py-0.5 rounded transition"
+                    >
+                      ⚡ Calculate Recommended
+                    </button>
                   </div>
                   <div className="relative">
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">₦</span>
