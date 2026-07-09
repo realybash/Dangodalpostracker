@@ -510,6 +510,11 @@ export function SettingsModal({
                         <option value="Withdrawal">Cash out POS</option>
                         <option value="Deposit">Deposit (Cash-in)</option>
                         <option value="Transfer">Bank Transfer</option>
+                        <option value="Cash In">Cash In</option>
+                        <option value="Cash Out">Cash Out</option>
+                        <option value="Airtime">Airtime</option>
+                        <option value="Data">Data</option>
+                        <option value="Bills">Bills</option>
                       </select>
                     </div>
 
@@ -521,9 +526,11 @@ export function SettingsModal({
                         onChange={(e) => onUpdateSettings({ defaultProvider: e.target.value as ProviderType })}
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-2 py-2 text-neutral-805 font-bold"
                       >
-                        <option value="OPay">OPay Terminal Partner</option>
-                        <option value="Moniepoint">Moniepoint Terminal Partner</option>
-                        <option value="PalmPay">PalmPay Terminal Partner</option>
+                        <option value="OPay">OPay</option>
+                        <option value="Moniepoint">Moniepoint</option>
+                        <option value="PalmPay">PalmPay</option>
+                        <option value="Nomba">Nomba</option>
+                        <option value="Others">Others</option>
                       </select>
                     </div>
 

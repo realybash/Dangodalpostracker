@@ -177,8 +177,8 @@ export interface AppSettings {
   receiptFooter: string;
   listDensity: 'compact' | 'comfortable';
   pageSize: number;
-  defaultProvider: 'OPay' | 'Moniepoint' | 'PalmPay';
-  defaultType: 'Deposit' | 'Withdrawal' | 'Transfer';
+  defaultProvider: ProviderType;
+  defaultType: TransactionType;
   chartStyle: 'line' | 'bar' | 'area';
   darkMode: boolean;
   language: 'en' | 'ha';
