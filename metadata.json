@@ -1,6 +1,6 @@
 {
   "name": "Dan Godal POS Tracker",
-  "description": "A premium secure ledger for POS payouts, cashflow auditing, and real-time terminal monitoring for OPay agents.",
+  "description": "A premium secure ledger for POS payouts, cashflow auditing, and real-time terminal monitoring for OPay agents, updated for 2026 Moniepoint/OPay standards with Inbound Transfer support.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

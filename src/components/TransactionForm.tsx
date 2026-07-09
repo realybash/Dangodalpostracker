@@ -4,10 +4,11 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowUpRight, ArrowDownLeft, ArrowRightLeft } from 'lucide-react';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -808,15 +809,30 @@ export function TransactionForm({
                         if (cat === 'Withdrawal') setPaymentMethod('Card');
                         else if (cat === 'Transfer' || cat === 'Deposit') setPaymentMethod('Card');
                       }}
-                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                      className={`relative overflow-hidden py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
                         isSelected 
-                          ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
-                          : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
+                          ? 'bg-emerald-50 border-[#00B87A] text-[#00B87A] shadow-sm scale-[1.02]' 
+                          : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600 hover:border-neutral-200'
                       }`}
                     >
-                      {cat === 'Withdrawal' && '📥 Cash Out'}
-                      {cat === 'Deposit' && '📤 Cash In'}
-                      {cat === 'Transfer' && '💸 Bank Transfer'}
+                      <div className={`p-1.5 rounded-xl transition-colors ${
+                        isSelected ? 'bg-[#00B87A] text-white' : 'bg-neutral-200 text-neutral-500'
+                      }`}>
+                        {cat === 'Withdrawal' && <CreditCard className="w-4 h-4" />}
+                        {cat === 'Deposit' && <ArrowUpRight className="w-4 h-4" />}
+                        {cat === 'Transfer' && <ArrowRightLeft className="w-4 h-4" />}
+                      </div>
+                      <span className="uppercase tracking-tighter">
+                        {cat === 'Withdrawal' && 'Cash Out'}
+                        {cat === 'Deposit' && 'Cash In'}
+                        {cat === 'Transfer' && 'Transfer'}
+                      </span>
+                      {isSelected && (
+                        <motion.div 
+                          layoutId="active-cat-indicator"
+                          className="absolute bottom-1 w-1 h-1 bg-[#00B87A] rounded-full"
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -826,41 +842,62 @@ export function TransactionForm({
             {/* Collection / Transfer Method Selection */}
             {(type === 'Withdrawal' || type === 'Transfer') && (
               <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-                  {type === 'Withdrawal' ? 'Collection Method (Source)' : 'Transfer Direction'}
+                <label className="block text-[10px] font-black uppercase tracking-widest text-[#00B87A] mb-3 font-mono">
+                  {type === 'Withdrawal' ? '💸 Source of Funds' : '🔄 Transfer Direction'}
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('Card')}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
+                    className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
                       paymentMethod === 'Card'
-                        ? 'bg-blue-50/60 border-blue-600 text-blue-700 font-black'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
+                        ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-sm scale-[1.02]'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600'
                     }`}
                   >
-                    {type === 'Withdrawal' ? <CreditCard className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-                    {type === 'Withdrawal' ? 'ATM Card' : 'Sending Out'}
+                    <div className={`p-1.5 rounded-xl transition-colors ${
+                      paymentMethod === 'Card' ? 'bg-blue-600 text-white' : 'bg-neutral-200 text-neutral-500'
+                    }`}>
+                      {type === 'Withdrawal' ? <CreditCard className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                    </div>
+                    <span className="uppercase tracking-tighter">
+                      {type === 'Withdrawal' ? 'ATM Card' : 'Sending Out'}
+                    </span>
+                    <span className="text-[8px] font-bold opacity-70 tracking-tight leading-none px-1">
+                      {type === 'Withdrawal' ? 'Standard Card Swipe' : 'Standard Bank Transfer'}
+                    </span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('Transfer')}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
+                    className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
                       paymentMethod === 'Transfer'
-                        ? 'bg-purple-50/60 border-purple-600 text-purple-700 font-black'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
+                        ? 'bg-purple-50 border-purple-600 text-purple-700 shadow-sm scale-[1.02]'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600'
                     }`}
                   >
-                    {type === 'Withdrawal' ? <Smartphone className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
-                    {type === 'Withdrawal' ? 'Phone Transfer' : 'Receiving In'}
+                    <div className={`p-1.5 rounded-xl transition-colors ${
+                      paymentMethod === 'Transfer' ? 'bg-purple-600 text-white' : 'bg-neutral-200 text-neutral-500'
+                    }`}>
+                      {type === 'Withdrawal' ? <Smartphone className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
+                    </div>
+                    <span className="uppercase tracking-tighter">
+                      {type === 'Withdrawal' ? 'Transfer' : 'Receiving In'}
+                    </span>
+                    <span className="text-[8px] font-bold opacity-70 tracking-tight leading-none px-1">
+                      {type === 'Withdrawal' ? 'Phone-to-POS' : 'Inbound for Cash'}
+                    </span>
                   </button>
                 </div>
-                <p className="text-[10px] text-neutral-400 font-medium mt-2 italic px-1">
-                  {type === 'Transfer' && paymentMethod === 'Transfer' && "Customer is transferring money to your POS account. Recorded as Inbound Cash Out."}
-                  {type === 'Transfer' && paymentMethod === 'Card' && "You are sending money to a customer's bank account."}
-                  {type === 'Withdrawal' && paymentMethod === 'Transfer' && "Customer is transferring to your POS account instead of swiping a card."}
-                  {type === 'Withdrawal' && paymentMethod === 'Card' && "Standard terminal withdrawal using physical card."}
-                </p>
+                <div className="bg-neutral-50 border border-neutral-100/50 p-2.5 rounded-xl mt-3 flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">
+                    {type === 'Transfer' && paymentMethod === 'Transfer' && "Customer is sending money to your POS. This is recorded as an Inbound Cash Out (₦50 CBN stamp duty applies over ₦10k)."}
+                    {type === 'Transfer' && paymentMethod === 'Card' && "Standard outbound bank transfer. Fees are deducted from your terminal balance."}
+                    {type === 'Withdrawal' && paymentMethod === 'Transfer' && "Customer is transferring funds to your terminal instead of swiping a card."}
+                    {type === 'Withdrawal' && paymentMethod === 'Card' && "Standard POS terminal withdrawal using a physical ATM card."}
+                  </p>
+                </div>
               </div>
             )}
           </div>

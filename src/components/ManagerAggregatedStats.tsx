@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
-import { formatNaira } from '../utils';
+import { formatNaira, getFriendlyTypeLabel } from '../utils';
 import { Sparkles, Users, Award, TrendingUp, DollarSign, Activity, Calendar } from 'lucide-react';
 import { Transaction, User } from '../types';
 
@@ -30,7 +30,10 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
       const userTxs = todayTxs.filter(tx => tx.employeeId === user.id);
       const volume = userTxs.reduce((sum, tx) => sum + tx.amount, 0);
       const profit = userTxs.reduce((sum, tx) => sum + tx.profit, 0);
+      const charges = userTxs.reduce((sum, tx) => sum + (tx.customerFee || tx.customerCharge || 0), 0);
       const count = userTxs.length;
+      
+      const margin = charges > 0 ? (profit / charges) * 100 : 0;
 
       return {
         id: user.id,
@@ -39,6 +42,8 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
         phone: user.phone || 'No phone',
         volume,
         profit,
+        charges,
+        margin,
         count,
         hasActivity: count > 0,
       };
@@ -121,14 +126,17 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
       </div>
 
       {/* Transaction Type Profits */}
-      <div className="flex flex-wrap gap-2 pt-2">
-        {(Object.entries(grandTotals.typeBreakdown) as [string, { profit: number; count: number }][]).map(([type, data]) => (
-          <div key={type} className="flex items-center gap-2 bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-100">
-            <span className="text-[10px] font-bold text-neutral-500 uppercase">{type}</span>
-            <span className="text-xs font-black text-neutral-800">{formatNaira(data.profit)}</span>
-            <span className="text-[9px] font-mono text-neutral-400">({data.count})</span>
-          </div>
-        ))}
+      <div className="space-y-2">
+        <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-450 uppercase block">Daily Category Performance:</span>
+        <div className="flex flex-wrap gap-2">
+          {(Object.entries(grandTotals.typeBreakdown) as [string, { profit: number; count: number }][]).map(([type, data]) => (
+            <div key={type} className="flex items-center gap-2 bg-neutral-50 px-3 py-1.5 rounded-xl border border-neutral-100 shadow-xs">
+              <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-tight">{getFriendlyTypeLabel(type)}</span>
+              <span className="text-xs font-black text-emerald-600">{formatNaira(data.profit)}</span>
+              <span className="text-[9px] font-mono text-neutral-400 font-bold bg-neutral-200/50 px-1.5 rounded-full">{data.count}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Cashier List Details Table / Cards */}
@@ -198,15 +206,21 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
                 </div>
 
                 {/* Performance Figures Row */}
-                <div className="grid grid-cols-2 gap-2 mt-3.5 border-t border-neutral-100 pt-3 text-xs">
+                <div className="grid grid-cols-3 gap-2 mt-3.5 border-t border-neutral-100 pt-3 text-xs">
                   <div>
-                    <span className="text-[9px] text-neutral-400 uppercase font-bold tracking-wider block">Transacted Volume</span>
+                    <span className="text-[9px] text-neutral-400 uppercase font-bold tracking-wider block">Volume</span>
                     <span className="font-mono font-black text-neutral-800">
                       {formatNaira(cashier.volume)}
                     </span>
                   </div>
+                  <div className="text-center">
+                    <span className="text-[9px] text-neutral-400 uppercase font-bold tracking-wider block">Margin</span>
+                    <span className={`font-mono font-black ${cashier.margin > 50 ? 'text-blue-600' : 'text-neutral-600'}`}>
+                      {cashier.margin.toFixed(1)}%
+                    </span>
+                  </div>
                   <div className="text-right">
-                    <span className="text-[9px] text-neutral-400 uppercase font-bold tracking-wider block">Profit Earned</span>
+                    <span className="text-[9px] text-neutral-400 uppercase font-bold tracking-wider block">Profit</span>
                     <span className="font-mono font-black text-emerald-600">
                       {formatNaira(cashier.profit)}
                     </span>

@@ -223,6 +223,7 @@ export function computeTxMetrics(
     Deposit: { count: 0, profit: 0, volume: 0 },
     Withdrawal: { count: 0, profit: 0, volume: 0 },
     Transfer: { count: 0, profit: 0, volume: 0 },
+    'Cash Out (Transfer)': { count: 0, profit: 0, volume: 0 },
     Airtime: { count: 0, profit: 0, volume: 0 },
     Data: { count: 0, profit: 0, volume: 0 },
     Bills: { count: 0, profit: 0, volume: 0 }
@@ -269,6 +270,17 @@ export function computeTxMetrics(
     averageProfit,
     breakdowns
   };
+}
+
+/**
+ * Returns a friendly label for transaction types
+ */
+export function getFriendlyTypeLabel(type: string): string {
+  if (type === 'Cash Out (Transfer)') return 'Inbound Transfer';
+  if (type === 'Withdrawal') return 'Cash Out (POS)';
+  if (type === 'Deposit') return 'Cash In (Wallet)';
+  if (type === 'Transfer') return 'Bank Transfer';
+  return type;
 }
 
 // Seed transactions generator
