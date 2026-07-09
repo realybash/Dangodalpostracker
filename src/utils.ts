@@ -110,10 +110,10 @@ export function calculateTerminalFee(
     const pvd = (provider || 'Moniepoint').toLowerCase();
     if (pvd === 'opay' || pvd === 'palmpay') {
       if (subType === 'SameBank') {
-        return 10;
+        return 20; // OPay updated Same-Bank transfer POS charge to ₦20
       }
       if (amt <= 5000) {
-        return 10;
+        return 20; // OPay and other POS terminals updated minimum transfer charge to ₦20
       } else if (amt <= 50000) {
         return 20;
       } else {
@@ -122,7 +122,7 @@ export function calculateTerminalFee(
     } else {
       // Moniepoint / other standard interbank and samebank transfer charges
       if (subType === 'SameBank') {
-        return 10;
+        return 20; // Moniepoint Same-Bank transfer POS charge is now ₦20
       }
       return 20;
     }
