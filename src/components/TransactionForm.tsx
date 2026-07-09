@@ -338,6 +338,8 @@ export function TransactionForm({
     const parsedAmount = parseFloat(amountInput);
     if (!isNaN(parsedAmount)) {
       setAmount(parsedAmount);
+    } else {
+      setAmount(0);
     }
   }, [amountInput]);
 
@@ -348,6 +350,8 @@ export function TransactionForm({
       if (parsedFee > 0 && isFeeWaived) {
         setIsFeeWaived(false);
       }
+    } else {
+      setCustomerFee(0);
     }
   }, [feeInput, isFeeWaived]);
 
@@ -362,19 +366,32 @@ export function TransactionForm({
 
   const isFirstRender = useRef(true);
 
-  // Re-run recommended fee suggestion on type/amount/subType shift to keep experience streamlined
+  // Re-run recommended fee suggestion on type/amount/subType shift to keep experience streamlined and automated
   useEffect(() => {
-    // Disabled automatic fee recommendation as per user request
-    if (isFirstRender.current) {
+    if (initialTransaction && isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
     
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+    }
+
     if (isFeeWaived) {
       setFeeInput('0');
       setCustomerFee(0);
+      return;
     }
-  }, [isFeeWaived]);
+
+    if (amount > 0) {
+      const recommended = getRecommendedAgentFee(amount, type, subType);
+      setFeeInput(recommended.toString());
+      setCustomerFee(recommended);
+    } else {
+      setFeeInput('');
+      setCustomerFee(0);
+    }
+  }, [amount, type, subType, isFeeWaived, initialTransaction]);
 
   const getTransactionObject = (finalStatus: 'Success' | 'Failed'): Transaction => {
     const activeTerminal = posTerminals?.find(t => t.id === selectedTerminalId);
@@ -1802,13 +1819,13 @@ export function TransactionForm({
               <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
                 <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Terminal Cost</span>
                 <span className="text-[11px] font-bold font-mono text-red-500">
-                  -{formatNaira(calculateTerminalFee(amount, type, provider, terminalFeeRate, subType))}
+                  -{formatNaira(liveTerminalFee)}
                 </span>
               </div>
               <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
                 <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate" title="CBN EMTL Levy (₦10,000+)">CBN EMTL</span>
                 <span className="text-[11px] font-bold font-mono text-red-500">
-                  -{formatNaira(calculateCBNCharge(amount))}
+                  -{formatNaira(liveCbnCharge)}
                 </span>
               </div>
               <div className="bg-white p-1.5 rounded-xl border border-neutral-200 font-medium">
@@ -1819,8 +1836,8 @@ export function TransactionForm({
               </div>
               <div className="bg-emerald-50 p-1.5 rounded-xl border border-emerald-100 font-medium">
                 <span className="text-[8px] text-emerald-600 uppercase font-mono block truncate">Net Earnings</span>
-                <span className={`text-[11px] font-extrabold font-mono ${customerFee - calculateTerminalFee(amount, type, provider, terminalFeeRate, subType) - calculateCBNCharge(amount) >= 0 ? 'text-emerald-700' : 'text-red-500'}`}>
-                  {formatNaira(customerFee - calculateTerminalFee(amount, type, provider, terminalFeeRate, subType) - calculateCBNCharge(amount))}
+                <span className={`text-[11px] font-extrabold font-mono ${customerFee - liveTerminalFee - liveCbnCharge >= 0 ? 'text-emerald-700' : 'text-red-500'}`}>
+                  {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
                 </span>
               </div>
             </div>

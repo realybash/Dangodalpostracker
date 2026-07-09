@@ -103,7 +103,7 @@ export function calculateTerminalFee(
   } else {
     // Deposit or Transfer
     if (subType === 'SameBank') {
-      return 0; // standard same-bank promo rates or free transfer
+      return 10; // Standard same-bank deposits on POS agent terminals carry a flat 10 Naira fee
     }
     // Interbank flat transfer fee (standard is 10 Naira)
     return 10;

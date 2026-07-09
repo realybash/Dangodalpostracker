@@ -17,6 +17,7 @@ import {
   isSameMonth, 
   isSameYear, 
   calculateTerminalFee,
+  calculateCBNCharge,
   getProviderTransactionNumber,
   mapFirestoreUser,
   cleanPhoneForCompare,
@@ -1318,7 +1319,8 @@ export default function App() {
     // Nigeria Agent fee practices standard calculation
     const customerFee = isWithdrawal ? Math.round(amount * 0.01) : 150; 
     const terminalFee = calculateTerminalFee(amount, type, provider, state.terminalFeeRate, subType);
-    const profit = customerFee - terminalFee;
+    const cbnCharge = calculateCBNCharge(amount);
+    const profit = customerFee - terminalFee - cbnCharge;
 
     const newSimTx: Transaction = {
       id: 'tx_sim_' + Math.floor(1000 + Math.random() * 9000),
@@ -1330,6 +1332,7 @@ export default function App() {
       amount,
       customerFee,
       terminalFee,
+      cbnCharge,
       profit,
       timestamp: new Date().toISOString(),
       notes: 'Automated live micro-simulation entry'
