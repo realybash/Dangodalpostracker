@@ -61,7 +61,7 @@ export interface BorrowKeepTransaction {
   photoBack?: string; // base64-encoded back view snapshot proof (cash/receipt)
 }
 
-export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Airtime' | 'Data' | 'Bills';
+export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Cash Out (Transfer)' | 'Airtime' | 'Data' | 'Bills';
 export type ProviderType = 'OPay' | 'Moniepoint' | 'PalmPay' | 'Nomba' | 'Others' | string;
 
 export interface ChargeRange {
@@ -105,8 +105,9 @@ export interface Transaction {
   customerPhone?: string;
   status?: 'Success' | 'Pending' | 'Failed';
   ownerId?: string;
-  feeMethod?: 'CardDebit' | 'Cash'; // Dedicated dynamic POS automatic fee deduction flow
+  feeMethod?: 'CardDebit' | 'Cash' | 'Transfer'; // Dedicated dynamic POS automatic fee deduction flow
   totalCustomerCharged?: number; // Real physical cost debited or collected
+  paymentMethod?: 'Card' | 'Transfer'; // Collection source: Physical ATM Card or Phone Transfer
   
   // New granular financial audit fields (separation of provider/customer/agent/etc)
   customerCharge?: number;

@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -114,6 +114,9 @@ export function TransactionForm({
   );
   const [provider, setProvider] = useState<ProviderType>(
     initialTransaction ? initialTransaction.provider : (settings?.defaultProvider || 'OPay')
+  );
+  const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Transfer'>(
+    initialTransaction ? (initialTransaction.paymentMethod || 'Card') : 'Card'
   );
   const [subType, setSubType] = useState<'OtherBank'>('OtherBank');
   const [destinationBank, setDestinationBank] = useState<ProviderType>('OPay');
@@ -341,7 +344,8 @@ export function TransactionForm({
   // Trigger quick recommendation update
   const applyRecommendedFee = () => {
     setIsFeeWaived(false);
-    const financials = getCalculatedFinancials(amount, type, provider, settings);
+    const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+    const financials = getCalculatedFinancials(amount, effectiveType, provider, settings);
     setFeeInput(financials.customerCharge.toString());
     setCustomerFee(financials.customerCharge);
   };
@@ -349,11 +353,12 @@ export function TransactionForm({
   // Automatically calculate fee when amount, type, or provider changes
   useEffect(() => {
     if (!isFeeWaived) {
-        const financials = getCalculatedFinancials(amount, type, provider, settings);
+        const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+        const financials = getCalculatedFinancials(amount, effectiveType, provider, settings);
         setFeeInput(financials.customerCharge.toString());
         setCustomerFee(financials.customerCharge);
     }
-  }, [amount, type, provider, settings]);
+  }, [amount, type, provider, settings, paymentMethod]);
 
 
   const isFirstRender = useRef(true);
@@ -383,7 +388,8 @@ export function TransactionForm({
 
     const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
 
-    const financials = getCalculatedFinancials(actualAmount, type, provider, settings);
+    const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+    const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings);
 
     // Maintain legacy compatibility while populating new fields
     const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : financials.customerCharge;
@@ -420,7 +426,8 @@ export function TransactionForm({
       terminalFee: financials.providerCharge, // Mapping provider charge to legacy terminal fee
       cbnCharge: financials.settlementCharge, // Mapping settlement charge to legacy cbn charge
       profit: financials.agentProfit, // Using new agent profit
-      feeMethod: (type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash',
+      feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
+      paymentMethod,
       totalCustomerCharged,
       timestamp: customTimestamp,
       notes: finalNotes.trim() || undefined,
@@ -591,8 +598,9 @@ export function TransactionForm({
   const { baseCash, cardSwipe, cashHandout, separateCashFee } = getWithdrawalDetails();
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
-  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, type, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, type);
+  const effectiveTypeLive = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, effectiveTypeLive, provider, activeFeeRate, subType);
+  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, effectiveTypeLive);
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 
@@ -782,31 +790,79 @@ export function TransactionForm({
           </div>
 
           {/* Operation Status Selection */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-              Operational Category
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['Withdrawal', 'Deposit', 'Transfer'] as const).map((cat) => {
-                const isSelected = type === cat;
-                return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
+                Operational Category
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['Withdrawal', 'Deposit', 'Transfer'] as const).map((cat) => {
+                  const isSelected = type === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setType(cat);
+                        // Default to Card for Withdrawal, and Outbound (Card/Legacy) for Transfer/Deposit
+                        if (cat === 'Withdrawal') setPaymentMethod('Card');
+                        else if (cat === 'Transfer' || cat === 'Deposit') setPaymentMethod('Card');
+                      }}
+                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                        isSelected 
+                          ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
+                          : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
+                      }`}
+                    >
+                      {cat === 'Withdrawal' && '📥 Cash Out'}
+                      {cat === 'Deposit' && '📤 Cash In'}
+                      {cat === 'Transfer' && '💸 Bank Transfer'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Collection / Transfer Method Selection */}
+            {(type === 'Withdrawal' || type === 'Transfer') && (
+              <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
+                  {type === 'Withdrawal' ? 'Collection Method (Source)' : 'Transfer Direction'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    key={cat}
                     type="button"
-                    onClick={() => setType(cat)}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
-                      isSelected 
-                        ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
+                    onClick={() => setPaymentMethod('Card')}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
+                      paymentMethod === 'Card'
+                        ? 'bg-blue-50/60 border-blue-600 text-blue-700 font-black'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    {cat === 'Withdrawal' && '📥 Cash out POS'}
-                    {cat === 'Deposit' && '📤 Deposit'}
-                    {cat === 'Transfer' && '💸 Bank Transfer'}
+                    {type === 'Withdrawal' ? <CreditCard className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                    {type === 'Withdrawal' ? 'ATM Card' : 'Sending Out'}
                   </button>
-                );
-              })}
-            </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('Transfer')}
+                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
+                      paymentMethod === 'Transfer'
+                        ? 'bg-purple-50/60 border-purple-600 text-purple-700 font-black'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
+                    }`}
+                  >
+                    {type === 'Withdrawal' ? <Smartphone className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                    {type === 'Withdrawal' ? 'Phone Transfer' : 'Receiving In'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-neutral-400 font-medium mt-2 italic px-1">
+                  {type === 'Transfer' && paymentMethod === 'Transfer' && "Customer is transferring money to your POS account. Recorded as Inbound Cash Out."}
+                  {type === 'Transfer' && paymentMethod === 'Card' && "You are sending money to a customer's bank account."}
+                  {type === 'Withdrawal' && paymentMethod === 'Transfer' && "Customer is transferring to your POS account instead of swiping a card."}
+                  {type === 'Withdrawal' && paymentMethod === 'Card' && "Standard terminal withdrawal using physical card."}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Active Terminal Status Indicator - Pro UX */}
