@@ -22,7 +22,9 @@ import {
   getProviderTransactionNumber,
   mapFirestoreUser,
   cleanPhoneForCompare,
-  getAuthPassword
+  getAuthPassword,
+  getDefaultPricingProfiles,
+  getCalculatedFinancials
 } from './utils';
 import { MetricCards } from './components/MetricCards';
 import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
@@ -122,7 +124,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultType: 'Withdrawal',
   chartStyle: 'line',
   darkMode: false,
-  language: 'en'
+  language: 'en',
+  pricingProfiles: getDefaultPricingProfiles(),
+  selectedProfileId: 'OPay',
+  profitWalletBalance: 0
 };
 
 const DEFAULT_STATE: AppState = {

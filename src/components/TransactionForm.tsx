@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
-import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee } from '../utils';
+import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
 import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle } from 'lucide-react';
 
@@ -359,10 +359,20 @@ export function TransactionForm({
   // Trigger quick recommendation update
   const applyRecommendedFee = () => {
     setIsFeeWaived(false);
-    const recommended = getRecommendedAgentFee(amount, type, subType);
-    setFeeInput(recommended.toString());
-    setCustomerFee(recommended);
+    const financials = getCalculatedFinancials(amount, type, provider, settings);
+    setFeeInput(financials.customerCharge.toString());
+    setCustomerFee(financials.customerCharge);
   };
+
+  // Automatically calculate fee when amount, type, or provider changes
+  useEffect(() => {
+    if (!isFeeWaived) {
+        const financials = getCalculatedFinancials(amount, type, provider, settings);
+        setFeeInput(financials.customerCharge.toString());
+        setCustomerFee(financials.customerCharge);
+    }
+  }, [amount, type, provider, settings]);
+
 
   const isFirstRender = useRef(true);
 
@@ -385,40 +395,20 @@ export function TransactionForm({
 
   const getTransactionObject = (finalStatus: 'Success' | 'Failed'): Transaction => {
     const activeTerminal = posTerminals?.find(t => t.id === selectedTerminalId);
-    const activeFeeRate = (activeTerminal?.terminalFeeRate !== undefined) ? (activeTerminal.terminalFeeRate as any) : terminalFeeRate;
     
     // Use derived values from the dynamic Withdrawal Calculator
-    const { baseCash, cardSwipe, cashHandout, separateCashFee } = getWithdrawalDetails();
+    const { baseCash, cardSwipe, cashHandout } = getWithdrawalDetails();
 
-    const amountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
-    const terminalFee = calculateTerminalFee(amountForTerminalFee, type, provider, activeFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amountForTerminalFee, type);
-    
-    // For unpaid charges, we do not collect any fee initially, so actual customerFee is 0
-    const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : customerFee;
-    const unpaidFeeAmount = chargesStatus === 'Unpaid' ? customerFee : undefined;
-    
-    let profit = 0;
-    if (type === 'Withdrawal') {
-      const settledAmount = cardSwipe - terminalFee - cbnCharge;
-      if (chargesStatus === 'Unpaid') {
-        // Unpaid charges: profit is POS wallet increase minus the cash handed out
-        profit = settledAmount - cashHandout;
-      } else {
-        if (withdrawChargeMode === 'SeparateCash') {
-          // Separate cash: wallet increase + physical cash fee collected minus cash given
-          profit = (settledAmount + actualCustomerFee) - cashHandout;
-        } else {
-          // Card Add-on / Deduct from cash: wallet increase minus cash handed out
-          profit = settledAmount - cashHandout;
-        }
-      }
-    } else {
-      profit = actualCustomerFee - terminalFee - cbnCharge;
-    }
+    const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
+
+    const financials = getCalculatedFinancials(actualAmount, type, provider, settings);
+
+    // Maintain legacy compatibility while populating new fields
+    const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : financials.customerCharge;
+    const unpaidFeeAmount = chargesStatus === 'Unpaid' ? financials.customerCharge : undefined;
     
     // Customer card debit / total charged amount
-    const totalCustomerCharged = type === 'Withdrawal' ? cardSwipe : amount;
+    const totalCustomerCharged = actualAmount;
 
     // Append notes details based on withdrawal charge mode
     let finalNotes = notes;
@@ -445,9 +435,9 @@ export function TransactionForm({
       subType,
       amount: type === 'Withdrawal' ? baseCash : amount,
       customerFee: actualCustomerFee,
-      terminalFee,
-      cbnCharge,
-      profit,
+      terminalFee: financials.providerCharge, // Mapping provider charge to legacy terminal fee
+      cbnCharge: financials.settlementCharge, // Mapping settlement charge to legacy cbn charge
+      profit: financials.agentProfit, // Using new agent profit
       feeMethod: (type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash',
       totalCustomerCharged,
       timestamp: customTimestamp,
@@ -460,12 +450,26 @@ export function TransactionForm({
       chargesStatus,
       customerName: (chargesStatus === 'Unpaid' || chargesStatus === 'PartiallyPaid') ? customerName.trim() : undefined,
       unpaidFeeAmount,
-      originalFeeAmount: initialTransaction?.originalFeeAmount !== undefined ? initialTransaction.originalFeeAmount : (chargesStatus === 'Unpaid' ? customerFee : undefined),
+      originalFeeAmount: initialTransaction?.originalFeeAmount !== undefined ? initialTransaction.originalFeeAmount : (chargesStatus === 'Unpaid' ? actualCustomerFee : undefined),
       chargesPaidAmount: initialTransaction?.chargesPaidAmount !== undefined ? initialTransaction.chargesPaidAmount : (chargesStatus === 'Unpaid' ? 0 : undefined),
       chargePayments: initialTransaction?.chargePayments !== undefined ? initialTransaction.chargePayments : (chargesStatus === 'Unpaid' ? [] : undefined),
       terminalId: selectedTerminalId || undefined,
       terminalName: activeTerminal?.name || undefined,
-      audioNote: audioNote || undefined
+      audioNote: audioNote || undefined,
+      // New fields
+      customerCharge: financials.customerCharge,
+      providerCharge: financials.providerCharge,
+      agentProfit: financials.agentProfit,
+      netProfit: financials.netProfit,
+      settlementCharge: financials.settlementCharge,
+      merchantProfit: financials.merchantProfit,
+      balanceBefore: 0, // Should be populated by backend later
+      balanceAfter: 0,
+      referenceNumber: generateId(), // Placeholder
+      rrn: generateId(),
+      stan: generateId(),
+      createdBy: currentUser.id,
+      branchName: settings?.businessName || 'Default Branch'
     };
   };
 

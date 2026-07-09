@@ -337,3 +337,122 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
     createTx('TX-1006', 'Transfer', 'OPay', 30000, 300, tenDaysAgo, 'OtherBank', 'Rent deposit')
   ];
 }
+
+import { TransactionType, ProviderType, AppSettings, PricingProfile, ChargeRange } from './types';
+
+export function getDefaultPricingProfiles(): PricingProfile[] {
+  const providers: { id: string; name: string }[] = [
+    { id: 'OPay', name: 'OPay Pricing Profile' },
+    { id: 'Moniepoint', name: 'Moniepoint Pricing Profile' },
+    { id: 'PalmPay', name: 'PalmPay Pricing Profile' },
+    { id: 'Nomba', name: 'Nomba Pricing Profile' }
+  ];
+  
+  const defaultTypes: TransactionType[] = ['Withdrawal', 'Deposit', 'Transfer', 'Cash In', 'Cash Out', 'Airtime', 'Data', 'Bills'];
+  
+  return providers.map(p => {
+    const ranges: { [txType: string]: ChargeRange[] } = {};
+    
+    defaultTypes.forEach(t => {
+      if (t === 'Withdrawal' || t === 'Cash Out') {
+        ranges[t] = [
+          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 1000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 5, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r2`, minAmount: 1001, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 15, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r3`, minAmount: 5001, maxAmount: 10000, customerCharge: 150, customerChargeType: 'flat', providerCharge: 25, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r4`, minAmount: 10001, maxAmount: 20000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 50, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r5`, minAmount: 20001, maxAmount: 50000, customerCharge: 400, customerChargeType: 'flat', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r6`, minAmount: 50001, maxAmount: 99999999, customerCharge: 1, customerChargeType: 'percent', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 }
+        ];
+      } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
+        ranges[t] = [
+          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 10, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r2`, minAmount: 5001, maxAmount: 10000, customerCharge: 150, customerChargeType: 'flat', providerCharge: 10, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r3`, minAmount: 10001, maxAmount: 50000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 },
+          { id: `${p.id}_${t}_r4`, minAmount: 50001, maxAmount: 99999999, customerCharge: 300, customerChargeType: 'flat', providerCharge: 50, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0 }
+        ];
+      } else {
+        ranges[t] = [
+          { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 99999999, customerCharge: t === 'Bills' ? 100 : 0, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: t === 'Bills' ? 10 : 2 }
+        ];
+      }
+    });
+    
+    return {
+      id: p.id,
+      name: p.name,
+      ranges
+    };
+  });
+}
+
+export function getCalculatedFinancials(
+  amount: number,
+  type: TransactionType,
+  provider: ProviderType,
+  settings: AppSettings | undefined
+): {
+  customerCharge: number;
+  providerCharge: number;
+  agentProfit: number;
+  netProfit: number;
+  settlementCharge: number;
+  merchantProfit: number;
+} {
+  const amt = Number(amount || 0);
+  const profiles = settings?.pricingProfiles || getDefaultPricingProfiles();
+  const selectedProfileId = settings?.selectedProfileId || provider || 'OPay';
+  
+  let profile = profiles.find(p => p.id === selectedProfileId);
+  if (!profile) {
+    profile = profiles.find(p => p.id === 'OPay') || profiles[0];
+  }
+  
+  const ranges = profile?.ranges?.[type] || [];
+  const matchedRange = ranges.find(r => amt >= r.minAmount && amt <= r.maxAmount);
+  
+  if (matchedRange) {
+    const custCharge = matchedRange.customerChargeType === 'percent'
+      ? Math.round(amt * (matchedRange.customerCharge / 100))
+      : matchedRange.customerCharge;
+      
+    const provCharge = matchedRange.providerChargeType === 'percent'
+      ? Math.round(amt * (matchedRange.providerCharge / 100))
+      : matchedRange.providerCharge;
+      
+    const settlement = matchedRange.settlementCharge || 0;
+    const vatAmount = matchedRange.vat || 0;
+    const comm = matchedRange.commission || 0;
+    
+    // Formula: Agent Profit = Customer Charge - Provider Charge
+    const agentProfit = custCharge - provCharge;
+    const netProfit = agentProfit - settlement - vatAmount - comm;
+    const merchantProfit = netProfit;
+    
+    return {
+      customerCharge: custCharge,
+      providerCharge: provCharge,
+      agentProfit: agentProfit,
+      netProfit: netProfit,
+      settlementCharge: settlement,
+      merchantProfit: merchantProfit
+    };
+  }
+  
+  // Legacy fallback
+  const custCharge = getRecommendedAgentFee(amt, type);
+  const provRate = selectedProfileId === 'OPay' ? 0.5 : 0.25;
+  const provCharge = type === 'Withdrawal'
+    ? Math.min(Math.ceil(amt / 1000) * 1000 * (provRate / 100), 100)
+    : 10;
+    
+  const agentProfit = custCharge - provCharge;
+  
+  return {
+    customerCharge: custCharge,
+    providerCharge: provCharge,
+    agentProfit: agentProfit,
+    netProfit: agentProfit,
+    settlementCharge: 0,
+    merchantProfit: agentProfit
+  };
+}

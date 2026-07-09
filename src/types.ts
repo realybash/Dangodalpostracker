@@ -61,8 +61,31 @@ export interface BorrowKeepTransaction {
   photoBack?: string; // base64-encoded back view snapshot proof (cash/receipt)
 }
 
-export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer';
-export type ProviderType = 'OPay' | 'Moniepoint' | 'PalmPay';
+export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Airtime' | 'Data' | 'Bills';
+export type ProviderType = 'OPay' | 'Moniepoint' | 'PalmPay' | 'Nomba' | 'Others' | string;
+
+export interface ChargeRange {
+  id: string;
+  minAmount: number;
+  maxAmount: number;
+  customerCharge: number;
+  customerChargeType: 'flat' | 'percent';
+  providerCharge: number;
+  providerChargeType: 'flat' | 'percent';
+  settlementCharge: number;
+  vat: number;
+  commission: number;
+  agentProfitFormula?: string;
+}
+
+export interface PricingProfile {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+  ranges: {
+    [txType: string]: ChargeRange[];
+  };
+}
 
 export interface Transaction {
   id: string;
@@ -83,6 +106,22 @@ export interface Transaction {
   ownerId?: string;
   feeMethod?: 'CardDebit' | 'Cash'; // Dedicated dynamic POS automatic fee deduction flow
   totalCustomerCharged?: number; // Real physical cost debited or collected
+  
+  // New granular financial audit fields (separation of provider/customer/agent/etc)
+  customerCharge?: number;
+  providerCharge?: number;
+  agentProfit?: number;
+  netProfit?: number;
+  settlementCharge?: number;
+  merchantProfit?: number;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  referenceNumber?: string;
+  rrn?: string;
+  stan?: string;
+  createdBy?: string;
+  branchName?: string;
+
   // New fields for split withdrawals
   mode?: 'Standard' | 'SplitWithdrawal';
   subTransfers?: SubTransfer[];
@@ -143,6 +182,9 @@ export interface AppSettings {
   chartStyle: 'line' | 'bar' | 'area';
   darkMode: boolean;
   language: 'en' | 'ha';
+  pricingProfiles?: PricingProfile[];
+  selectedProfileId?: string;
+  profitWalletBalance?: number;
 }
 
 export interface AppState {
