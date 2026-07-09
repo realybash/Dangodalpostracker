@@ -231,7 +231,7 @@ export function PosReconciliationTool({
         // Calculate standard fees using centralized realistic rules
         const customerFee = getRecommendedAgentFee(missing.amount, missing.type, 'OtherBank');
         const terminalFee = calculateTerminalFee(missing.amount, missing.type, missing.provider, 0.5, 'OtherBank');
-        const cbnCharge = calculateCBNCharge(missing.amount);
+        const cbnCharge = calculateCBNCharge(missing.amount, missing.type);
         const profit = customerFee - terminalFee - cbnCharge;
 
         const newTx: Transaction = {

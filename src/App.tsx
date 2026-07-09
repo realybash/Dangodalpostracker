@@ -497,7 +497,7 @@ export default function App() {
   const [newTerminalNetwork, setNewTerminalNetwork] = useState<string>('MTN');
   const [newTerminalBattery, setNewTerminalBattery] = useState<number>(100);
   const [newTerminalSignal, setNewTerminalSignal] = useState<number>(5);
-  const [newTerminalRate, setNewTerminalRate] = useState<0.25 | 0.5>(0.5);
+  const [newTerminalRate, setNewTerminalRate] = useState<number>(0.5);
   const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings'>('pos');
   const ownerTxsRef = useRef<Transaction[]>([]);
   const cashierTxsRef = useRef<Transaction[]>([]);
@@ -1333,7 +1333,7 @@ export default function App() {
     // Nigeria Agent fee practices standard calculation
     const customerFee = getRecommendedAgentFee(amount, type, subType); 
     const terminalFee = calculateTerminalFee(amount, type, provider, state.terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount);
+    const cbnCharge = calculateCBNCharge(amount, type);
     const profit = customerFee - terminalFee - cbnCharge;
 
     const newSimTx: Transaction = {
@@ -2159,7 +2159,7 @@ export default function App() {
             {/* OPay premium crown badge */}
             <div className="bg-white/15 px-3 py-1.5 rounded-2xl border border-white/10 text-right">
               <span className="text-[10px] block uppercase font-mono tracking-wider text-emerald-200">Baseline POS</span>
-              <span className="text-xs font-bold text-white block font-mono">{state.terminalFeeRate === 0.25 ? '0.25% Saver' : '0.50% Standard'}</span>
+              <span className="text-xs font-bold text-white block font-mono">{state.terminalFeeRate}% Rate</span>
             </div>
           </div>
 
@@ -2554,6 +2554,17 @@ export default function App() {
               }`}
             >
               0.25% Saver
+            </button>
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'SET_TERMINAL_RATE', payload: 0.35 })}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                state.terminalFeeRate === 0.35 
+                  ? 'bg-[#00B87A] text-white shadow-sm' 
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              0.35% Special
             </button>
             <button
               type="button"
@@ -3098,10 +3109,12 @@ export default function App() {
                     </label>
                     <select
                       value={newTerminalRate}
-                      onChange={(e) => setNewTerminalRate(parseFloat(e.target.value) as any)}
+                      onChange={(e) => setNewTerminalRate(parseFloat(e.target.value))}
                       className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none"
                     >
                       <option value={0.5}>0.50% (Standard Business Rate)</option>
+                      <option value={0.4}>0.40% (Standard Partner Rate)</option>
+                      <option value={0.35}>0.35% (Special Partner Rate)</option>
                       <option value={0.25}>0.25% (Saver Corporate Rate)</option>
                     </select>
                   </div>
@@ -3161,7 +3174,7 @@ export default function App() {
                         </div>
                       </div>
                       <span className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold ${brandColors[currentBrand]}`}>
-                        {term.provider} ({term.terminalFeeRate === 0.25 ? '0.25%' : '0.5%'})
+                        {term.provider} ({term.terminalFeeRate}%)
                       </span>
                     </div>
 

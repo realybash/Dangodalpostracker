@@ -78,8 +78,9 @@ export function isSameYear(d1: Date | string | number, d2: Date | string | numbe
 }
 
 // CBN EMTL Charge calculation helper (₦50 on transactions of 10,000+)
-export function calculateCBNCharge(amount: number): number {
+export function calculateCBNCharge(amount: number, type?: string): number {
   const amt = Number(amount || 0);
+  if (type === 'Withdrawal') return 0; // POS Card withdrawals/purchases are exempt from CBN EMTL levy
   return amt >= 10000 ? 50 : 0;
 }
 
@@ -97,12 +98,15 @@ export function calculateTerminalFee(
   if (type === 'Withdrawal') {
     if (subType === 'SameBank') {
       // Same bank card withdrawal on POS (e.g., OPay Card on OPay POS) is highly subsidized
+      const roundedAmt = Math.ceil(amt / 1000) * 1000;
       const rate = 0.25 / 100; // 0.25% SameBank rate
-      return Math.min(amt * rate, 50); // Capped at ₦50
+      return Math.min(roundedAmt * rate, 50); // Capped at ₦50
     }
     // Percentage fee for OtherBank / Interbank withdrawals
+    // To match real POS terminal behavior perfectly, we round up the amount to the next thousand before multiplying by the rate.
+    const roundedAmt = Math.ceil(amt / 1000) * 1000;
     const rate = (terminalFeeRate || 0.5) / 100;
-    const computed = amt * rate;
+    const computed = roundedAmt * rate;
     // OPay / Moniepoint standard cap for withdrawal is ₦100
     return Math.min(computed, 100);
   } else {
@@ -303,7 +307,7 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
     notes: string = ''
   ): Transaction => {
     const termFee = calculateTerminalFee(amount, type, provider, terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount);
+    const cbnCharge = calculateCBNCharge(amount, type);
     return {
       id,
       employeeId: 'EMP-001',

@@ -10,7 +10,7 @@ import { TrendingUp, RefreshCw, BarChart2, Award } from 'lucide-react';
 
 interface ProviderBreakdownProps {
   transactions: Transaction[];
-  terminalFeeRate: 0.25 | 0.5;
+  terminalFeeRate: number;
 }
 
 export function ProviderBreakdown({ transactions, terminalFeeRate }: ProviderBreakdownProps) {
@@ -35,7 +35,7 @@ export function ProviderBreakdown({ transactions, terminalFeeRate }: ProviderBre
         stats[p] = { profit: 0, volume: 0, count: 0, customerFees: 0, terminalCosts: 0 };
       }
       const termCost = tx.terminalFee !== undefined ? tx.terminalFee : calculateTerminalFee(tx.amount, tx.type, p as any, terminalFeeRate, tx.subType);
-      const cbnCharge = tx.cbnCharge !== undefined ? tx.cbnCharge : calculateCBNCharge(tx.amount);
+      const cbnCharge = tx.cbnCharge !== undefined ? tx.cbnCharge : calculateCBNCharge(tx.amount, tx.type);
       const prf = tx.profit !== undefined ? tx.profit : (tx.customerFee - termCost - cbnCharge);
       
       stats[p].volume += tx.amount;

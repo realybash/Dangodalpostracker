@@ -24,7 +24,7 @@ import { TrendingUp, RefreshCw, Calendar, Sparkles } from 'lucide-react';
 
 interface TrendChartProps {
   transactions: Transaction[];
-  terminalFeeRate: 0.25 | 0.5;
+  terminalFeeRate: number;
   chartStyle?: 'line' | 'bar' | 'area';
 }
 

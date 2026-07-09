@@ -31,10 +31,10 @@ import {
 
 interface SettingsModalProps {
   settings: AppSettings;
-  terminalFeeRate: 0.25 | 0.5;
+  terminalFeeRate: number;
   dailyTarget: number;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
-  onUpdateTerminalRate: (rate: 0.25 | 0.5) => void;
+  onUpdateTerminalRate: (rate: number) => void;
   onUpdateDailyTarget: (target: number) => void;
   onResetDatabase: () => void;
   onClearLocalCache: () => void;
@@ -60,7 +60,7 @@ export function SettingsModal({
   const [editReceiptPhone, setEditReceiptPhone] = useState(settings.receiptPhone);
   const [editReceiptFooter, setEditReceiptFooter] = useState(settings.receiptFooter);
   const [editDailyTarget, setEditDailyTarget] = useState(dailyTarget);
-  const [editTerminalRate, setEditTerminalRate] = useState<0.25 | 0.5>(terminalFeeRate);
+  const [editTerminalRate, setEditTerminalRate] = useState<number>(terminalFeeRate);
 
   // Success indicators
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -228,25 +228,45 @@ export function SettingsModal({
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block font-mono">Select Baseline Commission Tier</label>
-                  <div className="grid grid-cols-2 gap-3.5">
+                  <div className="grid grid-cols-3 gap-2.5">
                     {[
-                      { rate: 0.25, title: 'OPay Promo Tier', desc: '0.25% Cash out POS Cost, max ₦100 cap' },
-                      { rate: 0.5, title: 'OPay Standard Tier', desc: '0.50% Cash out POS Cost, max ₦100 cap' }
+                      { rate: 0.25, title: 'Promo Tier', desc: '0.25% fee, ₦100 cap' },
+                      { rate: 0.35, title: 'Special Tier', desc: '0.35% fee, ₦100 cap' },
+                      { rate: 0.5, title: 'Standard Tier', desc: '0.50% fee, ₦100 cap' }
                     ].map((tier) => (
                       <button
                         key={tier.rate}
                         type="button"
-                        onClick={() => setEditTerminalRate(tier.rate as 0.25 | 0.5)}
-                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                        onClick={() => setEditTerminalRate(tier.rate)}
+                        className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
                           editTerminalRate === tier.rate
                             ? 'bg-[#00B87A]/10 border-[#00B87A] text-[#00B87A] ring-1 ring-[#00B87A]'
                             : 'bg-white border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50'
                         }`}
                       >
-                        <div className="font-extrabold text-xs">{tier.title}</div>
-                        <div className="text-[10px] text-neutral-500 font-medium mt-1">{tier.desc}</div>
+                        <div className="font-extrabold text-[11px]">{tier.title}</div>
+                        <div className="text-[9px] text-neutral-500 font-medium mt-0.5">{tier.desc}</div>
                       </button>
                     ))}
+                  </div>
+
+                  <div className="mt-2.5 pt-2 border-t border-dashed border-neutral-150">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider font-mono">Or Set Custom Rate (%)</label>
+                      <span className="text-[9px] text-neutral-400">e.g. 0.35, 0.40, etc.</span>
+                    </div>
+                    <div className="relative w-36">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="5"
+                        value={editTerminalRate}
+                        onChange={(e) => setEditTerminalRate(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 text-neutral-800 font-mono font-bold text-xs focus:outline-none focus:bg-white focus:border-[#00B87A]"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-xs font-bold">%</span>
+                    </div>
                   </div>
                 </div>
 

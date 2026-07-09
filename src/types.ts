@@ -154,7 +154,7 @@ export interface AppState {
   selectedEmployeeFilter: string; // 'ALL' or employeeId
   impersonatedUserId?: string; // ID of employee being viewed by manager
   activeTimeframe: 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
-  terminalFeeRate: 0.25 | 0.5; // Baseline terminal operating fee package
+  terminalFeeRate: number; // Baseline terminal operating fee package
   dailyTarget: number; // User-defined target
   settings?: AppSettings;
 }
@@ -163,7 +163,7 @@ export type AppAction =
   | { type: 'SWITCH_USER'; payload: User }
   | { type: 'SET_EMPLOYEE_FILTER'; payload: string }
   | { type: 'SET_TIMEFRAME'; payload: 'Daily' | 'Weekly' | 'Monthly' | 'Yearly' }
-  | { type: 'SET_TERMINAL_RATE'; payload: 0.25 | 0.5 }
+  | { type: 'SET_TERMINAL_RATE'; payload: number }
   | { type: 'SET_DAILY_TARGET'; payload: number }
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'UPDATE_TRANSACTION'; payload: Transaction }

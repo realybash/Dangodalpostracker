@@ -89,7 +89,7 @@ export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
 interface TransactionFormProps {
   currentUser: User;
   availableEmployees: User[];
-  terminalFeeRate: 0.25 | 0.5;
+  terminalFeeRate: number;
   onSave: (newTx: Transaction | Transaction[]) => void;
   onClose: () => void;
   initialType?: TransactionType;
@@ -392,7 +392,7 @@ export function TransactionForm({
 
     const amountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
     const terminalFee = calculateTerminalFee(amountForTerminalFee, type, provider, activeFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amountForTerminalFee);
+    const cbnCharge = calculateCBNCharge(amountForTerminalFee, type);
     
     // For unpaid charges, we do not collect any fee initially, so actual customerFee is 0
     const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : customerFee;
@@ -603,7 +603,7 @@ export function TransactionForm({
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
   const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, type, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee);
+  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, type);
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 
@@ -1139,6 +1139,9 @@ export function TransactionForm({
                       placeholder="Enter Fee Amount"
                       required
                     />
+                    <p className="text-[10px] text-neutral-400 mt-1.5 leading-tight font-medium font-mono">
+                      💡 Cashier Manual Entry: Type exact customer charge. No automatic or hidden fees are added.
+                    </p>
                   </div>
                 </div>
               ) : (
