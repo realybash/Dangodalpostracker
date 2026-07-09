@@ -1332,7 +1332,7 @@ export default function App() {
     // Nigeria Agent fee practices standard calculation
     const customerFee = isWithdrawal ? Math.round(amount * 0.01) : 150; 
     const terminalFee = calculateTerminalFee(amount, type, provider, state.terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount, type);
+    const cbnCharge = calculateCBNCharge(amount);
     const profit = customerFee - terminalFee - cbnCharge;
 
     const newSimTx: Transaction = {

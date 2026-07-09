@@ -381,7 +381,7 @@ export function UnpaidChargesLedger({
     }
 
     const terminalFee = calculateTerminalFee(amountNum, newTxType, newTxProvider, 0.5, 'OtherBank');
-    const cbnCharge = calculateCBNCharge(amountNum, newTxType);
+    const cbnCharge = calculateCBNCharge(amountNum);
     const id = generateId();
 
     const newTx: Transaction = {

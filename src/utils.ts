@@ -77,9 +77,8 @@ export function isSameYear(d1: Date | string | number, d2: Date | string | numbe
   return date1.getFullYear() === date2.getFullYear();
 }
 
-// CBN EMTL Charge calculation helper (₦50 on withdrawal transactions of 10,000+)
-export function calculateCBNCharge(amount: number, type?: string): number {
-  if (type && type !== 'Withdrawal') return 0;
+// CBN EMTL Charge calculation helper (₦50 on transactions of 10,000+)
+export function calculateCBNCharge(amount: number): number {
   const amt = Number(amount || 0);
   return amt >= 10000 ? 50 : 0;
 }
@@ -292,7 +291,7 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
     notes: string = ''
   ): Transaction => {
     const termFee = calculateTerminalFee(amount, type, provider, terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount, type);
+    const cbnCharge = calculateCBNCharge(amount);
     return {
       id,
       employeeId: 'EMP-001',
