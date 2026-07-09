@@ -81,8 +81,6 @@ export function isSameYear(d1: Date | string | number, d2: Date | string | numbe
 export function calculateCBNCharge(amount: number, type?: string): number {
   const amt = Number(amount || 0);
   if (type === 'Withdrawal') return 0; // POS Card withdrawals/purchases are exempt from CBN EMTL levy
-  
-  // Inbound transfers (Cash Out Transfer) over 10k trigger a ₦50 stamp duty/EMTL on the recipient account
   return amt >= 10000 ? 50 : 0;
 }
 
@@ -103,10 +101,6 @@ export function calculateTerminalFee(
     const rate = (terminalFeeRate || 0.5) / 100;
     const computed = roundedAmt * rate;
     return Math.min(computed, 100);
-  } else if (type === 'Cash Out (Transfer)') {
-    // Inbound transfers generally don't have a terminal fee from the POS provider,
-    // only the CBN EMTL stamp duty (handled separately)
-    return 0;
   } else {
     // Deposit or Transfer - Standard flat rate
     return 20;
@@ -223,7 +217,6 @@ export function computeTxMetrics(
     Deposit: { count: 0, profit: 0, volume: 0 },
     Withdrawal: { count: 0, profit: 0, volume: 0 },
     Transfer: { count: 0, profit: 0, volume: 0 },
-    'Cash Out (Transfer)': { count: 0, profit: 0, volume: 0 },
     Airtime: { count: 0, profit: 0, volume: 0 },
     Data: { count: 0, profit: 0, volume: 0 },
     Bills: { count: 0, profit: 0, volume: 0 }
@@ -270,17 +263,6 @@ export function computeTxMetrics(
     averageProfit,
     breakdowns
   };
-}
-
-/**
- * Returns a friendly label for transaction types
- */
-export function getFriendlyTypeLabel(type: string): string {
-  if (type === 'Cash Out (Transfer)') return 'Inbound Transfer';
-  if (type === 'Withdrawal') return 'Cash Out (POS)';
-  if (type === 'Deposit') return 'Cash In (Wallet)';
-  if (type === 'Transfer') return 'Bank Transfer';
-  return type;
 }
 
 // Seed transactions generator
@@ -365,8 +347,7 @@ export function getDefaultPricingProfiles(): PricingProfile[] {
           ];
         } else if (t === 'Cash Out (Transfer)') {
           ranges[t] = [
-            { id: `${p.id}_${t}_r1`, minAmount: 0, maxAmount: 9999.99, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
-            { id: `${p.id}_${t}_r2`, minAmount: 10000, maxAmount: 99999999, customerCharge: 200, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 50, vat: 0, commission: 0, cashback: 0 }
+            { id: `${p.id}_${t}_r1`, minAmount: 0, maxAmount: 99999999, customerCharge: 100, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 }
           ];
         } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
           ranges[t] = [
@@ -389,8 +370,7 @@ export function getDefaultPricingProfiles(): PricingProfile[] {
           ];
         } else if (t === 'Cash Out (Transfer)') {
           ranges[t] = [
-            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 9999.99, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
-            { id: `${p.id}_${t}_r2`, minAmount: 10000, maxAmount: 10000000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 50, vat: 0, commission: 0, cashback: 0 }
+            { id: `${p.id}_${t}_r1`, minAmount: 1, maxAmount: 10000000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 }
           ];
         } else if (t === 'Deposit' || t === 'Transfer' || t === 'Cash In') {
           ranges[t] = [

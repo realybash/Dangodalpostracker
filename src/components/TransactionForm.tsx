@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowUpRight, ArrowDownLeft, ArrowRightLeft } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone } from 'lucide-react';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -389,8 +389,7 @@ export function TransactionForm({
 
     const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
 
-    const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-    const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings);
+    const financials = getCalculatedFinancials(actualAmount, type, provider, settings);
 
     // Maintain legacy compatibility while populating new fields
     const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : financials.customerCharge;
@@ -599,9 +598,8 @@ export function TransactionForm({
   const { baseCash, cardSwipe, cashHandout, separateCashFee } = getWithdrawalDetails();
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
-  const effectiveTypeLive = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, effectiveTypeLive, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, effectiveTypeLive);
+  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, type, provider, activeFeeRate, subType);
+  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, type);
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 
@@ -803,106 +801,64 @@ export function TransactionForm({
                     <button
                       key={cat}
                       type="button"
-                      onClick={() => {
-                        setType(cat);
-                        // Default to Card for Withdrawal, and Outbound (Card/Legacy) for Transfer/Deposit
-                        if (cat === 'Withdrawal') setPaymentMethod('Card');
-                        else if (cat === 'Transfer' || cat === 'Deposit') setPaymentMethod('Card');
-                      }}
-                      className={`relative overflow-hidden py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
+                      onClick={() => setType(cat)}
+                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
                         isSelected 
-                          ? 'bg-emerald-50 border-[#00B87A] text-[#00B87A] shadow-sm scale-[1.02]' 
-                          : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600 hover:border-neutral-200'
+                          ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
+                          : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
                       }`}
                     >
-                      <div className={`p-1.5 rounded-xl transition-colors ${
-                        isSelected ? 'bg-[#00B87A] text-white' : 'bg-neutral-200 text-neutral-500'
-                      }`}>
-                        {cat === 'Withdrawal' && <CreditCard className="w-4 h-4" />}
-                        {cat === 'Deposit' && <ArrowUpRight className="w-4 h-4" />}
-                        {cat === 'Transfer' && <ArrowRightLeft className="w-4 h-4" />}
-                      </div>
-                      <span className="uppercase tracking-tighter">
-                        {cat === 'Withdrawal' && 'Cash Out'}
-                        {cat === 'Deposit' && 'Cash In'}
-                        {cat === 'Transfer' && 'Transfer'}
-                      </span>
-                      {isSelected && (
-                        <motion.div 
-                          layoutId="active-cat-indicator"
-                          className="absolute bottom-1 w-1 h-1 bg-[#00B87A] rounded-full"
-                        />
-                      )}
+                      {cat === 'Withdrawal' && '📥 Cash out POS'}
+                      {cat === 'Deposit' && '📤 Deposit'}
+                      {cat === 'Transfer' && '💸 Bank Transfer'}
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Collection / Transfer Method Selection */}
-            {(type === 'Withdrawal' || type === 'Transfer') && (
+            {/* Collection Method Selection (Only for Withdrawal/Cash Out) */}
+            {type === 'Withdrawal' && (
               <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-                <label className="block text-[10px] font-black uppercase tracking-widest text-[#00B87A] mb-3 font-mono">
-                  {type === 'Withdrawal' ? '💸 Source of Funds' : '🔄 Transfer Direction'}
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
+                  Collection Method (Source of Money)
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('Card')}
-                    className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
+                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
                       paymentMethod === 'Card'
-                        ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-sm scale-[1.02]'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600'
+                        ? 'bg-blue-50/60 border-blue-600 text-blue-700 font-black'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    <div className={`p-1.5 rounded-xl transition-colors ${
-                      paymentMethod === 'Card' ? 'bg-blue-600 text-white' : 'bg-neutral-200 text-neutral-500'
-                    }`}>
-                      {type === 'Withdrawal' ? <CreditCard className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
-                    </div>
-                    <span className="uppercase tracking-tighter">
-                      {type === 'Withdrawal' ? 'ATM Card' : 'Sending Out'}
-                    </span>
-                    <span className="text-[8px] font-bold opacity-70 tracking-tight leading-none px-1">
-                      {type === 'Withdrawal' ? 'Standard Card Swipe' : 'Standard Bank Transfer'}
-                    </span>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    ATM Card
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('Transfer')}
-                    className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
+                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
                       paymentMethod === 'Transfer'
-                        ? 'bg-purple-50 border-purple-600 text-purple-700 shadow-sm scale-[1.02]'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600'
+                        ? 'bg-purple-50/60 border-purple-600 text-purple-700 font-black'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    <div className={`p-1.5 rounded-xl transition-colors ${
-                      paymentMethod === 'Transfer' ? 'bg-purple-600 text-white' : 'bg-neutral-200 text-neutral-500'
-                    }`}>
-                      {type === 'Withdrawal' ? <Smartphone className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
-                    </div>
-                    <span className="uppercase tracking-tighter">
-                      {type === 'Withdrawal' ? 'Transfer' : 'Receiving In'}
-                    </span>
-                    <span className="text-[8px] font-bold opacity-70 tracking-tight leading-none px-1">
-                      {type === 'Withdrawal' ? 'Phone-to-POS' : 'Inbound for Cash'}
-                    </span>
+                    <Smartphone className="w-3.5 h-3.5" />
+                    Phone Transfer
                   </button>
                 </div>
-                <div className="bg-neutral-50 border border-neutral-100/50 p-2.5 rounded-xl mt-3 flex items-start gap-2">
-                  <Info className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-neutral-500 font-bold leading-relaxed">
-                    {type === 'Transfer' && paymentMethod === 'Transfer' && "Customer is sending money to your POS. This is recorded as an Inbound Cash Out (₦50 CBN stamp duty applies over ₦10k)."}
-                    {type === 'Transfer' && paymentMethod === 'Card' && "Standard outbound bank transfer. Fees are deducted from your terminal balance."}
-                    {type === 'Withdrawal' && paymentMethod === 'Transfer' && "Customer is transferring funds to your terminal instead of swiping a card."}
-                    {type === 'Withdrawal' && paymentMethod === 'Card' && "Standard POS terminal withdrawal using a physical ATM card."}
-                  </p>
-                </div>
+                <p className="text-[10px] text-neutral-400 font-medium mt-2 italic px-1">
+                  {paymentMethod === 'Transfer' 
+                    ? "Customer is transferring to your POS account. Charges will be calculated based on inbound transfer rates."
+                    : "Standard terminal withdrawal using physical card."}
+                </p>
               </div>
             )}
           </div>
 
-          {/* Active Terminal Status Indicator - Pro UX */}
+          {/* Active POS Sync: OPay provider rate and settlement rules are locked for this transaction. */}
           {selectedTerminalId && (
             <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200 shadow-sm mb-4">
               <div className="p-2 bg-[#00B87A] text-white rounded-full">
@@ -910,7 +866,7 @@ export function TransactionForm({
               </div>
               <div>
                 <h4 className="text-[11px] font-black text-emerald-800 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-                  Active POS Sync: {posTerminals?.find(t => t.id === selectedTerminalId)?.name}
+                  ACTIVE POS SYNC: {posTerminals?.find(t => t.id === selectedTerminalId)?.name}
                 </h4>
                 <p className="text-[10px] text-emerald-700/80 font-medium">
                   {posTerminals?.find(t => t.id === selectedTerminalId)?.provider} provider rate and settlement rules are locked for this transaction.
@@ -1837,7 +1793,7 @@ export function TransactionForm({
           {/* Live computes summary block */}
           <div className="bg-emerald-50/60 border border-emerald-100 p-4 rounded-2xl space-y-2">
             <span className="text-[10px] font-mono tracking-widest text-[#00B87A] uppercase block font-black">
-              Live Projected Commission computation
+              LIVE PROJECTED COMMISSION COMPUTATION
             </span>
             <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
               <div className="bg-white p-1.5 rounded-xl border border-neutral-200">

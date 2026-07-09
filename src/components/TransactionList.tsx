@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings } from '../types';
-import { formatNaira, getProviderTransactionNumber, isSameDay, isSameWeek, isSameMonth, isSameYear, getFriendlyTypeLabel } from '../utils';
+import { formatNaira, getProviderTransactionNumber, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
 import { CalendarFilter } from './CalendarFilter';
 import { 
   Search, 
@@ -105,8 +105,6 @@ export function TransactionList({
     let transferVol = 0;
     let depositCount = 0;
     let depositVol = 0;
-    let inboundCount = 0;
-    let inboundVol = 0;
 
     let opayCount = 0;
     let opayVol = 0;
@@ -125,9 +123,6 @@ export function TransactionList({
       } else if (tx.type === 'Deposit') {
         depositCount++;
         depositVol += tx.amount;
-      } else if (tx.type === 'Cash Out (Transfer)') {
-        inboundCount++;
-        inboundVol += tx.amount;
       }
 
       if (tx.provider === 'OPay') {
@@ -151,8 +146,6 @@ export function TransactionList({
       transferVol,
       depositCount,
       depositVol,
-      inboundCount,
-      inboundVol,
       opayCount,
       opayVol,
       moniepointCount,
@@ -183,15 +176,9 @@ export function TransactionList({
 
     // Valid option sets
     const providerOptions = ['opay', 'moniepoint', 'palmpay'];
-    const typeOptions = ['withdrawal', 'deposit', 'transfer', 'cash out (transfer)'];
+    const typeOptions = ['withdrawal', 'deposit', 'transfer'];
 
     tokens.forEach((token) => {
-      // Check for inbound keywords
-      if (token === 'inbound' || token === 'receiving' || token === 'receive' || token === 'in') {
-        extractedTypes.push('cash out (transfer)');
-        return;
-      }
-      
       // Check for standalone match of providers
       const matchedProv = providerOptions.find(p => p === token || (token.length >= 3 && p.includes(token)));
       if (matchedProv) {
@@ -388,12 +375,10 @@ export function TransactionList({
     const depositTxs = filteredList.filter(t => t.type === 'Deposit');
     const withdrawalTxs = filteredList.filter(t => t.type === 'Withdrawal');
     const transferTxs = filteredList.filter(t => t.type === 'Transfer');
-    const inboundTxs = filteredList.filter(t => t.type === 'Cash Out (Transfer)');
 
     const totalDepositAmt = depositTxs.reduce((sum, t) => sum + t.amount, 0);
     const totalWithdrawalAmt = withdrawalTxs.reduce((sum, t) => sum + t.amount, 0);
     const totalTransferAmt = transferTxs.reduce((sum, t) => sum + t.amount, 0);
-    const totalInboundAmt = inboundTxs.reduce((sum, t) => sum + t.amount, 0);
 
     return {
       depositsCount: depositTxs.length,
@@ -402,8 +387,6 @@ export function TransactionList({
       withdrawalsAmount: totalWithdrawalAmt,
       transfersCount: transferTxs.length,
       transfersAmount: totalTransferAmt,
-      inboundCount: inboundTxs.length,
-      inboundAmount: totalInboundAmt,
       totalCount: filteredList.length,
       totalAmount: filteredList.reduce((sum, t) => sum + t.amount, 0),
     };
@@ -623,24 +606,6 @@ export function TransactionList({
           </div>
         </div>
 
-        {/* Metric: Inbound Transfers */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 border border-orange-100">
-            <ArrowDownLeft className="w-4 h-4 stroke-[2.3]" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
-              Inbound Size
-            </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
-              {metrics.inboundCount} receipts
-            </div>
-            <span className="text-[8.5px] font-mono text-neutral-500 font-bold block mt-0.5 leading-none">
-              {formatNaira(metrics.inboundAmount)}
-            </span>
-          </div>
-        </div>
-
         {/* Metric 4: Profit Summary */}
         <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-xl flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
@@ -708,11 +673,10 @@ export function TransactionList({
       <div className="space-y-4">
         <div className="space-y-1.5">
           <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-450 uppercase block">Category Operation Filters:</span>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { id: 'ALL', label: 'Every Transaction 🌐', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white' },
-              { id: 'Withdrawal', label: '📥 Cash out POS', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-emerald-100 text-[#00B87A] bg-emerald-50/30', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white' },
-              { id: 'Cash Out (Transfer)', label: '📥 Inbound Transfer', count: stats.inboundCount, vol: stats.inboundVol, color: 'border-orange-100 text-orange-700 bg-orange-50/30', activeColor: 'bg-orange-600 border-orange-600 text-white' },
+              { id: 'Withdrawal', label: '📥 Cash out POS', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-orange-100 text-orange-700 bg-orange-50/30', activeColor: 'bg-orange-600 border-orange-600 text-white' },
               { id: 'Transfer', label: '💸 Bank Transfers', count: stats.transferCount, vol: stats.transferVol, color: 'border-indigo-100 text-indigo-700 bg-indigo-50/30', activeColor: 'bg-indigo-600 border-indigo-600 text-white' },
               { id: 'Deposit', label: '📤 Wallet Deposits', count: stats.depositCount, vol: stats.depositVol, color: 'border-blue-100 text-blue-700 bg-blue-50/30', activeColor: 'bg-blue-600 border-blue-600 text-white' }
             ].map((tab) => {
@@ -869,7 +833,6 @@ export function TransactionList({
             >
               <option value="ALL">All Categories</option>
               <option value="Withdrawal">📥 Cash out POS Only</option>
-              <option value="Cash Out (Transfer)">📥 Inbound Transfer Only</option>
               <option value="Deposit">📤 Wallet Deposits Only</option>
               <option value="Transfer">💸 Bank Transfers Only</option>
             </select>
