@@ -648,9 +648,12 @@ export default function App() {
 
   // Real-time Firestore sync subscriptions when syncOwnerId is active
   useEffect(() => {
-    if (!syncOwnerId) {
+    if (!syncOwnerId || !state.currentUser.id) {
       return;
     }
+
+    const currentUserId = state.currentUser.id;
+    const isManager = state.currentUser.role === 'Manager';
 
     // Subscribe to transactions
     const updateCombinedTxs = () => {
@@ -660,19 +663,29 @@ export default function App() {
       dispatch({ type: 'SET_TRANSACTIONS', payload: unique });
     };
 
-    const unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', syncOwnerId)), (snap) => {
-      ownerTxsRef.current = snap.docs.map(d => d.data() as Transaction);
-      updateCombinedTxs();
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
+    // Managers subscribe to ALL transactions they own
+    // Employees ONLY subscribe to transactions where they are the cashier
+    let unsubscribeOwner = () => {};
+    let unsubscribeCashier = () => {};
 
-    const unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', syncOwnerId)), (snap) => {
-      cashierTxsRef.current = snap.docs.map(d => d.data() as Transaction);
-      updateCombinedTxs();
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
+    if (isManager) {
+      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId)), (snap) => {
+        ownerTxsRef.current = snap.docs.map(d => d.data() as Transaction);
+        updateCombinedTxs();
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
+    } else {
+      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId)), (snap) => {
+        cashierTxsRef.current = snap.docs.map(d => d.data() as Transaction);
+        updateCombinedTxs();
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
+    }
 
 
-    // Subscribe to Manager-owned expenses
-    const expensesQuery = query(collection(db, 'expenses'), where('ownerId', '==', syncOwnerId));
+    // Subscribe to Expenses
+    const expensesQuery = isManager 
+      ? query(collection(db, 'expenses'), where('ownerId', '==', currentUserId))
+      : query(collection(db, 'expenses'), where('employeeId', '==', currentUserId));
+
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
       const expList: Expense[] = [];
       snapshot.forEach((docSnap) => {
@@ -685,8 +698,11 @@ export default function App() {
       handleFirestoreError(err, OperationType.LIST, 'expenses');
     });
 
-    // Subscribe to Manager-owned POS Terminals
-    const terminalsQuery = query(collection(db, 'pos_terminals'), where('ownerId', '==', syncOwnerId));
+    // Subscribe to POS Terminals
+    const terminalsQuery = isManager
+      ? query(collection(db, 'pos_terminals'), where('ownerId', '==', currentUserId))
+      : query(collection(db, 'pos_terminals'), where('employeeId', '==', currentUserId));
+
     const unsubscribeTerminals = onSnapshot(terminalsQuery, (snapshot) => {
       const termList: PosTerminal[] = [];
       snapshot.forEach((docSnap) => {
@@ -705,7 +721,7 @@ export default function App() {
       unsubscribeExpenses();
       unsubscribeTerminals();
     };
-  }, [syncOwnerId, state.terminalFeeRate]);
+  }, [syncOwnerId, state.currentUser.id, state.currentUser.role]);
 
   // Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
   const prepareFirestoreData = (data: any, collectionName?: string) => {
@@ -980,14 +996,7 @@ export default function App() {
     return {
       count: todayTxs.length,
       volume: todayTxs.reduce((sum, t) => sum + t.amount, 0),
-      profit: todayTxs.reduce((sum, t) => {
-        if (isEmployee) {
-          const fee = t.chargesStatus === 'Unpaid' ? 0 : (t.customerFee || 0);
-          return sum + fee;
-        } else {
-          return sum + t.profit;
-        }
-      }, 0)
+      profit: todayTxs.reduce((sum, t) => sum + (t.profit || 0), 0)
     };
   }, [state.transactions, state.currentUser, state.impersonatedUserId, registeredUsers]);
 
@@ -2329,17 +2338,6 @@ export default function App() {
           </span>
           <div className="grid grid-cols-4 gap-y-5 gap-x-2 text-center">
             
-            {/* To Bank (Transfer) */}
-            <button 
-              onClick={() => openWithPreset('Transfer')}
-              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
-            >
-              <div className="w-12 h-12 rounded-full bg-emerald-100 group-hover:bg-emerald-200 transition-colors flex items-center justify-center text-emerald-600 shadow-sm active:scale-90 duration-100">
-                <ArrowRightLeft className="w-5 h-5 stroke-[2.2]" />
-              </div>
-              <span className="text-[11px] font-bold text-neutral-700 leading-tight">To Bank</span>
-            </button>
-
             {/* POS Cashout */}
             <button 
               onClick={() => openWithPreset('Withdrawal')}
@@ -2348,7 +2346,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-orange-100 group-hover:bg-orange-200 transition-colors flex items-center justify-center text-orange-600 shadow-sm active:scale-90 duration-100">
                 <ArrowDownToLine className="w-5 h-5 stroke-[2.2]" />
               </div>
-              <span className="text-[11px] font-bold text-neutral-700 leading-tight">POS Cashout</span>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Cash out POS</span>
             </button>
 
             {/* Wallet Deposit */}
@@ -2359,7 +2357,18 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-blue-100 group-hover:bg-blue-200 transition-colors flex items-center justify-center text-blue-600 shadow-sm active:scale-90 duration-100">
                 <ArrowUpFromLine className="w-5 h-5 stroke-[2.2]" />
               </div>
-              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Wallet Cash</span>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Deposit</span>
+            </button>
+
+            {/* Bank Transfer */}
+            <button 
+              onClick={() => openWithPreset('Transfer')}
+              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
+            >
+              <div className="w-12 h-12 rounded-full bg-emerald-100 group-hover:bg-emerald-200 transition-colors flex items-center justify-center text-emerald-600 shadow-sm active:scale-90 duration-100">
+                <ArrowRightLeft className="w-5 h-5 stroke-[2.2]" />
+              </div>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Bank Transfer</span>
             </button>
 
             {/* Simulate Random TX */}

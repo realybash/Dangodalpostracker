@@ -1,6 +1,6 @@
 import { useEffect, Dispatch, SetStateAction } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, or } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { User, AppAction } from '../types';
 import { mapFirestoreUser } from '../utils';
@@ -12,30 +12,40 @@ export const useFirebasePersistence = (
   syncOwnerId: string | null
 ) => {
   useEffect(() => {
-    console.log('[Persistence] Initializing real-time users sync with syncOwnerId:', syncOwnerId);
+    // If we have a local cache, load it immediately to speed up UI
+    const saved = localStorage.getItem('OPay_Registered_Users_v4');
+    if (saved) {
+      try {
+        const list = JSON.parse(saved);
+        setRegisteredUsers(list);
+        dispatch({ type: 'SET_REGISTERED_USERS', payload: list });
+        setIsUsersLoaded(true); // Allow login immediately if we have cached users
+      } catch (e) {
+        console.error('[Persistence] Failed to load from local storage');
+      }
+    }
+
+    if (!syncOwnerId && !auth.currentUser) {
+      console.log('[Persistence] Real-time users sync starting in public mode (no syncOwnerId)');
+    }
+
+    console.log('[Persistence] Initializing real-time users sync. Auth UID:', auth.currentUser?.uid);
     
     const usersRef = collection(db, 'users');
     
-    const unsubscribeSnapshot = onSnapshot(usersRef, (snap) => {
+    // In public mode or logged in mode, we fetch users to allow login lookups and team management.
+    // Security rules allow public read for users to facilitate the phone-based login.
+    const usersQuery = usersRef;
+    
+    const unsubscribeSnapshot = onSnapshot(usersQuery, (snap) => {
       console.log(`[Persistence] Received users snapshot: ${snap.size} documents`);
       
       const cloudUsersList = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
       
-      let filteredUsers = cloudUsersList;
-      if (syncOwnerId) {
-        filteredUsers = cloudUsersList.filter(user => 
-          user.id === syncOwnerId || 
-          user.ownerId === syncOwnerId || 
-          user.ownerId === 'mgr_1' || 
-          user.ownerId === 'local_owner' ||
-          !user.ownerId
-        );
-      }
+      setRegisteredUsers(cloudUsersList);
+      dispatch({ type: 'SET_REGISTERED_USERS', payload: cloudUsersList });
       
-      setRegisteredUsers(filteredUsers);
-      dispatch({ type: 'SET_REGISTERED_USERS', payload: filteredUsers });
-      
-      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(filteredUsers));
+      localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(cloudUsersList));
       setIsUsersLoaded(true);
     }, (err) => {
       console.error('[Persistence] Users sync failed:', err);
@@ -43,16 +53,7 @@ export const useFirebasePersistence = (
       const saved = localStorage.getItem('OPay_Registered_Users_v4');
       if (saved) {
         try {
-          let list = JSON.parse(saved);
-          if (syncOwnerId) {
-            list = list.filter((user: User) => 
-              user.id === syncOwnerId || 
-              user.ownerId === syncOwnerId || 
-              user.ownerId === 'mgr_1' || 
-              user.ownerId === 'local_owner' ||
-              !user.ownerId
-            );
-          }
+          const list = JSON.parse(saved);
           setRegisteredUsers(list);
           dispatch({ type: 'SET_REGISTERED_USERS', payload: list });
         } catch (e) {
@@ -62,17 +63,8 @@ export const useFirebasePersistence = (
       setIsUsersLoaded(true);
     });
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log('[Persistence] Auth state: User logged in', user.uid);
-      } else {
-        console.log('[Persistence] Auth state: No user');
-      }
-    });
-
     return () => {
       unsubscribeSnapshot();
-      unsubscribeAuth();
     };
   }, [setRegisteredUsers, setIsUsersLoaded, dispatch, syncOwnerId]);
 };

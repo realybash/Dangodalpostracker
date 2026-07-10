@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark } from 'lucide-react';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -389,7 +389,8 @@ export function TransactionForm({
 
     const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
 
-    const financials = getCalculatedFinancials(actualAmount, type, provider, settings);
+    const effectiveType = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+    const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings);
 
     // Maintain legacy compatibility while populating new fields
     const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : financials.customerCharge;
@@ -423,9 +424,9 @@ export function TransactionForm({
       subType,
       amount: type === 'Withdrawal' ? baseCash : amount,
       customerFee: actualCustomerFee,
-      terminalFee: financials.providerCharge, // Mapping provider charge to legacy terminal fee
-      cbnCharge: financials.settlementCharge, // Mapping settlement charge to legacy cbn charge
-      profit: financials.agentProfit, // Using new agent profit
+      terminalFee: financials.providerCharge, 
+      cbnCharge: financials.cbnCharge, 
+      profit: financials.agentProfit, 
       feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
       paymentMethod,
       totalCustomerCharged,
@@ -445,7 +446,7 @@ export function TransactionForm({
       terminalId: selectedTerminalId || undefined,
       terminalName: activeTerminal?.name || undefined,
       audioNote: audioNote || undefined,
-      // New fields
+      // Comprehensive Senior Fintech Fields
       customerCharge: financials.customerCharge,
       providerCharge: financials.providerCharge,
       agentProfit: financials.agentProfit,
@@ -598,8 +599,9 @@ export function TransactionForm({
   const { baseCash, cardSwipe, cashHandout, separateCashFee } = getWithdrawalDetails();
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
-  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, type, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, type);
+  const effectiveTypeLive = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, effectiveTypeLive, provider, activeFeeRate, subType);
+  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, effectiveTypeLive);
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 
@@ -617,7 +619,7 @@ export function TransactionForm({
               <h3 className="text-base font-extrabold text-neutral-800 tracking-tight">
                 {initialTransaction ? 'Edit POS Receipt' : 'Record POS Receipt'}
               </h3>
-              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">Auto computed under baseline {terminalFeeRate}% fee rate</p>
+              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">Using Realistic 2026 {provider} baseline rates</p>
             </div>
           </div>
           <button 
@@ -802,15 +804,24 @@ export function TransactionForm({
                       key={cat}
                       type="button"
                       onClick={() => setType(cat)}
-                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                      className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
                         isSelected 
-                          ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
-                          : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
+                          ? 'bg-emerald-50 border-[#00B87A] text-[#00B87A] shadow-sm scale-[1.02]' 
+                          : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600 hover:border-neutral-200'
                       }`}
                     >
-                      {cat === 'Withdrawal' && '📥 Cash out POS'}
-                      {cat === 'Deposit' && '📤 Deposit'}
-                      {cat === 'Transfer' && '💸 Bank Transfer'}
+                      <div className={`p-1.5 rounded-xl transition-colors ${
+                        isSelected ? 'bg-[#00B87A] text-white' : 'bg-neutral-100'
+                      }`}>
+                        {cat === 'Withdrawal' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
+                        {cat === 'Deposit' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
+                        {cat === 'Transfer' && <Landmark className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-emerald-600'}`} />}
+                      </div>
+                      <span className="font-bold tracking-tight text-[11px] leading-tight">
+                        {cat === 'Withdrawal' && 'Cash out POS'}
+                        {cat === 'Deposit' && 'Deposit'}
+                        {cat === 'Transfer' && 'Bank Transfer'}
+                      </span>
                     </button>
                   );
                 })}

@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings } from '../types';
-import { formatNaira, getProviderTransactionNumber, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
+import { formatNaira, getProviderTransactionNumber, isSameDay, isSameWeek, isSameMonth, isSameYear, getFriendlyTypeLabel } from '../utils';
 import { CalendarFilter } from './CalendarFilter';
 import { 
   Search, 
@@ -114,7 +114,7 @@ export function TransactionList({
     let palmpayVol = 0;
 
     transactions.forEach((tx) => {
-      if (tx.type === 'Withdrawal') {
+      if (tx.type === 'Withdrawal' || tx.type === 'Cash Out (Transfer)') {
         withdrawCount++;
         withdrawVol += tx.amount;
       } else if (tx.type === 'Transfer') {
@@ -1155,7 +1155,7 @@ export function TransactionList({
                             </div>
                           )}
                           <div className={`${iconSizeClass} flex items-center justify-center shrink-0 ${easyIconBg} ${easyIconColor}`}>
-                          {tx.type === 'Withdrawal' && <ArrowDownLeft className={arrowSizeClass} />}
+                          {(tx.type === 'Withdrawal' || tx.type === 'Cash Out (Transfer)') && <ArrowDownLeft className={arrowSizeClass} />}
                           {tx.type === 'Transfer' && <ArrowRightLeft className={arrowSizeClass} />}
                           {tx.type === 'Deposit' && <ArrowUpRight className={arrowSizeClass} />}
                         </div>
@@ -1163,7 +1163,7 @@ export function TransactionList({
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className={`${titleTextSize} text-neutral-800 tracking-tight`}>
-                              {tx.type === 'Withdrawal' ? 'Cash Out' : tx.type === 'Deposit' ? 'Cash In' : 'Bank Transfer'}
+                              {getFriendlyTypeLabel(tx.type)}
                             </span>
                             <span className="text-neutral-300 text-[10px]">•</span>
                             <span className={`text-[8.5px] font-mono font-black px-1 py-0.1 rounded ${
@@ -1304,7 +1304,7 @@ export function TransactionList({
                                 Action Instruction
                               </span>
                               <span className="font-black text-neutral-700">
-                                {tx.type === 'Withdrawal' ? (
+                                {tx.type === 'Withdrawal' || tx.type === 'Cash Out (Transfer)' ? (
                                   <span className="text-emerald-700">🟢 Hand CASH bills to Customer</span>
                                 ) : tx.type === 'Deposit' ? (
                                   <span className="text-blue-700">📥 Collect CASH bills from Customer</span>
@@ -1542,13 +1542,13 @@ export function TransactionList({
                     <td className={`${rowPadding} font-medium`}>
                       <div className="flex flex-wrap gap-1.5 items-center">
                         <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-bold flex items-center gap-1 ${
-                          tx.type === 'Withdrawal' 
+                          (tx.type === 'Withdrawal' || tx.type === 'Cash Out (Transfer)')
                             ? 'bg-orange-100 text-orange-750' 
                             : tx.type === 'Deposit' 
                             ? 'bg-blue-100 text-blue-750' 
                             : 'bg-indigo-100 text-indigo-750'
                         }`}>
-                          {tx.type === 'Withdrawal' ? '📥 Cash Out' : tx.type === 'Deposit' ? '📤 Cash In' : '💸 Send'}
+                          {tx.type === 'Withdrawal' ? '📥 Cash Out (ATM)' : tx.type === 'Cash Out (Transfer)' ? '📲 Phone Transfer' : tx.type === 'Deposit' ? '📤 Cash In' : '💸 Send'}
                         </span>
                         
                         <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-black border ${providerColor}`}>
