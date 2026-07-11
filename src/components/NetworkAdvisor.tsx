@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Wifi, 
-  Signal, 
-  Smartphone, 
-  RefreshCw, 
-  AlertTriangle, 
-  Check, 
-  X, 
-  Info, 
-  Zap, 
-  Activity, 
-  Globe, 
+import {
+  Wifi,
+  Signal,
+  Smartphone,
+  RefreshCw,
+  AlertTriangle,
+  Check,
+  X,
+  Info,
+  Zap,
+  Activity,
+  Globe,
   Sparkles,
   ShieldAlert,
   Sliders,
@@ -26,8 +26,10 @@ import {
   Award,
   AlertCircle,
   PlayCircle,
-  Eye
+  Eye,
+  MapPin
 } from 'lucide-react';
+import { LocationDetector, LocationData } from './LocationDetector';
 
 interface NetworkAdvisorProps {
   isOpen: boolean;
@@ -172,6 +174,7 @@ export function NetworkAdvisorModal({ isOpen, onClose }: NetworkAdvisorProps) {
   });
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'recommender' | 'speedtest' | 'history' | 'diagnostic'>('dashboard');
+  const [location, setLocation] = useState<LocationData | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshStep, setRefreshStep] = useState('');
   const [isAirplaneMode, setIsAirplaneMode] = useState(false);
@@ -577,6 +580,22 @@ export function NetworkAdvisorModal({ isOpen, onClose }: NetworkAdvisorProps) {
               {activeTab === 'dashboard' && (
                 <div className="space-y-4">
                   
+                  {/* Location Section */}
+                  <div className="bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 rounded-[2rem] space-y-3">
+                    <h4 className="font-black text-sm text-neutral-800 dark:text-white flex items-center gap-1.5">
+                      <MapPin className="w-4 h-4 text-[#00B87A]" />
+                      📍 Current Location
+                    </h4>
+                    <LocationDetector onLocationChange={setLocation} />
+                    {location && (
+                      <div className="text-xs text-neutral-600 dark:text-neutral-400 font-mono space-y-1">
+                        <p className="font-bold">{location.address}</p>
+                        <p className="text-[10px] text-neutral-400">Lat: {location.lat.toFixed(4)}, Lng: {location.lng.toFixed(4)} • Acc: {location.accuracy.toFixed(1)}m</p>
+                        <p className="text-[10px] text-neutral-400">Last Updated: {location.lastUpdated}</p>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Top Premium AI Advice Card */}
                   {bestNetwork && !isAirplaneMode ? (
                     <div className="bg-gradient-to-br from-[#00B87A] via-emerald-600 to-teal-700 text-white p-5 rounded-[2rem] shadow-xl space-y-4 relative overflow-hidden">
@@ -588,10 +607,12 @@ export function NetworkAdvisorModal({ isOpen, onClose }: NetworkAdvisorProps) {
                         <span className="bg-white/20 text-[9px] uppercase font-mono font-black tracking-wider px-2.5 py-1 rounded-full">
                           🏆 AI Recommended Carrier
                         </span>
-                        <div className="flex items-center gap-1.5 text-xs font-extrabold">
-                          <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-                          <span>99% Confidence Rate</span>
-                        </div>
+                        {location && (
+                          <div className="flex items-center gap-1 text-xs font-semibold bg-white/10 px-2 py-1 rounded-lg">
+                            <MapPin className="w-3.5 h-3.5" />
+                            <span>{location.address.split(',')[0]}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-1">

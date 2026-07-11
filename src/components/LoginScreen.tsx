@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser, getAuthPassword } from '../utils';
@@ -110,6 +110,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Forgot PIN state
+  const [forgotStep, setForgotStep] = useState<'info' | 'verify' | 'new-pin' | 'success'>('info');
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [forgotNewPin, setForgotNewPin] = useState('');
+  const [targetUser, setTargetUser] = useState<User | null>(null);
+  const [forgotError, setForgotError] = useState('');
 
   const staffUsers = registeredUsers.filter(u => u.role === 'Employee');
   const managerUsers = registeredUsers.filter(u => u.role === 'Manager');
@@ -1321,7 +1328,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-neutral-200 text-neutral-800 p-6 relative text-center">
             <button 
-              onClick={() => setShowForgotPasscode(false)} 
+              onClick={() => { setShowForgotPasscode(false); setForgotStep('info'); }} 
               className="absolute top-4 right-4 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition"
             >
               <div className="w-5 h-5 flex items-center justify-center text-lg leading-none">&times;</div>
@@ -1330,21 +1337,114 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
               <HelpCircle className="w-8 h-8" />
             </div>
             <h3 className="font-black text-lg mb-2 tracking-tight">Forgot Passcode?</h3>
-            {loginTab === 'staff' ? (
-              <p className="text-sm text-neutral-600 mb-6 leading-relaxed">
-                If you are a Cashier, please contact your Manager. They can securely reset your 4-digit PIN from their Manager Dashboard under the <strong>Profile Center</strong>.
-              </p>
-            ) : (
-              <p className="text-sm text-neutral-600 mb-6 leading-relaxed">
-                If you forgot your Manager PIN, please contact OPay Business Support or proceed with registering a secure new manager profile.
-              </p>
+            
+            {forgotStep === 'info' && (
+              <>
+                {loginTab === 'staff' ? (
+                  <p className="text-sm text-neutral-600 mb-6 leading-relaxed">
+                    If you are a Cashier, please contact your Manager. They can securely reset your 4-digit PIN from their Manager Dashboard under the <strong>Profile Center</strong>.
+                  </p>
+                ) : (
+                  <p className="text-sm text-neutral-600 mb-6 leading-relaxed">
+                    If you forgot your Manager PIN, I can help you reset it.
+                  </p>
+                )}
+                {loginTab === 'manager' && (
+                  <button
+                    onClick={() => setForgotStep('verify')}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider mb-3"
+                  >
+                    Reset PIN
+                  </button>
+                )}
+                <button
+                  onClick={() => { setShowForgotPasscode(false); setForgotStep('info'); }}
+                  className="w-full py-3 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider"
+                >
+                  {loginTab === 'manager' ? 'Cancel' : 'Okay, Got It'}
+                </button>
+              </>
             )}
-            <button
-              onClick={() => setShowForgotPasscode(false)}
-              className="w-full py-3 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider"
-            >
-              Okay, Got It
-            </button>
+
+            {forgotStep === 'verify' && (
+              <>
+                <p className="text-sm text-neutral-600 mb-6">Please enter your registered phone number to verify your manager account.</p>
+                <input
+                  type="text"
+                  value={forgotPhone}
+                  onChange={(e) => setForgotPhone(e.target.value)}
+                  placeholder="Enter phone number"
+                  className="w-full p-3 border border-neutral-200 rounded-xl mb-4 text-center"
+                />
+                {forgotError && <p className="text-red-500 text-xs mb-4">{forgotError}</p>}
+                <button
+                  onClick={async () => {
+                    setForgotError('');
+                    const phone = cleanPhoneForCompare(forgotPhone);
+                    const user = managerUsers.find(u => cleanPhoneForCompare(u.phone || '') === phone);
+                    if (user) {
+                      setTargetUser(user);
+                      setForgotStep('new-pin');
+                    } else {
+                      setForgotError('Manager account not found with this phone number.');
+                    }
+                  }}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider"
+                >
+                  Verify
+                </button>
+              </>
+            )}
+
+            {forgotStep === 'new-pin' && (
+              <>
+                <p className="text-sm text-neutral-600 mb-6">Enter a new 4-digit PIN for {targetUser?.name}.</p>
+                <input
+                  type="password"
+                  value={forgotNewPin}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    if (val.length <= 4) setForgotNewPin(val);
+                  }}
+                  placeholder="New 4-digit PIN"
+                  className="w-full p-3 border border-neutral-200 rounded-xl mb-4 text-center text-xl tracking-[0.5em]"
+                />
+                {forgotError && <p className="text-red-500 text-xs mb-4">{forgotError}</p>}
+                <button
+                  onClick={async () => {
+                    if (forgotNewPin.length !== 4) {
+                      setForgotError('PIN must be 4 digits.');
+                      return;
+                    }
+                    if (targetUser) {
+                      try {
+                        const userDoc = doc(db, 'users', targetUser.id);
+                        await updateDoc(userDoc, { pin: forgotNewPin });
+                        setForgotStep('success');
+                      } catch (e) {
+                        console.error('Error updating PIN:', e);
+                        setForgotError(`Failed to update PIN: ${(e as Error).message}`);
+                      }
+                    }
+                  }}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider"
+                >
+                  Update PIN
+                </button>
+              </>
+            )}
+
+            {forgotStep === 'success' && (
+              <>
+                <p className="text-sm text-green-600 mb-6 font-bold">PIN updated successfully!</p>
+                <button
+                  onClick={() => { setShowForgotPasscode(false); setForgotStep('info'); setForgotPhone(''); setForgotNewPin(''); }}
+                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-sm transition cursor-pointer uppercase tracking-wider"
+                >
+                  Done
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

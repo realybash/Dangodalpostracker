@@ -541,7 +541,7 @@ export default function App() {
   const [newTerminalBattery, setNewTerminalBattery] = useState<number>(100);
   const [newTerminalSignal, setNewTerminalSignal] = useState<number>(5);
   const [newTerminalRate, setNewTerminalRate] = useState<number>(0.5);
-  const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings' | 'audit' | 'pricing'>('pos');
+  const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings' | 'audit' | 'pricing' | 'airtime'>('pos');
   const ownerTxsRef = useRef<Transaction[]>([]);
   const cashierTxsRef = useRef<Transaction[]>([]);
   const isRegisteringUser = useRef(false);
@@ -2482,6 +2482,17 @@ export default function App() {
                 <ArrowRightLeft className="w-5 h-5 stroke-[2.2]" />
               </div>
               <span className="text-[11px] font-bold text-neutral-700 leading-tight">Bank Transfer</span>
+            </button>
+
+            {/* Airtime Sale */}
+            <button 
+              onClick={() => openWithPreset('Airtime')}
+              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
+            >
+              <div className="w-12 h-12 rounded-full bg-sky-100 group-hover:bg-sky-200 transition-colors flex items-center justify-center text-sky-600 shadow-sm active:scale-90 duration-100">
+                <Smartphone className="w-5 h-5 stroke-[2.2]" />
+              </div>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Airtime</span>
             </button>
 
             {/* Simulate Random TX */}
