@@ -316,7 +316,7 @@ export function MetricCards({
                     ease: "easeInOut"
                   }}
                 >
-                  🏆 OPay Milestone Target Met! Fantastic Job Employee! 🌟
+                  🏆 POS Business Milestone Target Met! Fantastic Job! 🌟
                 </motion.span>
               ) : (
                 <span className="text-neutral-500 font-medium">Need <strong className="text-neutral-700">{formatNaira(Math.max(dailyTarget - profit, 0))}</strong> more to hit target</span>

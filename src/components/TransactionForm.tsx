@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart } from 'lucide-react';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -346,7 +346,7 @@ export function TransactionForm({
   const applyRecommendedFee = () => {
     setIsFeeWaived(false);
     const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-    const financials = getCalculatedFinancials(amount, effectiveType, provider, settings);
+    const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
     setFeeInput(financials.customerCharge.toString());
     setCustomerFee(financials.customerCharge);
   };
@@ -355,11 +355,11 @@ export function TransactionForm({
   useEffect(() => {
     if (!isFeeWaived) {
         const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-        const financials = getCalculatedFinancials(amount, effectiveType, provider, settings);
+        const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
         setFeeInput(financials.customerCharge.toString());
         setCustomerFee(financials.customerCharge);
     }
-  }, [amount, type, provider, settings, paymentMethod]);
+  }, [amount, type, provider, settings, paymentMethod, destinationBank]);
 
 
   const isFirstRender = useRef(true);
@@ -390,12 +390,16 @@ export function TransactionForm({
     const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
 
     const effectiveType = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-    const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings);
+    const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings, destinationBank);
 
     // Maintain legacy compatibility while populating new fields
-    const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : financials.customerCharge;
-    const unpaidFeeAmount = chargesStatus === 'Unpaid' ? financials.customerCharge : undefined;
+    const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : customerFee;
+    const unpaidFeeAmount = chargesStatus === 'Unpaid' ? customerFee : undefined;
     
+    // Adjust profit based on manual fee overrides
+    const feeDifference = customerFee - financials.customerCharge;
+    const actualProfit = financials.agentProfit + feeDifference;
+
     // Customer card debit / total charged amount
     const totalCustomerCharged = actualAmount;
 
@@ -426,9 +430,10 @@ export function TransactionForm({
       customerFee: actualCustomerFee,
       terminalFee: financials.providerCharge, 
       cbnCharge: financials.cbnCharge, 
-      profit: financials.agentProfit, 
+      profit: actualProfit, 
       feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
       paymentMethod,
+      destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime') ? destinationBank : undefined,
       totalCustomerCharged,
       timestamp: customTimestamp,
       notes: finalNotes.trim() || undefined,
@@ -447,15 +452,15 @@ export function TransactionForm({
       terminalName: activeTerminal?.name || undefined,
       audioNote: audioNote || undefined,
       // Comprehensive Senior Fintech Fields
-      customerCharge: financials.customerCharge,
+      customerCharge: actualCustomerFee,
       providerCharge: financials.providerCharge,
-      agentProfit: financials.agentProfit,
-      netProfit: financials.netProfit,
+      agentProfit: actualProfit,
+      netProfit: actualProfit,
       vatAmount: financials.vatAmount,
       cashback: financials.cashback,
       commissionAmount: financials.commissionAmount,
       settlementCharge: financials.settlementCharge,
-      merchantProfit: financials.merchantProfit,
+      merchantProfit: actualProfit,
       balanceBefore: 0, // Should be populated by backend later
       balanceAfter: 0,
       referenceNumber: generateId(), // Placeholder
@@ -600,8 +605,12 @@ export function TransactionForm({
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
   const effectiveTypeLive = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-  const liveTerminalFee = calculateTerminalFee(liveAmountForTerminalFee, effectiveTypeLive, provider, activeFeeRate, subType);
-  const liveCbnCharge = calculateCBNCharge(liveAmountForTerminalFee, effectiveTypeLive);
+  
+  // UNIFIED CALCULATION SERVICE CALL
+  const liveFinancials = getCalculatedFinancials(liveAmountForTerminalFee, effectiveTypeLive, provider, settings, destinationBank);
+  
+  const liveTerminalFee = liveFinancials.providerCharge;
+  const liveCbnCharge = liveFinancials.cbnCharge;
 
   const fastAmounts = [5000, 10000, 15000, 20000, 50000];
 
@@ -619,7 +628,7 @@ export function TransactionForm({
               <h3 className="text-base font-extrabold text-neutral-800 tracking-tight">
                 {initialTransaction ? 'Edit POS Receipt' : 'Record POS Receipt'}
               </h3>
-              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">Using Realistic 2026 {provider} baseline rates</p>
+              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">Using Realistic 2024/2025 {provider} market rates</p>
             </div>
           </div>
           <button 
@@ -673,8 +682,8 @@ export function TransactionForm({
                             tx.type === 'Deposit' ? 'bg-emerald-50 text-emerald-700' :
                             'bg-amber-50 text-amber-700'
                           }`}>
-                            {tx.type === 'Withdrawal' && '📥 Cash out'}
-                            {tx.type === 'Deposit' && '📤 Deposit'}
+                            {tx.type === 'Withdrawal' && '📥 Withdraw'}
+                            {tx.type === 'Deposit' && '📤 Money Receive'}
                             {tx.type === 'Transfer' && '💸 Transfer'}
                           </span>
                           <span className="text-[10px] font-bold text-neutral-400 font-mono">
@@ -716,7 +725,7 @@ export function TransactionForm({
                   <span className="font-mono font-bold text-neutral-800">{formatNaira(basket.reduce((sum, t) => t.type === 'Withdrawal' ? sum + t.amount : sum, 0))}</span>
                 </div>
                 <div className="flex justify-between items-center text-neutral-500">
-                  <span>Total Outgoing (Transfers/Deposits):</span>
+                  <span>Total Outgoing (Transfers/Money Receive):</span>
                   <span className="font-mono font-bold text-neutral-800">-{formatNaira(basket.reduce((sum, t) => (t.type === 'Transfer' || t.type === 'Deposit') ? sum + t.amount : sum, 0))}</span>
                 </div>
                 <div className="flex justify-between items-center text-neutral-500 pb-1.5 border-b border-neutral-100">
@@ -796,14 +805,19 @@ export function TransactionForm({
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
                 Operational Category
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['Withdrawal', 'Deposit', 'Transfer'] as const).map((cat) => {
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(['Withdrawal', 'Deposit', 'Transfer', 'Airtime'] as const).map((cat) => {
                   const isSelected = type === cat;
                   return (
                     <button
                       key={cat}
                       type="button"
-                      onClick={() => setType(cat)}
+                      onClick={() => {
+                        setType(cat);
+                        if (cat === 'Airtime') {
+                          setDestinationBank('MTN' as any);
+                        }
+                      }}
                       className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
                         isSelected 
                           ? 'bg-emerald-50 border-[#00B87A] text-[#00B87A] shadow-sm scale-[1.02]' 
@@ -816,11 +830,13 @@ export function TransactionForm({
                         {cat === 'Withdrawal' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
                         {cat === 'Deposit' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
                         {cat === 'Transfer' && <Landmark className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-emerald-600'}`} />}
+                        {cat === 'Airtime' && <Smartphone className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-purple-600'}`} />}
                       </div>
                       <span className="font-bold tracking-tight text-[11px] leading-tight">
-                        {cat === 'Withdrawal' && 'Cash out POS'}
-                        {cat === 'Deposit' && 'Deposit'}
+                        {cat === 'Withdrawal' && 'Withdraw'}
+                        {cat === 'Deposit' && 'Money Receive'}
                         {cat === 'Transfer' && 'Bank Transfer'}
+                        {cat === 'Airtime' && 'Airtime Sale'}
                       </span>
                     </button>
                   );
@@ -828,45 +844,7 @@ export function TransactionForm({
               </div>
             </div>
 
-            {/* Collection Method Selection (Only for Withdrawal/Cash Out) */}
-            {type === 'Withdrawal' && (
-              <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-                  Collection Method (Source of Money)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('Card')}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
-                      paymentMethod === 'Card'
-                        ? 'bg-blue-50/60 border-blue-600 text-blue-700 font-black'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
-                    }`}
-                  >
-                    <CreditCard className="w-3.5 h-3.5" />
-                    ATM Card
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('Transfer')}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex items-center justify-center gap-2 ${
-                      paymentMethod === 'Transfer'
-                        ? 'bg-purple-50/60 border-purple-600 text-purple-700 font-black'
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800'
-                    }`}
-                  >
-                    <Smartphone className="w-3.5 h-3.5" />
-                    Phone Transfer
-                  </button>
-                </div>
-                <p className="text-[10px] text-neutral-400 font-medium mt-2 italic px-1">
-                  {paymentMethod === 'Transfer' 
-                    ? "Customer is transferring to your POS account. Charges will be calculated based on inbound transfer rates."
-                    : "Standard terminal withdrawal using physical card."}
-                </p>
-              </div>
-            )}
+
           </div>
 
           {/* Active POS Sync: OPay provider rate and settlement rules are locked for this transaction. */}
@@ -971,12 +949,18 @@ export function TransactionForm({
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
                 {type === 'Withdrawal' && 'Card Issuer Bank'}
                 {type === 'Transfer' && 'Destination Bank'}
-                {type === 'Deposit' && 'Wallet Destination Network'}
+                {type === 'Deposit' && 'Money Receive Wallet Destination'}
+                {type === 'Airtime' && 'Telecommunication Network'}
               </label>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
-              {([
+            <div className={`grid ${type === 'Airtime' ? 'grid-cols-4' : 'grid-cols-3'} gap-2 animate-in fade-in slide-in-from-top-2 duration-150`}>
+              {(type === 'Airtime' ? [
+                { id: 'MTN', title: 'MTN', color: 'border-amber-200 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-500 border-amber-500 text-white shadow-md' },
+                { id: 'Airtel', title: 'Airtel', color: 'border-red-200 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-md' },
+                { id: 'Glo', title: 'Glo', color: 'border-green-200 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-600 border-green-600 text-white shadow-md' },
+                { id: '9mobile', title: '9mobile', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-md' }
+              ] as const : [
                 { id: 'Moniepoint', title: 'Moniepoint', color: 'border-blue-200 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-md' },
                 { id: 'OPay', title: 'OPay', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-md' },
                 { id: 'PalmPay', title: 'PalmPay', color: 'border-orange-200 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-500 border-orange-500 text-white shadow-md' }
@@ -987,10 +971,10 @@ export function TransactionForm({
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => setDestinationBank(opt.id)}
+                    onClick={() => setDestinationBank(opt.id as any)}
                     className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
                       isActive 
-                        ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ${opt.id === 'Moniepoint' ? 'ring-blue-600' : opt.id === 'OPay' ? 'ring-[#00B87A]' : 'ring-orange-500'}` 
+                        ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ${opt.id === 'Moniepoint' ? 'ring-blue-600' : opt.id === 'OPay' ? 'ring-[#00B87A]' : opt.id === 'PalmPay' ? 'ring-orange-500' : opt.id === 'MTN' ? 'ring-amber-500' : opt.id === 'Airtel' ? 'ring-red-600' : opt.id === 'Glo' ? 'ring-green-600' : 'ring-emerald-600'}` 
                         : `${opt.color}`
                     }`}
                   >
@@ -998,7 +982,11 @@ export function TransactionForm({
                       <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
                         isActive ? 'bg-white text-black' : 
                         opt.id === 'Moniepoint' ? 'bg-blue-600 text-white' : 
-                        opt.id === 'OPay' ? 'bg-[#00B87A] text-white' : 'bg-orange-500 text-white'
+                        opt.id === 'OPay' ? 'bg-[#00B87A] text-white' : 
+                        opt.id === 'PalmPay' ? 'bg-orange-500 text-white' :
+                        opt.id === 'MTN' ? 'bg-amber-500 text-white' :
+                        opt.id === 'Airtel' ? 'bg-red-600 text-white' :
+                        opt.id === 'Glo' ? 'bg-green-600 text-white' : 'bg-emerald-600 text-white'
                       }`}>
                         {opt.id[0]}
                       </div>
@@ -1579,6 +1567,47 @@ export function TransactionForm({
             </div>
           )}
 
+          {/* Financial Breakdown Summary */}
+          <div className="bg-[#00B87A]/5 border border-[#00B87A]/20 rounded-2xl p-4 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between border-b border-[#00B87A]/10 pb-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#00B87A] font-mono flex items-center gap-1.5">
+                <PieChart className="w-3.5 h-3.5" /> Core Financial Decomposition
+              </label>
+              <span className="text-[9px] font-bold text-neutral-400 font-mono">Real-Time Computed</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Customer Amount</span>
+                <span className="text-xs font-black text-neutral-800 font-mono">{formatNaira(amount)}</span>
+              </div>
+              <div className="flex flex-col text-right">
+                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Customer Charge</span>
+                <span className="text-xs font-black text-neutral-800 font-mono">+{formatNaira(customerFee)}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Provider Cost</span>
+                <span className="text-xs font-black text-red-500 font-mono">-{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).providerCharge)}</span>
+              </div>
+              <div className="flex flex-col text-right">
+                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Regulatory Levy (CBN)</span>
+                <span className="text-xs font-black text-red-500 font-mono">-{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).cbnCharge)}</span>
+              </div>
+            </div>
+
+            <div className="pt-2.5 border-t border-[#00B87A]/15 flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-[#00B87A] uppercase tracking-tighter">Net Agent Profit</span>
+                <p className="text-[8px] text-neutral-400 font-medium leading-none">After all 3rd party deductions</p>
+              </div>
+              <div className="bg-[#00B87A] px-3.5 py-1.5 rounded-xl shadow-sm">
+                <span className="text-sm font-black text-white font-mono">
+                  {formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).agentProfit)}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Transaction Status Selection */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
@@ -1802,36 +1831,46 @@ export function TransactionForm({
           </div>
 
           {/* Live computes summary block */}
-          <div className="bg-emerald-50/60 border border-emerald-100 p-4 rounded-2xl space-y-2">
-            <span className="text-[10px] font-mono tracking-widest text-[#00B87A] uppercase block font-black">
-              LIVE PROJECTED COMMISSION COMPUTATION
+          <div className={`p-4 rounded-2xl space-y-2 transition-colors ${liveFinancials.isConfigured ? 'bg-emerald-50/60 border border-emerald-100' : 'bg-red-50 border border-red-200 animate-pulse'}`}>
+            <span className={`text-[10px] font-mono tracking-widest uppercase block font-black ${liveFinancials.isConfigured ? 'text-[#00B87A]' : 'text-red-600'}`}>
+              {liveFinancials.isConfigured ? 'LIVE PROJECTED COMMISSION COMPUTATION' : 'PRICING ERROR: RULE NOT CONFIGURED'}
             </span>
-            <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
-              <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
-                <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Terminal Cost</span>
-                <span className="text-[11px] font-bold font-mono text-red-500">
-                  -{formatNaira(liveTerminalFee)}
-                </span>
+            
+            {!liveFinancials.isConfigured ? (
+              <div className="flex items-start gap-3 py-1">
+                <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                <p className="text-[11px] font-bold text-red-700 leading-tight">
+                  {liveFinancials.error || "Pricing rule for this transaction combination is not configured in Firestore."}
+                </p>
               </div>
-              <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
-                <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate" title="CBN EMTL Levy (₦10,000+)">CBN EMTL</span>
-                <span className="text-[11px] font-bold font-mono text-red-500">
-                  -{formatNaira(liveCbnCharge)}
-                </span>
+            ) : (
+              <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
+                <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
+                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Terminal Cost</span>
+                  <span className="text-[11px] font-bold font-mono text-red-500">
+                    -{formatNaira(liveTerminalFee)}
+                  </span>
+                </div>
+                <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
+                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate" title="CBN EMTL Levy (₦10,000+)">CBN EMTL</span>
+                  <span className="text-[11px] font-bold font-mono text-red-500">
+                    -{formatNaira(liveCbnCharge)}
+                  </span>
+                </div>
+                <div className="bg-white p-1.5 rounded-xl border border-neutral-200 font-medium">
+                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Client Fee</span>
+                  <span className="text-[11px] font-bold font-mono text-neutral-700">
+                    +{formatNaira(customerFee)}
+                  </span>
+                </div>
+                <div className="bg-emerald-50 p-1.5 rounded-xl border border-emerald-100 font-medium">
+                  <span className="text-[8px] text-emerald-600 uppercase font-mono block truncate">Net Earnings</span>
+                  <span className={`text-[11px] font-extrabold font-mono ${customerFee - liveTerminalFee - liveCbnCharge >= 0 ? 'text-emerald-700' : 'text-red-500'}`}>
+                    {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
+                  </span>
+                </div>
               </div>
-              <div className="bg-white p-1.5 rounded-xl border border-neutral-200 font-medium">
-                <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Client Fee</span>
-                <span className="text-[11px] font-bold font-mono text-neutral-700">
-                  +{formatNaira(customerFee)}
-                </span>
-              </div>
-              <div className="bg-emerald-50 p-1.5 rounded-xl border border-emerald-100 font-medium">
-                <span className="text-[8px] text-emerald-600 uppercase font-mono block truncate">Net Earnings</span>
-                <span className={`text-[11px] font-extrabold font-mono ${customerFee - liveTerminalFee - liveCbnCharge >= 0 ? 'text-emerald-700' : 'text-red-500'}`}>
-                  {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
 
 
@@ -1849,24 +1888,34 @@ export function TransactionForm({
               <button
                 type="button"
                 onClick={handleAddToBasket}
-                className="flex-1 min-w-[130px] bg-neutral-50 hover:bg-neutral-100 border border-[#00B87A]/30 hover:border-[#00B87A] text-[#00B87A] font-extrabold py-3 rounded-2xl cursor-pointer text-xs transition flex items-center justify-center gap-1.5"
-                title="Add current transaction to batch ticket and start another"
+                disabled={!liveFinancials.isConfigured}
+                className={`flex-1 min-w-[130px] font-extrabold py-3 rounded-2xl cursor-pointer text-xs transition flex items-center justify-center gap-1.5 ${
+                  liveFinancials.isConfigured 
+                    ? 'bg-neutral-50 hover:bg-neutral-100 border border-[#00B87A]/30 hover:border-[#00B87A] text-[#00B87A]' 
+                    : 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'
+                }`}
+                title={liveFinancials.isConfigured ? "Add current transaction to batch ticket and start another" : "Pricing rule missing - cannot add to batch"}
               >
-                <Plus className="w-4 h-4 text-[#00B87A] stroke-[2]" />
+                <Plus className={`w-4 h-4 stroke-[2] ${liveFinancials.isConfigured ? 'text-[#00B87A]' : 'text-neutral-300'}`} />
                 Add to Batch
               </button>
             )}
 
             <button
               type="submit"
-              className="flex-1 min-w-[140px] bg-[#00B87A] hover:bg-emerald-600 text-white font-extrabold py-3 rounded-2xl cursor-pointer text-xs shadow-lg shadow-[#00B87A]/20 transition flex items-center justify-center gap-1.5"
+              disabled={!liveFinancials.isConfigured}
+              className={`flex-1 min-w-[140px] font-extrabold py-3 rounded-2xl cursor-pointer text-xs shadow-lg transition flex items-center justify-center gap-1.5 ${
+                liveFinancials.isConfigured 
+                  ? 'bg-[#00B87A] hover:bg-emerald-600 text-white shadow-[#00B87A]/20' 
+                  : 'bg-neutral-300 text-neutral-500 shadow-none cursor-not-allowed'
+              }`}
             >
-              <Check className="w-4 h-4 stroke-[3]" />
+              {liveFinancials.isConfigured ? <Check className="w-4 h-4 stroke-[3]" /> : <Lock className="w-4 h-4" />}
               {initialTransaction 
                 ? 'Update Receipt' 
                 : basket.length > 0 
                   ? 'Confirm & Save All' 
-                  : 'Confirm Receipt'}
+                  : (liveFinancials.isConfigured ? 'Confirm Receipt' : 'Pricing Restricted')}
             </button>
           </div>
 

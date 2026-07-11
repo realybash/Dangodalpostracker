@@ -24,10 +24,14 @@ import {
   cleanPhoneForCompare,
   getAuthPassword,
   getDefaultPricingProfiles,
-  getCalculatedFinancials
+  getCalculatedFinancials,
+  REALISTIC_PROVIDER_CONFIGS,
+  REALISTIC_REGULATORY_CONFIG,
+  REALISTIC_PRICING_PROFILE
 } from './utils';
 import { MetricCards } from './components/MetricCards';
 import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
+import { ChargeMatrixSettings } from './components/ChargeMatrixSettings';
 import { RealizedGainHistory } from './components/RealizedGainHistory';
 import { TransactionForm } from './components/TransactionForm';
 import { AudioRecorder } from './components/AudioRecorder';
@@ -47,6 +51,9 @@ import { EditEmployeeModal } from './components/EditEmployeeModal';
 import { CashierReconciliationCalculator } from './components/CashierReconciliationCalculator';
 import { LoginScreen } from './components/LoginScreen';
 import { useFirebasePersistence } from './hooks/useFirebasePersistence';
+import { AdminPricingAudit } from './components/AdminPricingAudit';
+import { PricingRuleManager } from './components/PricingRuleManager';
+import { NetworkAdvisorModal, NetworkAdvisorWidget } from './components/NetworkAdvisor';
 import { 
   User as UserIcon,
   UserCheck, 
@@ -125,9 +132,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chartStyle: 'line',
   darkMode: false,
   language: 'en',
-  pricingProfiles: getDefaultPricingProfiles(),
-  selectedProfileId: 'OPay',
-  profitWalletBalance: 0
+  pricingProfiles: [REALISTIC_PRICING_PROFILE],
+  selectedProfileId: REALISTIC_PRICING_PROFILE.id,
+  profitWalletBalance: 0,
+  providerConfigs: REALISTIC_PROVIDER_CONFIGS,
+  regulatoryConfig: REALISTIC_REGULATORY_CONFIG
 };
 
 const DEFAULT_STATE: AppState = {
@@ -229,10 +238,11 @@ function appReducer(state: AppState, action: AppAction): AppState {
       break;
     }
     case 'BULK_UPDATE_TRANSACTIONS': {
+      const payload = Array.isArray(action.payload) ? action.payload : [];
       nextState = {
         ...state,
         transactions: state.transactions.map((t) => {
-          const match = action.payload.find((u) => u.id === t.id);
+          const match = payload.find((u) => u.id === t.id);
           return match ? match : t;
         })
       };
@@ -311,11 +321,18 @@ function appReducer(state: AppState, action: AppAction): AppState {
       break;
     }
     case 'UPDATE_SETTINGS': {
+      const payload = action.payload || {};
       nextState = {
         ...state,
         settings: {
           ...state.settings!,
-          ...action.payload
+          ...payload,
+          providerConfigs: Array.isArray(payload.providerConfigs) 
+            ? payload.providerConfigs 
+            : (state.settings?.providerConfigs || DEFAULT_SETTINGS.providerConfigs),
+          pricingProfiles: Array.isArray(payload.pricingProfiles)
+            ? payload.pricingProfiles
+            : (state.settings?.pricingProfiles || DEFAULT_SETTINGS.pricingProfiles)
         }
       };
       break;
@@ -354,10 +371,17 @@ function initAppState(): AppState {
           terminalFee: parseFloat(t?.terminalFee || 0),
           profit: parseFloat(t?.profit || 0)
         })),
+        expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
         posTerminals: Array.isArray(parsed.posTerminals) ? parsed.posTerminals : [],
         settings: {
           ...DEFAULT_SETTINGS,
-          ...(parsed.settings || {})
+          ...(parsed.settings || {}),
+          providerConfigs: Array.isArray(parsed.settings?.providerConfigs) 
+            ? parsed.settings.providerConfigs 
+            : DEFAULT_SETTINGS.providerConfigs,
+          pricingProfiles: Array.isArray(parsed.settings?.pricingProfiles)
+            ? parsed.settings.pricingProfiles
+            : DEFAULT_SETTINGS.pricingProfiles
         }
       };
     }
@@ -371,61 +395,7 @@ export default function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, initAppState);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  // Sync state to local storage
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({
-        transactions: state.transactions,
-        terminalFeeRate: state.terminalFeeRate,
-        dailyTarget: state.dailyTarget,
-        selectedEmployeeFilter: state.selectedEmployeeFilter,
-        activeTimeframe: state.activeTimeframe,
-        currentUser: state.currentUser,
-        settings: state.settings,
-        impersonatedUserId: state.impersonatedUserId
-      }));
-    } catch (err) {
-      console.warn('LocalStorage save failed', err);
-    }
-  }, [state]);
-
-  // Synchronize dark theme state with the DOM
-  useEffect(() => {
-    const isDark = state.settings?.darkMode ?? false;
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [state.settings?.darkMode]);
-
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [preselectedFormType, setPreselectedFormType] = useState<TransactionType>('Withdrawal');
-  const [helpBannerOpen, setHelpBannerOpen] = useState(true);
-  const [hideBalances, setHideBalances] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterDate, setFilterDate] = useState(new Date());
-  const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
-  const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isReconCalcOpen, setIsReconCalcOpen] = useState(false);
-  const [editingEmployeeFromDashboard, setEditingEmployeeFromDashboard] = useState<User | null>(null);
-  const [appNotification, setAppNotification] = useState<{message: string, type: 'success' | 'info' | 'error'} | null>(null);
-
-  const showAppNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setAppNotification({ message, type });
-    setTimeout(() => setAppNotification(null), 5000);
-  };
-
-  const unpaidCount = useMemo(() => {
-    return state.transactions.filter(
-      (tx) => (tx.chargesStatus === 'Unpaid' || tx.chargesStatus === 'PartiallyPaid') && (tx.status || 'Success') !== 'Failed'
-    ).length;
-  }, [state.transactions]);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
-
-   // Manager Auth states
+  // Manager Auth states
   const [cloudUser, setCloudUser] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? window.navigator.onLine : true);
 
@@ -462,6 +432,74 @@ export default function App() {
 
   const [cloudLoading, setCloudLoading] = useState(true);
 
+  // Sync state to local storage
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({
+        transactions: state.transactions,
+        expenses: state.expenses,
+        availableEmployees: state.availableEmployees,
+        terminalFeeRate: state.terminalFeeRate,
+        dailyTarget: state.dailyTarget,
+        selectedEmployeeFilter: state.selectedEmployeeFilter,
+        activeTimeframe: state.activeTimeframe,
+        currentUser: state.currentUser,
+        settings: state.settings,
+        impersonatedUserId: state.impersonatedUserId,
+        posTerminals: state.posTerminals
+      }));
+      
+      // Cloud backup for settings if ownerId is present
+      if (syncOwnerId && state.settings && state.currentUser.role === 'Manager') {
+        const settingsRef = doc(db, 'settings', syncOwnerId);
+        setDoc(settingsRef, state.settings, { merge: true }).catch(err => {
+          console.warn('Firestore settings sync failed:', err);
+        });
+      }
+    } catch (err) {
+      console.warn('LocalStorage save failed', err);
+    }
+  }, [state, syncOwnerId]);
+
+  // Synchronize dark theme state with the DOM
+  useEffect(() => {
+    const isDark = state.settings?.darkMode ?? false;
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [state.settings?.darkMode]);
+
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [preselectedFormType, setPreselectedFormType] = useState<TransactionType>('Withdrawal');
+  const [helpBannerOpen, setHelpBannerOpen] = useState(true);
+  const [hideBalances, setHideBalances] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDate, setFilterDate] = useState(new Date());
+  const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
+  const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isReconCalcOpen, setIsReconCalcOpen] = useState(false);
+  const [isNetworkAdvisorOpen, setIsNetworkAdvisorOpen] = useState(false);
+  const [editingEmployeeFromDashboard, setEditingEmployeeFromDashboard] = useState<User | null>(null);
+  const [appNotification, setAppNotification] = useState<{message: string, type: 'success' | 'info' | 'error'} | null>(null);
+
+  const showAppNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setAppNotification({ message, type });
+    setTimeout(() => setAppNotification(null), 5000);
+  };
+
+  const unpaidCount = useMemo(() => {
+    return state.transactions.filter(
+      (tx) => (tx.chargesStatus === 'Unpaid' || tx.chargesStatus === 'PartiallyPaid') && (tx.status || 'Success') !== 'Failed'
+    ).length;
+  }, [state.transactions]);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+
+   // Manager Auth states
+  
   // Sync network connectivity status listener
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -503,7 +541,7 @@ export default function App() {
   const [newTerminalBattery, setNewTerminalBattery] = useState<number>(100);
   const [newTerminalSignal, setNewTerminalSignal] = useState<number>(5);
   const [newTerminalRate, setNewTerminalRate] = useState<number>(0.5);
-  const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings'>('pos');
+  const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings' | 'audit' | 'pricing'>('pos');
   const ownerTxsRef = useRef<Transaction[]>([]);
   const cashierTxsRef = useRef<Transaction[]>([]);
   const isRegisteringUser = useRef(false);
@@ -592,24 +630,60 @@ export default function App() {
         };
 
         try {
-          const snap = await getDoc(userDocRef);
-          if (snap.exists()) {
+          let snap;
+          try {
+            snap = await getDoc(userDocRef);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+          }
+
+          if (snap && snap.exists()) {
             const mUser = mapFirestoreUser(snap.data(), user.uid);
             console.log('[Auth] Profile restored from Firestore:', mUser.name, 'Role:', mUser.role);
             updatePoolAndDispatch(mUser);
+
+            // Load settings if manager or linked to one
+            const ownerId = mUser.role === 'Manager' ? mUser.id : mUser.ownerId;
+            if (ownerId && ownerId !== 'mgr_1') {
+              try {
+                const settingsSnap = await getDoc(doc(db, 'settings', ownerId));
+                if (settingsSnap.exists()) {
+                  dispatch({ type: 'UPDATE_SETTINGS', payload: settingsSnap.data() });
+                }
+              } catch (settingsErr) {
+                console.warn('[Auth] Settings retrieval failed:', settingsErr);
+                // Non-critical, just log it. If it's a permission error, it will show in logs.
+              }
+            }
           } else {
             console.warn('[Auth] Auth account exists but Firestore document is missing for UID:', user.uid);
-            // Fallback for newly created accounts where Firestore write might be slightly delayed
-            // or if the account was created without a document (should not happen now)
-            const fallback: User = {
-              id: user.uid,
-              name: user.displayName || 'User',
-              role: 'Employee', // Default to employee if unknown
-              phone: user.email?.split('@')[0] || '',
-              ownerId: 'mgr_1',
-              activated: true
-            };
-            updatePoolAndDispatch(fallback);
+            if (isRegisteringUser.current) {
+              const fallback: User = {
+                id: user.uid,
+                name: user.displayName || 'User',
+                role: 'Employee', // Default to employee if unknown
+                phone: user.email?.split('@')[0] || '',
+                ownerId: 'mgr_1',
+                activated: true
+              };
+              updatePoolAndDispatch(fallback);
+            } else {
+              console.log('[Auth] Database cleared/orphaned session. Signing out of Firebase Auth and clearing cache.');
+              try {
+                await signOut(auth);
+                localStorage.removeItem('OPay_Registered_Users_v4');
+                localStorage.removeItem('OPay_Terminal_Locked');
+                localStorage.removeItem('OPay_Last_Login_Tab');
+                localStorage.removeItem('OPay_Last_Staff_Phone');
+                localStorage.removeItem('OPay_Last_Staff_Pin');
+                localStorage.removeItem('OPay_Last_Manager_Phone');
+                localStorage.removeItem('OPay_Last_Manager_Pin');
+                setRegisteredUsers([]);
+                window.location.reload();
+              } catch (signOutErr) {
+                console.error('[Auth] Failed to sign out orphaned user:', signOutErr);
+              }
+            }
           }
         } catch (err) {
           console.error('[Auth] Failed to retrieve user profile:', err);
@@ -742,6 +816,8 @@ export default function App() {
 
   // Firestore mutation wrappers
   const handleAddPosTerminal = async (term: PosTerminal) => {
+    dispatch({ type: 'ADD_POS_TERMINAL', payload: term });
+
     if (syncOwnerId) {
       try {
         const termWithOwner = { ...term, ownerId: syncOwnerId };
@@ -750,12 +826,12 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
       }
-    } else {
-      dispatch({ type: 'ADD_POS_TERMINAL', payload: term });
     }
   };
 
   const handleUpdatePosTerminal = async (term: PosTerminal) => {
+    dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
+
     if (syncOwnerId) {
       try {
         const termWithOwner = { ...term, ownerId: syncOwnerId };
@@ -764,8 +840,6 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
       }
-    } else {
-      dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
     }
   };
 
@@ -786,60 +860,70 @@ export default function App() {
   };
 
   const handleDeletePosTerminal = async (id: string) => {
+    dispatch({ type: 'DELETE_POS_TERMINAL', payload: id });
+
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'pos_terminals', id));
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${id}`);
       }
-    } else {
-      dispatch({ type: 'DELETE_POS_TERMINAL', payload: id });
     }
   };
 
   const handleAddTransaction = async (tx: Transaction) => {
+    // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
+    // This solves the core audit requirement of preventing any lag or delay in showing transaction history, metrics, and reports.
+    dispatch({ type: 'ADD_TRANSACTION', payload: tx });
+
     if (syncOwnerId) {
       try {
-        const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
+        // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
+        // This ensures the cashier's onSnapshot listener query (where('cashierId', '==', currentUserId)) matches successfully.
+        const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
         const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
         const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
       }
-    } else {
-      dispatch({ type: 'ADD_TRANSACTION', payload: tx });
     }
   };
 
   const handleUpdateTransaction = async (tx: Transaction) => {
+    // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
+    dispatch({ type: 'UPDATE_TRANSACTION', payload: tx });
+
     if (syncOwnerId) {
       try {
-        const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
+        // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
+        const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
         const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
         const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
       }
-    } else {
-      dispatch({ type: 'UPDATE_TRANSACTION', payload: tx });
     }
   };
 
   const handleDeleteTransaction = async (id: string) => {
+    // Unconditionally dispatch locally first
+    dispatch({ type: 'DELETE_TRANSACTION', payload: id });
+
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'transactions', id));
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, `transactions/${id}`);
       }
-    } else {
-      dispatch({ type: 'DELETE_TRANSACTION', payload: id });
     }
   };
 
   const handleBulkDeleteTransactions = async (ids: string[]) => {
+    // Unconditionally dispatch locally first
+    dispatch({ type: 'BULK_DELETE_TRANSACTIONS', payload: ids });
+
     if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
@@ -850,17 +934,19 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_delete');
       }
-    } else {
-      dispatch({ type: 'BULK_DELETE_TRANSACTIONS', payload: ids });
     }
   };
 
   const handleBulkUpdateTransactions = async (updatedTxs: Transaction[]) => {
+    // Unconditionally dispatch locally first
+    dispatch({ type: 'BULK_UPDATE_TRANSACTIONS', payload: updatedTxs });
+
     if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
         updatedTxs.forEach((tx) => {
-          const cashierId = tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined;
+          // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
+          const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
           const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
           const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
           batch.set(doc(db, 'transactions', tx.id), cleanData, { merge: true });
@@ -869,12 +955,12 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_update');
       }
-    } else {
-      dispatch({ type: 'BULK_UPDATE_TRANSACTIONS', payload: updatedTxs });
     }
   };
 
   const handleCustomResetData = async () => {
+    dispatch({ type: 'RESET_DATA' });
+
     if (syncOwnerId) {
       try {
         const batch = writeBatch(db);
@@ -885,7 +971,8 @@ export default function App() {
 
         const seedTxs = getSeedTransactions(state.terminalFeeRate);
         seedTxs.forEach((tx) => {
-          const txWithOwner = { ...tx, ownerId: syncOwnerId };
+          const cashierId = tx.employeeId || tx.cashierId || state.currentUser.id || 'cashier';
+          const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
           const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
           batch.set(doc(db, 'transactions', tx.id), cleanData);
         });
@@ -894,12 +981,13 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, 'transactions_batch_reset');
       }
-    } else {
-      dispatch({ type: 'RESET_DATA' });
     }
   };
 
   const handleAddExpense = async (expense: Expense) => {
+    // Unconditionally dispatch locally first
+    dispatch({ type: 'ADD_EXPENSE', payload: expense });
+
     if (syncOwnerId) {
       try {
         const expenseWithOwner = { ...expense, ownerId: syncOwnerId };
@@ -908,20 +996,19 @@ export default function App() {
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `expenses/${expense.id}`);
       }
-    } else {
-      dispatch({ type: 'ADD_EXPENSE', payload: expense });
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
+    // Unconditionally dispatch locally first
+    dispatch({ type: 'DELETE_EXPENSE', payload: id });
+
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'expenses', id));
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, `expenses/${id}`);
       }
-    } else {
-      dispatch({ type: 'DELETE_EXPENSE', payload: id });
     }
   };
 
@@ -1345,10 +1432,11 @@ export default function App() {
     const employeeName = state.currentUser.name;
 
     // Nigeria Agent fee practices standard calculation
-    const customerFee = getRecommendedAgentFee(amount, type, subType); 
-    const terminalFee = calculateTerminalFee(amount, type, provider, state.terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount, type);
-    const profit = customerFee - terminalFee - cbnCharge;
+    const financials = getCalculatedFinancials(amount, type, provider, state.settings);
+    const customerFee = financials.customerCharge; 
+    const terminalFee = financials.providerCharge;
+    const cbnCharge = financials.cbnCharge;
+    const profit = financials.agentProfit;
 
     const newSimTx: Transaction = {
       id: 'tx_sim_' + Math.floor(1000 + Math.random() * 9000),
@@ -1781,6 +1869,26 @@ export default function App() {
                   <ArrowRightLeft className="w-3.5 h-3.5 text-neutral-500" />
                   <span>Switch Shift</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDashboardTab('audit')}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 hover:text-amber-700 rounded-xl text-[11px] font-black transition cursor-pointer select-none active:scale-[0.98] border border-amber-200/40 uppercase tracking-wider"
+                  title="Audit pricing rules and verify Firestore configuration"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Pricing Audit</span>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => setDashboardTab('pricing')}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 rounded-xl text-[11px] font-black transition cursor-pointer select-none active:scale-[0.98] border border-indigo-200/40 uppercase tracking-wider"
+                  title="Manage advanced pricing rules and versioned matrices"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Pricing Rules</span>
+                </button>
                 
                 <button
                   type="button"
@@ -2200,7 +2308,7 @@ export default function App() {
               className="bg-white hover:bg-neutral-50 text-[#00b87a] font-bold py-2.5 px-1 rounded-xl text-[12px] flex flex-col sm:flex-row items-center justify-center gap-1.5 transition active:scale-95 shadow-sm cursor-pointer"
             >
               <ArrowUpFromLine className="w-4 h-4 text-[#00b87a]" />
-              <span>Wallet Deposit</span>
+              <span>Money Receive</span>
             </button>
             <button
               onClick={() => openWithPreset('Transfer')}
@@ -2214,7 +2322,7 @@ export default function App() {
               className="bg-white hover:bg-neutral-50 text-[#00b87a] font-bold py-2.5 px-1 rounded-xl text-[12px] flex flex-col sm:flex-row items-center justify-center gap-1.5 transition active:scale-95 shadow-sm cursor-pointer"
             >
               <ArrowDownToLine className="w-4 h-4 text-[#00b87a]" />
-              <span>Cash Out POS</span>
+              <span>Withdraw</span>
             </button>
           </div>
 
@@ -2332,11 +2440,16 @@ export default function App() {
 
         {/* 3. OPAY TRADITIONAL CIRCULAR SHORTCUTS MENU GRID */}
         {dashboardTab === 'pos' && (
-        <div className="bg-white border border-neutral-200 p-5 rounded-3xl shadow-sm space-y-4">
-          <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-neutral-400 block pb-1 border-b border-neutral-100">
-            Core Services Grid
-          </span>
-          <div className="grid grid-cols-4 gap-y-5 gap-x-2 text-center">
+          <>
+            <div className="mb-4">
+              <NetworkAdvisorWidget onOpen={() => setIsNetworkAdvisorOpen(true)} />
+            </div>
+
+            <div className="bg-white border border-neutral-200 p-5 rounded-3xl shadow-sm space-y-4">
+              <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-neutral-400 block pb-1 border-b border-neutral-100">
+                Core Services Grid
+              </span>
+              <div className="grid grid-cols-4 gap-y-5 gap-x-2 text-center">
             
             {/* POS Cashout */}
             <button 
@@ -2346,7 +2459,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-orange-100 group-hover:bg-orange-200 transition-colors flex items-center justify-center text-orange-600 shadow-sm active:scale-90 duration-100">
                 <ArrowDownToLine className="w-5 h-5 stroke-[2.2]" />
               </div>
-              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Cash out POS</span>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Withdraw</span>
             </button>
 
             {/* Wallet Deposit */}
@@ -2357,7 +2470,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-blue-100 group-hover:bg-blue-200 transition-colors flex items-center justify-center text-blue-600 shadow-sm active:scale-90 duration-100">
                 <ArrowUpFromLine className="w-5 h-5 stroke-[2.2]" />
               </div>
-              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Deposit</span>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Money Receive</span>
             </button>
 
             {/* Bank Transfer */}
@@ -2458,8 +2571,22 @@ export default function App() {
               </div>
               <span className="text-[11px] font-bold text-neutral-700 leading-tight">Shift Profile</span>
             </button>
+
+            {/* Network Advisor Button */}
+            <button 
+              type="button"
+              onClick={() => setIsNetworkAdvisorOpen(true)}
+              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
+              title="Compare mobile signals & AI prediction today"
+            >
+              <div className="w-12 h-12 rounded-full bg-amber-50 group-hover:bg-amber-100 text-amber-600 border border-amber-200 transition-all flex items-center justify-center shadow-sm active:scale-90 duration-100">
+                <span className="text-lg">📶</span>
+              </div>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Best Network</span>
+            </button>
           </div>
         </div>
+          </>
         )}
 
         {/* Active Transaction Counters & Performance */}
@@ -2552,7 +2679,7 @@ export default function App() {
         <div className="bg-white border border-neutral-200 p-4 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="space-y-0.5">
             <span className="text-xs font-mono font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-1.5">
-              <Percent className="w-3.5 h-3.5 text-[#00B87A]" /> Cashout Base Operating Cost Rate
+              <Percent className="w-3.5 h-3.5 text-[#00B87A]" /> Withdrawal Base Operating Cost Rate
             </span>
             <p className="text-[11px] text-neutral-500 font-medium">Configure terminal operator charge settings (0.25% Saver vs 0.50% Master rate).</p>
           </div>
@@ -3063,51 +3190,7 @@ export default function App() {
                     </label>
                     <select
                       value={newTerminalProvider}
-                      onChange={(e) => setNewTerminalProvider(e.target.value as ProviderType)}
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
-                    >
-                      <option value="OPay">OPay</option>
-                      <option value="Moniepoint">Moniepoint</option>
-                      <option value="PalmPay">PalmPay</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-1.5 font-mono">
-                      SIM Card Number
-                    </label>
-                    <input
-                      type="text"
-                      value={newTerminalSim}
-                      onChange={(e) => setNewTerminalSim(e.target.value)}
-                      placeholder="e.g. 08012345678"
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-1.5 font-mono">
-                      Network Provider
-                    </label>
-                    <select
-                      value={newTerminalNetwork}
-                      onChange={(e) => setNewTerminalNetwork(e.target.value)}
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
-                    >
-                      <option value="MTN">MTN</option>
-                      <option value="Airtel">Airtel</option>
-                      <option value="Glo">Glo</option>
-                      <option value="9mobile">9mobile</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-1.5 font-mono">
-                      POS Hardware Brand *
-                    </label>
-                    <select
-                      value={newTerminalProvider}
-                      onChange={(e) => setNewTerminalProvider(e.target.value)}
+                      onChange={(e) => setNewTerminalProvider(e.target.value as any)}
                       className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
                     >
                       <option value="OPay">OPay Terminal</option>
@@ -3405,6 +3488,7 @@ export default function App() {
             onUpdateTransaction={handleUpdateTransaction}
             onAddTransaction={handleAddTransaction}
             currentUser={state.currentUser}
+            settings={state.settings}
           />
           <BorrowKeepSection state={state} syncOwnerId={syncOwnerId} />
         </>
@@ -3416,6 +3500,7 @@ export default function App() {
             registeredUsers={registeredUsers}
             transactions={state.transactions}
             posTerminals={state.posTerminals}
+            settings={state.settings}
             activeTimeframe={state.activeTimeframe}
             selectedEmployeeFilter={state.selectedEmployeeFilter}
             onSetEmployeeFilter={(id) => dispatch({ type: 'SET_EMPLOYEE_FILTER', payload: id })}
@@ -3471,6 +3556,21 @@ export default function App() {
               Manage Shift Profile
             </button>
           </div>
+
+          {/* Charge Rule Matrix Section */}
+          <ChargeMatrixSettings 
+            providerConfigs={state.settings?.providerConfigs || []}
+            regulatoryConfig={state.settings?.regulatoryConfig || { emtlThreshold: 10000, emtlCharge: 50, vatRate: 0 }}
+            onSave={(pConfigs, rConfig) => {
+              dispatch({ 
+                type: 'UPDATE_SETTINGS', 
+                payload: { 
+                  providerConfigs: pConfigs,
+                  regulatoryConfig: rConfig
+                } 
+              });
+            }}
+          />
 
           {/* Revert Sandbox Seed Records */}
           <div className="bg-white border border-neutral-200 p-4 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -3572,6 +3672,7 @@ export default function App() {
           <ProviderBreakdown 
             transactions={authorizedTransactions} 
             terminalFeeRate={state.terminalFeeRate}
+            settings={state.settings}
           />
 
           {/* 12. DYNAMIC TREND ANALYTICS */}
@@ -3601,6 +3702,16 @@ export default function App() {
         </div>
         )}
 
+        {/* ADMIN PRICING AUDIT VIEW */}
+        {dashboardTab === 'audit' && (
+          <AdminPricingAudit settings={state.settings} />
+        )}
+
+        {/* PRICING RULE MANAGER VIEW */}
+        {dashboardTab === 'pricing' && (
+          <PricingRuleManager currentUser={activeUser} settings={state.settings} />
+        )}
+
       </main>
 
       {/* 15. PERSISTENT FLOATING BOTTOM NAV BAR - EXTREMELY HIGH FIDELITY TO OPAY FOR MOBILE & DESKTOP DOCK */}
@@ -3622,7 +3733,7 @@ export default function App() {
             className="flex-1 flex flex-col items-center gap-1 hover:text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
           >
             <ArrowDownToLine className="w-5 h-5" />
-            <span>Cashout</span>
+            <span>Withdraw</span>
           </button>
 
           <button 
@@ -3943,6 +4054,17 @@ export default function App() {
                     </div>
                   )}
 
+                  {selectedReceiptTx.destinationBank && (
+                    <div className="border-t border-dashed border-neutral-200 pt-2.5 flex justify-between">
+                      <span className="text-neutral-400 text-[10px] uppercase font-bold tracking-wider">
+                        {selectedReceiptTx.type === 'Airtime' ? 'Telco Network' : 'Destination Bank'}
+                      </span>
+                      <span className="text-neutral-800 font-extrabold text-right uppercase">
+                        {selectedReceiptTx.destinationBank}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="border-t border-neutral-200 pt-3 flex justify-between items-center text-sm">
                     <span className="text-neutral-500 font-sans font-bold">Transaction Amount</span>
                     <span className="font-extrabold text-neutral-900 font-mono text-base">
@@ -4045,6 +4167,11 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <NetworkAdvisorModal
+        isOpen={isNetworkAdvisorOpen}
+        onClose={() => setIsNetworkAdvisorOpen(false)}
+      />
 
     </div>
   );

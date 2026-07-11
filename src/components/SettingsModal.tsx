@@ -507,11 +507,11 @@ export function SettingsModal({
                         onChange={(e) => onUpdateSettings({ defaultType: e.target.value as TransactionType })}
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-2 py-2 text-neutral-805 font-bold"
                       >
-                        <option value="Withdrawal">Cash out POS</option>
-                        <option value="Deposit">Deposit (Cash-in)</option>
+                        <option value="Withdrawal">Withdraw</option>
+                        <option value="Deposit">Money Receive</option>
                         <option value="Transfer">Bank Transfer</option>
                         <option value="Cash In">Cash In</option>
-                        <option value="Cash Out">Cash Out</option>
+                        <option value="Cash Out">Withdraw</option>
                         <option value="Airtime">Airtime</option>
                         <option value="Data">Data</option>
                         <option value="Bills">Bills</option>

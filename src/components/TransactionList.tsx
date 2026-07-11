@@ -30,7 +30,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  AlertTriangle
+  AlertTriangle,
+  Smartphone
 } from 'lucide-react';
 
 interface TransactionListProps {
@@ -105,6 +106,8 @@ export function TransactionList({
     let transferVol = 0;
     let depositCount = 0;
     let depositVol = 0;
+    let airtimeCount = 0;
+    let airtimeVol = 0;
 
     let opayCount = 0;
     let opayVol = 0;
@@ -123,6 +126,9 @@ export function TransactionList({
       } else if (tx.type === 'Deposit') {
         depositCount++;
         depositVol += tx.amount;
+      } else if (tx.type === 'Airtime' || tx.type === 'Data') {
+        airtimeCount++;
+        airtimeVol += tx.amount;
       }
 
       if (tx.provider === 'OPay') {
@@ -146,6 +152,8 @@ export function TransactionList({
       transferVol,
       depositCount,
       depositVol,
+      airtimeCount,
+      airtimeVol,
       opayCount,
       opayVol,
       moniepointCount,
@@ -559,7 +567,7 @@ export function TransactionList({
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
-              Cash Out Size
+              Withdrawal Size
             </span>
             <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
               {metrics.withdrawalsCount} receipts
@@ -673,12 +681,13 @@ export function TransactionList({
       <div className="space-y-4">
         <div className="space-y-1.5">
           <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-450 uppercase block">Category Operation Filters:</span>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {[
               { id: 'ALL', label: 'Every Transaction 🌐', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white' },
-              { id: 'Withdrawal', label: '📥 Cash out POS', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-orange-100 text-orange-700 bg-orange-50/30', activeColor: 'bg-orange-600 border-orange-600 text-white' },
+              { id: 'Withdrawal', label: '📥 Withdraw', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-orange-100 text-orange-700 bg-orange-50/30', activeColor: 'bg-orange-600 border-orange-600 text-white' },
               { id: 'Transfer', label: '💸 Bank Transfers', count: stats.transferCount, vol: stats.transferVol, color: 'border-indigo-100 text-indigo-700 bg-indigo-50/30', activeColor: 'bg-indigo-600 border-indigo-600 text-white' },
-              { id: 'Deposit', label: '📤 Wallet Deposits', count: stats.depositCount, vol: stats.depositVol, color: 'border-blue-100 text-blue-700 bg-blue-50/30', activeColor: 'bg-blue-600 border-blue-600 text-white' }
+              { id: 'Deposit', label: '📤 Money Receive', count: stats.depositCount, vol: stats.depositVol, color: 'border-blue-100 text-blue-700 bg-blue-50/30', activeColor: 'bg-blue-600 border-blue-600 text-white' },
+              { id: 'Airtime', label: '📱 Airtime Sale', count: stats.airtimeCount, vol: stats.airtimeVol, color: 'border-purple-100 text-purple-700 bg-purple-50/30', activeColor: 'bg-purple-600 border-purple-600 text-white' }
             ].map((tab) => {
               const isActive = typeFilter === tab.id;
               return (
@@ -832,8 +841,8 @@ export function TransactionList({
               className="w-full bg-neutral-50 border border-neutral-200 focus:border-[#00B87A] hover:border-neutral-300 focus:outline-none rounded-xl px-2 py-2.5 text-xs text-neutral-700 font-bold"
             >
               <option value="ALL">All Categories</option>
-              <option value="Withdrawal">📥 Cash out POS Only</option>
-              <option value="Deposit">📤 Wallet Deposits Only</option>
+              <option value="Withdrawal">📥 Withdraw Only</option>
+              <option value="Deposit">📤 Money Receive Only</option>
               <option value="Transfer">💸 Bank Transfers Only</option>
             </select>
           </div>
@@ -1045,7 +1054,7 @@ export function TransactionList({
                   let easyIconColor = '';
    
                   if (tx.type === 'Withdrawal') {
-                    easyCategoryTitle = '📥 Cash Out (Withdrawal)';
+                    easyCategoryTitle = '📥 Withdraw';
                     easyCategoryDesc = 'Customer swiped card, you gave them paper cash';
                     easyIconBg = 'bg-emerald-50 text-emerald-700 border border-emerald-200/50';
                     easyIconColor = 'text-emerald-600';
@@ -1055,7 +1064,7 @@ export function TransactionList({
                     easyIconBg = 'bg-indigo-50 text-indigo-700 border border-indigo-200/50';
                     easyIconColor = 'text-indigo-600';
                   } else { // Deposit
-                    easyCategoryTitle = '📤 Cash In (Deposit)';
+                    easyCategoryTitle = '📤 Money Receive';
                     easyCategoryDesc = 'Customer gave you cash, you credited their wallet';
                     easyIconBg = 'bg-blue-50 text-blue-700 border border-blue-200/50';
                     easyIconColor = 'text-blue-600';
@@ -1158,6 +1167,7 @@ export function TransactionList({
                           {(tx.type === 'Withdrawal' || tx.type === 'Cash Out (Transfer)') && <ArrowDownLeft className={arrowSizeClass} />}
                           {tx.type === 'Transfer' && <ArrowRightLeft className={arrowSizeClass} />}
                           {tx.type === 'Deposit' && <ArrowUpRight className={arrowSizeClass} />}
+                          {(tx.type === 'Airtime' || tx.type === 'Data') && <Smartphone className={arrowSizeClass} />}
                         </div>
                         
                         <div className="min-w-0">
@@ -1548,7 +1558,7 @@ export function TransactionList({
                             ? 'bg-blue-100 text-blue-750' 
                             : 'bg-indigo-100 text-indigo-750'
                         }`}>
-                          {tx.type === 'Withdrawal' ? '📥 Cash Out (ATM)' : tx.type === 'Cash Out (Transfer)' ? '📲 Phone Transfer' : tx.type === 'Deposit' ? '📤 Cash In' : '💸 Send'}
+                          {tx.type === 'Withdrawal' ? '📥 Withdraw (ATM)' : tx.type === 'Cash Out (Transfer)' ? '📲 Money Receive' : tx.type === 'Deposit' ? '📤 Money Receive' : '💸 Send'}
                         </span>
                         
                         <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-black border ${providerColor}`}>

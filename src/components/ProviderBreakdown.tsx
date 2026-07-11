@@ -4,16 +4,17 @@
  */
 
 import React, { useMemo } from 'react';
-import { Transaction, ProviderType } from '../types';
-import { formatNaira, calculateTerminalFee, calculateCBNCharge } from '../utils';
+import { Transaction, ProviderType, AppSettings } from '../types';
+import { formatNaira, calculateTerminalFee, calculateCBNCharge, getCalculatedFinancials } from '../utils';
 import { TrendingUp, RefreshCw, BarChart2, Award } from 'lucide-react';
 
 interface ProviderBreakdownProps {
   transactions: Transaction[];
   terminalFeeRate: number;
+  settings?: AppSettings;
 }
 
-export function ProviderBreakdown({ transactions, terminalFeeRate }: ProviderBreakdownProps) {
+export function ProviderBreakdown({ transactions, terminalFeeRate, settings }: ProviderBreakdownProps) {
   
   // Compute provider distribution matrices
   const providerStats = useMemo(() => {
@@ -34,9 +35,17 @@ export function ProviderBreakdown({ transactions, terminalFeeRate }: ProviderBre
       if (!stats[p]) {
         stats[p] = { profit: 0, volume: 0, count: 0, customerFees: 0, terminalCosts: 0 };
       }
-      const termCost = tx.terminalFee !== undefined ? tx.terminalFee : calculateTerminalFee(tx.amount, tx.type, p as any, terminalFeeRate, tx.subType);
-      const cbnCharge = tx.cbnCharge !== undefined ? tx.cbnCharge : calculateCBNCharge(tx.amount, tx.type);
-      const prf = tx.profit !== undefined ? tx.profit : (tx.customerFee - termCost - cbnCharge);
+      
+      // Use stored values if available, otherwise use unified calculator
+      const financials = getCalculatedFinancials(tx.amount, tx.type as any, p as any, settings, tx.destinationBank);
+      
+      const termCost = tx.providerCharge !== undefined ? tx.providerCharge : 
+                       (tx.terminalFee !== undefined ? tx.terminalFee : financials.providerCharge);
+      
+      const cbnCharge = tx.cbnCharge !== undefined ? tx.cbnCharge : financials.cbnCharge;
+      
+      const prf = tx.netProfit !== undefined ? tx.netProfit : 
+                  (tx.profit !== undefined ? tx.profit : (tx.customerFee - termCost - cbnCharge));
       
       stats[p].volume += tx.amount;
       stats[p].customerFees += tx.customerFee;

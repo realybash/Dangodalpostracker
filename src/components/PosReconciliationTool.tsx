@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, User, ProviderType } from '../types';
-import { formatNaira, getProviderTransactionNumber, generateId, calculateTerminalFee, calculateCBNCharge, getRecommendedAgentFee } from '../utils';
+import { Transaction, User, ProviderType, AppSettings } from '../types';
+import { formatNaira, getProviderTransactionNumber, generateId, calculateTerminalFee, calculateCBNCharge, getRecommendedAgentFee, getCalculatedFinancials } from '../utils';
 import { 
   FileText, 
   Upload, 
@@ -24,6 +24,7 @@ import {
 interface PosReconciliationToolProps {
   transactions: Transaction[];
   registeredUsers: User[];
+  settings?: AppSettings;
   onAddTransaction: (tx: Transaction) => Promise<void>;
   activeTimeframe: string;
 }
@@ -39,6 +40,7 @@ interface SimulatedPosTx {
 export function PosReconciliationTool({
   transactions,
   registeredUsers,
+  settings,
   onAddTransaction,
   activeTimeframe
 }: PosReconciliationToolProps) {
@@ -229,10 +231,11 @@ export function PosReconciliationTool({
         const id = `tx_${generateId()}`;
         
         // Calculate standard fees using centralized realistic rules
-        const customerFee = getRecommendedAgentFee(missing.amount, missing.type, 'OtherBank');
-        const terminalFee = calculateTerminalFee(missing.amount, missing.type, missing.provider, 0.5, 'OtherBank');
-        const cbnCharge = calculateCBNCharge(missing.amount, missing.type);
-        const profit = customerFee - terminalFee - cbnCharge;
+        const financials = getCalculatedFinancials(missing.amount, missing.type, missing.provider, settings);
+        const customerFee = financials.customerCharge;
+        const terminalFee = financials.providerCharge;
+        const cbnCharge = financials.cbnCharge;
+        const profit = financials.agentProfit;
 
         const newTx: Transaction = {
           id,
@@ -585,7 +588,7 @@ export function PosReconciliationTool({
                         <span className={`w-2 h-2 rounded-full shrink-0 ${matches ? 'bg-emerald-400 shadow-sm shadow-emerald-400/30' : 'bg-rose-500 animate-ping'}`} />
                         <div className="min-w-0">
                           <div className="text-[10px] font-black text-neutral-100 flex items-center gap-1.5 flex-wrap">
-                            <span>{st.type === 'Withdrawal' ? '📥 Cash-out Received' : '📤 Deposit Paid'}</span>
+                            <span>{st.type === 'Withdrawal' ? '📥 Withdraw Received' : '📤 Money Receive Paid'}</span>
                             <span className="text-[8.5px] font-bold text-neutral-400">
                               {new Date(st.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
@@ -741,7 +744,7 @@ export function PosReconciliationTool({
                         <div className="min-w-0">
                           <div className="font-extrabold text-neutral-800 flex items-center gap-1.5">
                             <span className="bg-rose-50 text-rose-700 px-1.5 py-0.2 rounded font-mono text-[9px] font-black uppercase">
-                              {mtx.type === 'Withdrawal' ? 'Withdraw' : 'Deposit'}
+                              {mtx.type === 'Withdrawal' ? 'Withdraw' : 'Money Receive'}
                             </span>
                             <span className="text-neutral-500 font-medium text-[9px]">
                               🕒 {new Date(mtx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

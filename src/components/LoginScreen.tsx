@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser, getAuthPassword } from '../utils';
 import { 
@@ -37,6 +37,14 @@ interface LoginScreenProps {
 
 export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts, isUsersLoaded }: LoginScreenProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+
+  // Automatically switch to registration mode if there are zero registered users in the database
+  useEffect(() => {
+    if (isUsersLoaded && registeredUsers.length === 0) {
+      setAuthMode('register');
+    }
+  }, [isUsersLoaded, registeredUsers.length]);
+
   const [loginTab, setLoginTab] = useState<'staff' | 'manager'>(() => {
     try {
       const savedTab = localStorage.getItem('OPay_Last_Login_Tab');
@@ -174,6 +182,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           });
         } catch (err) {
           console.warn('[Login] Remote staff lookup failed:', err);
+          handleFirestoreError(err, OperationType.LIST, 'users_staff_lookup');
         }
       }
 
@@ -283,47 +292,59 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
           // Query by role and phoneNumber field
           if (normalizedInputPhone) {
-            const q = query(usersRef, where('role', '==', 'Manager'), where('phoneNumber', '==', normalizedInputPhone));
-            const snap = await getDocs(q);
-            fetchedDocsCount = snap.size;
-            console.log(`[Login] Firestore query returned ${fetchedDocsCount} documents for phone ${normalizedInputPhone}`);
-            
-            if (!snap.empty) {
-              const docSnap = snap.docs[0];
-              matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
-              console.log('[Login] Matched manager via direct phoneNumber field:', matchedManager.name, 'UID:', matchedManager.uid);
+            try {
+              const q = query(usersRef, where('role', '==', 'Manager'), where('phoneNumber', '==', normalizedInputPhone));
+              const snap = await getDocs(q);
+              fetchedDocsCount = snap.size;
+              console.log(`[Login] Firestore query returned ${fetchedDocsCount} documents for phone ${normalizedInputPhone}`);
+              
+              if (!snap.empty) {
+                const docSnap = snap.docs[0];
+                matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
+                console.log('[Login] Matched manager via direct phoneNumber field:', matchedManager.name, 'UID:', matchedManager.uid);
+              }
+            } catch (qErr) {
+              handleFirestoreError(qErr, OperationType.LIST, 'users_manager_phone_query');
             }
           }
 
           // Fallback direct query by fullName
           if (!matchedManager) {
             console.log('[Login] Trying fallback query by fullName in Firestore...');
-            const q = query(usersRef, where('role', '==', 'Manager'), where('fullName', '==', inputRaw));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              const docSnap = snap.docs[0];
-              matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
-              console.log('[Login] Matched manager via direct fullName field:', matchedManager.name, 'UID:', matchedManager.uid);
+            try {
+              const q = query(usersRef, where('role', '==', 'Manager'), where('fullName', '==', inputRaw));
+              const snap = await getDocs(q);
+              if (!snap.empty) {
+                const docSnap = snap.docs[0];
+                matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
+                console.log('[Login] Matched manager via direct fullName field:', matchedManager.name, 'UID:', matchedManager.uid);
+              }
+            } catch (fnErr) {
+              handleFirestoreError(fnErr, OperationType.LIST, 'users_manager_name_query');
             }
           }
 
           // Fallback query all managers if queries didn't work (e.g. slight mismatch)
           if (!matchedManager) {
             console.log('[Login] Trying absolute fallback: fetching all Managers in Firestore...');
-            const q = query(usersRef, where('role', '==', 'Manager'));
-            const snap = await getDocs(q);
-            const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
-            console.log('[Login] Retrieved all managers list size:', allManagers.length);
-            
-            matchedManager = allManagers.find(m => {
-              const dbPhoneDigits = cleanPhoneForCompare(m.phone || m.phoneNumber || '');
-              const dbName = m.name.toLowerCase().replace(/\s+/g, '');
-              const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-              const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
-              return phoneMatch || nameMatch;
-            });
-            if (matchedManager) {
-              console.log('[Login] Found matched manager in retrieved managers list:', matchedManager.name, 'UID:', matchedManager.uid);
+            try {
+              const q = query(usersRef, where('role', '==', 'Manager'));
+              const snap = await getDocs(q);
+              const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+              console.log('[Login] Retrieved all managers list size:', allManagers.length);
+              
+              matchedManager = allManagers.find(m => {
+                const dbPhoneDigits = cleanPhoneForCompare(m.phone || m.phoneNumber || '');
+                const dbName = m.name.toLowerCase().replace(/\s+/g, '');
+                const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
+                const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
+                return phoneMatch || nameMatch;
+              });
+              if (matchedManager) {
+                console.log('[Login] Found matched manager in retrieved managers list:', matchedManager.name, 'UID:', matchedManager.uid);
+              }
+            } catch (fallbackErr) {
+              handleFirestoreError(fallbackErr, OperationType.LIST, 'users_manager_all_fallback');
             }
           }
         } catch (err) {

@@ -1,137 +1,143 @@
 {
   "entities": {
     "User": {
-      "title": "User",
-      "description": "Terminal cashier or manager account linked to a Google owner",
+      "title": "User Profile",
+      "description": "User account details and roles",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["Manager", "Employee"] },
-        "pin": { "type": "string" },
-        "phone": { "type": "string" },
-        "ownerId": { "type": "string", "description": "Google Auth UID of the terminal owner" }
+        "name": { "type": "string", "description": "Full name" },
+        "role": { "type": "string", "enum": ["Manager", "Employee"], "description": "User role" },
+        "phone": { "type": "string", "description": "Unique phone number used for login" },
+        "ownerId": { "type": "string", "description": "ID of the manager who owns this employee account" },
+        "activated": { "type": "boolean", "description": "Whether the account is active" },
+        "pin": { "type": "string", "description": "Numeric PIN for secure operations" }
       },
-      "required": ["id", "name", "role", "pin", "phone", "ownerId"]
+      "required": ["name", "role", "phone", "activated"]
     },
     "Transaction": {
-      "title": "Transaction",
-      "description": "Simulated or actual POS financial transaction record",
+      "title": "Financial Transaction",
+      "description": "Records of cash-in, cash-out, and transfers",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "employeeId": { "type": "string" },
-        "employeeName": { "type": "string" },
-        "type": { "type": "string", "enum": ["Deposit", "Withdrawal", "Transfer"] },
-        "provider": { "type": "string", "enum": ["OPay", "Moniepoint", "PalmPay", "Others"] },
-        "subType": { "type": "string" },
         "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["Withdrawal", "Deposit", "Transfer", "Airtime", "Bill Payment"] },
+        "status": { "type": "string", "enum": ["Success", "Pending", "Failed"] },
+        "ownerId": { "type": "string" },
+        "cashierId": { "type": "string" },
+        "provider": { "type": "string" },
         "customerFee": { "type": "number" },
         "terminalFee": { "type": "number" },
+        "cbnCharge": { "type": "number" },
         "profit": { "type": "number" },
-        "feeMethod": { "type": "string", "enum": ["CardDebit", "Cash"] },
-        "totalCustomerCharged": { "type": "number" },
-        "timestamp": { "type": "string" },
-        "notes": { "type": "string" },
-        "status": { "type": "string", "enum": ["Success", "Pending", "Failed"] },
-        "ownerId": { "type": "string", "description": "Google Auth UID of the terminal owner" },
-        "terminalId": { "type": "string" },
-        "terminalName": { "type": "string" }
+        "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "employeeId", "employeeName", "type", "provider", "amount", "customerFee", "terminalFee", "profit", "timestamp", "ownerId"]
-    },
-    "PosTerminal": {
-      "title": "PosTerminal",
-      "description": "Custom linked POS terminal in the cashier account",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "provider": { "type": "string" },
-        "serialNumber": { "type": "string" },
-        "terminalFeeRate": { "type": "number" },
-        "ownerId": { "type": "string" },
-        "employeeId": { "type": "string" },
-        "employeeName": { "type": "string" },
-        "posAccountNo": { "type": "string" },
-        "cashierName": { "type": "string" },
-        "areaOfWorking": { "type": "string" },
-        "addedBy": { "type": "string" },
-        "status": { "type": "string", "enum": ["Active", "Inactive", "Live"] },
-        "timestamp": { "type": "string" }
-      },
-      "required": ["id", "name", "provider", "ownerId", "posAccountNo", "cashierName", "areaOfWorking", "addedBy", "status", "timestamp"]
+      "required": ["amount", "type", "status", "ownerId", "cashierId", "timestamp"]
     },
     "Expense": {
-      "title": "Expense",
-      "description": "Business expense record",
+      "title": "Business Expense",
+      "description": "Operational costs recorded by employees or managers",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "amount": { "type": "number" },
+        "category": { "type": "string" },
         "description": { "type": "string" },
-        "timestamp": { "type": "string" },
         "ownerId": { "type": "string" },
         "employeeId": { "type": "string" },
-        "employeeName": { "type": "string" },
-        "notes": { "type": "string" },
-        "audioNote": { "type": "string" }
+        "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "amount", "description", "timestamp", "ownerId"]
+      "required": ["amount", "category", "ownerId", "employeeId", "timestamp"]
+    },
+    "PosTerminal": {
+      "title": "POS Terminal",
+      "description": "Configuration and tracking for physical terminals",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "provider": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "serialNumber": { "type": "string" }
+      },
+      "required": ["name", "provider", "ownerId"]
+    },
+    "Settings": {
+      "title": "Application Settings",
+      "description": "Global charge rules and regulatory configurations",
+      "type": "object",
+      "properties": {
+        "providerConfigs": { "type": "array" },
+        "regulatoryConfig": { "type": "object" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      }
     },
     "BorrowKeep": {
-      "title": "BorrowKeep",
-      "description": "Loan or kept money record",
+      "title": "Borrow/Keep Records",
+      "description": "Records of money borrowed or kept from transactions",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Borrow", "Keep"] },
         "amount": { "type": "number" },
-        "type": { "type": "string", "enum": ["loan_given", "loan_repaid", "money_kept", "money_returned"] },
-        "timestamp": { "type": "string" },
+        "person": { "type": "string" },
         "ownerId": { "type": "string" },
-        "employeeId": { "type": "string" },
-        "employeeName": { "type": "string" },
-        "linkedTransactionId": { "type": "string" },
-        "repaidAmount": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "partial", "settled"] },
-        "notes": { "type": "string" },
-        "audioNote": { "type": "string" },
-        "photo": { "type": "string" }
+        "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "name", "amount", "type", "timestamp", "ownerId"]
+      "required": ["type", "amount", "person", "ownerId", "timestamp"]
+    },
+    "PricingRule": {
+      "title": "Pricing Rule",
+      "description": "Advanced versioned pricing rule",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string" },
+        "type": { "type": "string" },
+        "minAmount": { "type": "number" },
+        "maxAmount": { "type": "number" },
+        "customerCharge": { "type": "number" },
+        "customerChargeType": { "type": "string", "enum": ["flat", "percent"] },
+        "providerCharge": { "type": "number" },
+        "providerChargeType": { "type": "string", "enum": ["flat", "percent"] },
+        "regulatoryCharge": { "type": "number" },
+        "vatRate": { "type": "number" },
+        "effectiveDate": { "type": "string", "format": "date-time" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "inactive", "archived"] },
+        "version": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["provider", "type", "minAmount", "maxAmount", "customerCharge", "status", "version", "ownerId"]
     }
   },
   "firestore": {
-    "users/{userId}": {
+    "/users/{userId}": {
       "schema": "User",
-      "description": "Collection of terminal authorization profiles"
+      "description": "User profiles"
     },
-    "transactions/{transactionId}": {
+    "/transactions/{id}": {
       "schema": "Transaction",
-      "description": "Collection of transaction records"
+      "description": "Financial logs"
     },
-    "pos_terminals/{terminalId}": {
-      "schema": "PosTerminal",
-      "description": "Collection of linked custom POS terminals"
-    },
-    "expenses/{expenseId}": {
+    "/expenses/{id}": {
       "schema": "Expense",
-      "description": "Collection of business expenses"
+      "description": "Expense logs"
     },
-    "borrowKeep/{recordId}": {
+    "/pos_terminals/{id}": {
+      "schema": "PosTerminal",
+      "description": "Terminal records"
+    },
+    "/settings/{ownerId}": {
+      "schema": "Settings",
+      "description": "Global config per manager"
+    },
+    "/borrowKeep/{id}": {
       "schema": "BorrowKeep",
-      "description": "Collection of loans and kept money"
+      "description": "Debt and credit tracking"
     },
-    "test_connection/{documentId}": {
-      "schema": {
-        "title": "TestConnection",
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" }
-        }
-      },
-      "description": "Collection for connectivity checks"
+    "/pricing_rules/{id}": {
+      "schema": "PricingRule",
+      "description": "Advanced pricing rules"
     }
   }
 }

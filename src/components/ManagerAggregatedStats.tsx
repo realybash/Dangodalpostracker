@@ -57,17 +57,19 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
     
     const customerCharges = todayTxs.reduce((sum, tx) => sum + (tx.customerCharge || tx.customerFee || 0), 0);
     const providerCharges = todayTxs.reduce((sum, tx) => sum + (tx.providerCharge || tx.terminalFee || 0), 0);
+    const regulatoryFees = todayTxs.reduce((sum, tx) => sum + (tx.cbnCharge || 0), 0);
+    const totalFees = providerCharges + regulatoryFees;
     const vat = todayTxs.reduce((sum, tx) => sum + (tx.vatAmount || 0), 0);
     const cashback = todayTxs.reduce((sum, tx) => sum + (tx.cashback || 0), 0);
     
     const typeBreakdown = todayTxs.reduce((acc, tx) => {
       if (!acc[tx.type]) acc[tx.type] = { profit: 0, count: 0 };
-      acc[tx.type].profit += tx.profit || 0;
+      acc[tx.type].profit += tx.netProfit || tx.agentProfit || tx.profit || 0;
       acc[tx.type].count += 1;
       return acc;
     }, {} as Record<string, { profit: number, count: number }>);
 
-    return { volume, profit, count, customerCharges, providerCharges, vat, cashback, typeBreakdown };
+    return { volume, profit, count, customerCharges, providerCharges, regulatoryFees, totalFees, vat, cashback, typeBreakdown };
   }, [transactions]);
 
   return (
@@ -107,15 +109,15 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
           <p className="text-sm font-black text-neutral-800">{formatNaira(grandTotals.customerCharges)}</p>
         </div>
         <div className="bg-red-50 p-3 rounded-2xl border border-red-100">
-          <p className="text-[9px] font-bold text-red-400 uppercase font-mono mb-1">Total Fees</p>
-          <p className="text-sm font-black text-red-800">{formatNaira(grandTotals.providerCharges)}</p>
+          <p className="text-[9px] font-bold text-red-400 uppercase font-mono mb-1">Provider & Regulatory Fees</p>
+          <p className="text-sm font-black text-red-800">{formatNaira(grandTotals.totalFees)}</p>
         </div>
         <div className="bg-blue-50 p-3 rounded-2xl border border-blue-100">
-          <p className="text-[9px] font-bold text-blue-400 uppercase font-mono mb-1">Cashback</p>
+          <p className="text-[9px] font-bold text-blue-400 uppercase font-mono mb-1">Cashback earned</p>
           <p className="text-sm font-black text-blue-800">{formatNaira(grandTotals.cashback)}</p>
         </div>
         <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100">
-          <p className="text-[9px] font-bold text-emerald-400 uppercase font-mono mb-1">My Profit</p>
+          <p className="text-[9px] font-bold text-emerald-400 uppercase font-mono mb-1">Net Agent Profit</p>
           <p className="text-sm font-black text-emerald-800">{formatNaira(grandTotals.profit)}</p>
         </div>
       </div>

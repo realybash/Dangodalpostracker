@@ -107,7 +107,8 @@ export interface Transaction {
   ownerId?: string;
   feeMethod?: 'CardDebit' | 'Cash' | 'Transfer'; // Dedicated dynamic POS automatic fee deduction flow
   totalCustomerCharged?: number; // Real physical cost debited or collected
-  paymentMethod?: 'Card' | 'Transfer'; // Collection source: Physical ATM Card or Phone Transfer
+  paymentMethod?: 'Card' | 'Transfer'; // Collection source: Physical ATM Card or Money Receive
+  destinationBank?: string; // Captured destination bank for transfers
   
   // New granular financial audit fields (separation of provider/customer/agent/etc)
   customerCharge?: number;
@@ -173,6 +174,66 @@ export interface PosTerminal {
   internetAccess?: 'Granted' | 'Denied';
 }
 
+export interface ChargeRule {
+  type: 'flat' | 'percent';
+  value: number;
+  cap?: number; // Maximum charge (e.g. 100 for withdrawals)
+  min?: number; // Minimum charge
+  threshold?: number; // Threshold for rule change (e.g. 20000 for withdrawal caps)
+  aboveThresholdValue?: number; // Value to use above threshold (e.g. 100 flat)
+  aboveThresholdType?: 'flat' | 'percent';
+}
+
+export interface ProviderChargeConfig {
+  id: string; // e.g. 'Moniepoint', 'OPay', 'PalmPay'
+  name: string;
+  withdrawal: ChargeRule;
+  transfer: ChargeRule;
+  deposit: ChargeRule;
+  airtime: ChargeRule;
+  bills: ChargeRule;
+  posCost?: number | string;
+  lastUpdated?: string;
+}
+
+export interface RegulatoryConfig {
+  emtlThreshold: number; // e.g. 10000
+  emtlCharge: number; // e.g. 50
+  vatRate: number; // e.g. 7.5 (%)
+}
+
+export type RuleStatus = 'active' | 'inactive' | 'archived';
+
+export interface PricingRule {
+  id: string;
+  provider: ProviderType;
+  type: TransactionType;
+  minAmount: number;
+  maxAmount: number;
+  
+  // Financials
+  customerCharge: number;
+  customerChargeType: 'flat' | 'percent';
+  providerCharge: number;
+  providerChargeType: 'flat' | 'percent';
+  regulatoryCharge: number; // Flat EMTL or similar
+  vatRate: number; // e.g. 7.5
+  
+  // Metadata
+  effectiveDate: string;
+  expiryDate?: string;
+  status: RuleStatus;
+  version: number;
+  createdBy: string;
+  updatedBy: string;
+  updatedAt: string;
+  
+  // Optional extras
+  commission?: number;
+  cashback?: number;
+  settlementCharge?: number;
+}
+
 export interface AppSettings {
   soundEnabled: boolean;
   voiceEnabled: boolean;
@@ -190,6 +251,8 @@ export interface AppSettings {
   pricingProfiles?: PricingProfile[];
   selectedProfileId?: string;
   profitWalletBalance?: number;
+  providerConfigs?: ProviderChargeConfig[];
+  regulatoryConfig?: RegulatoryConfig;
 }
 
 export interface AppState {

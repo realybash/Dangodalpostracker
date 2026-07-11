@@ -60,7 +60,7 @@ export function BreakdownTable({ daily, weekly, monthly, yearly, allTime, totalA
               <td className="p-4 font-medium text-neutral-700">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-sm"></div>
-                  Deposit
+                  Money Receive
                 </div>
               </td>
               {periods.map(p => (
@@ -75,7 +75,7 @@ export function BreakdownTable({ daily, weekly, monthly, yearly, allTime, totalA
               <td className="p-4 font-medium text-neutral-700">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-orange-500 shadow-sm"></div>
-                  Withdrawal
+                  Withdraw
                 </div>
               </td>
               {periods.map(p => (

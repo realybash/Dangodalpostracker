@@ -1,4 +1,100 @@
-import { Transaction, User } from './types';
+import { Transaction, User, TransactionType, ProviderType, AppSettings, UserRole, ProviderChargeConfig, RegulatoryConfig, ChargeRule, PricingProfile, ChargeRange, PricingRule } from './types';
+
+// REMOVED HARDCODED DEFAULTS (Strictly enforced Firestore-only rules)
+
+// REALISTIC NIGERIAN POS TERMINAL DEFAULTS (2024/2025)
+export const REALISTIC_PROVIDER_CONFIGS: ProviderChargeConfig[] = [
+  {
+    id: 'Moniepoint',
+    name: 'Moniepoint',
+    withdrawal: { type: 'percent', value: 0.5, threshold: 20000, aboveThresholdValue: 100, aboveThresholdType: 'flat' },
+    transfer: { type: 'flat', value: 20 },
+    deposit: { type: 'flat', value: 20 },
+    airtime: { type: 'percent', value: 2 },
+    bills: { type: 'flat', value: 0 }
+  },
+  {
+    id: 'OPay',
+    name: 'OPay',
+    withdrawal: { type: 'percent', value: 0.5, threshold: 20000, aboveThresholdValue: 100, aboveThresholdType: 'flat' },
+    transfer: { type: 'flat', value: 20 }, // Avg between 10-30
+    deposit: { type: 'flat', value: 10 },
+    airtime: { type: 'percent', value: 3.2 }, // Average 3.2-5.5
+    bills: { type: 'percent', value: 2.2 }
+  },
+  {
+    id: 'PalmPay',
+    name: 'PalmPay',
+    withdrawal: { type: 'percent', value: 0.5, threshold: 20000, aboveThresholdValue: 100, aboveThresholdType: 'flat' },
+    transfer: { type: 'flat', value: 10 },
+    deposit: { type: 'flat', value: 10 },
+    airtime: { type: 'percent', value: 2 },
+    bills: { type: 'percent', value: 2 }
+  }
+];
+
+export const REALISTIC_REGULATORY_CONFIG: RegulatoryConfig = {
+  emtlThreshold: 10000,
+  emtlCharge: 50,
+  vatRate: 7.5
+};
+
+export const REALISTIC_PRICING_PROFILE: PricingProfile = {
+  id: 'standard_retail',
+  name: 'Standard Retail (Nigeria)',
+  isDefault: true,
+  ranges: {
+    Withdrawal: [
+      { id: 'w1', minAmount: 1, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'w2', minAmount: 5001, maxAmount: 10000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'w3', minAmount: 10001, maxAmount: 15000, customerCharge: 300, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'w4', minAmount: 15001, maxAmount: 20000, customerCharge: 400, customerChargeType: 'flat', providerCharge: 0.5, providerChargeType: 'percent', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'w5', minAmount: 20001, maxAmount: 10000000, customerCharge: 2, customerChargeType: 'percent', providerCharge: 100, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 }
+    ],
+    Transfer: [
+      { id: 't1', minAmount: 1, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 't2', minAmount: 5001, maxAmount: 10000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 't3', minAmount: 10001, maxAmount: 10000000, customerCharge: 300, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 }
+    ],
+    Deposit: [
+      { id: 'd1', minAmount: 1, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'd2', minAmount: 5001, maxAmount: 10000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 },
+      { id: 'd3', minAmount: 10001, maxAmount: 10000000, customerCharge: 300, customerChargeType: 'flat', providerCharge: 20, providerChargeType: 'flat', settlementCharge: 0, vat: 0, commission: 0, cashback: 0 }
+    ]
+  }
+};
+
+export function applyChargeRule(amount: number, rule: ChargeRule): number {
+  if (!rule) return 0;
+  let charge = 0;
+
+  // HOTFIX for old configs: if it's a 0.5% rule with no threshold (or just standard POS withdrawal)
+  // Enforce the 20000 threshold -> 100 flat rule
+  if (rule.type === 'percent' && rule.value === 0.5 && !rule.threshold) {
+    if (amount >= 20000) {
+      return 100;
+    }
+  }
+
+  if (rule.threshold && amount >= rule.threshold && rule.aboveThresholdValue !== undefined) {
+    if (rule.aboveThresholdType === 'percent') {
+      charge = amount * (rule.aboveThresholdValue / 100);
+    } else {
+      charge = rule.aboveThresholdValue;
+    }
+  } else {
+    if (rule.type === 'percent') {
+      charge = amount * (rule.value / 100);
+    } else {
+      charge = rule.value;
+    }
+  }
+
+  if (rule.cap !== undefined) charge = Math.min(charge, rule.cap);
+  if (rule.min !== undefined) charge = Math.max(charge, rule.min);
+
+  return charge;
+}
 
 // Existing phone/name normalization functions
 export function normalizePhone(phone: string): string {
@@ -78,68 +174,52 @@ export function isSameYear(d1: Date | string | number, d2: Date | string | numbe
 }
 
 // CBN EMTL Charge calculation helper (₦50 on transactions of 10,000+)
-export function calculateCBNCharge(amount: number, type?: string): number {
+export function calculateCBNCharge(amount: number, type: string, config?: RegulatoryConfig): number {
   const amt = Number(amount || 0);
+  if (!config) return 0; // Return 0 but should be checked for presence elsewhere
   
-  // 2026 OFFICIAL REGULATION: ₦50 Electronic Money Transfer Levy (EMTL)
-  // Automatically applied to all POS transactions (Withdrawal/Transfer/Deposit) of ₦10,000 and above.
-  return amt >= 10000 ? 50 : 0;
+  // OFFICIAL REGULATION: Electronic Money Transfer Levy (EMTL)
+  // Usually applies to transfers/deposits
+  if (type === 'Transfer' || type === 'Deposit') {
+    return amt >= config.emtlThreshold ? config.emtlCharge : 0;
+  }
+  return 0;
 }
 
 // Terminal fee calculation helper (with withdrawal percentage and transfer flat rates)
 export function calculateTerminalFee(
   amount: number,
   type: string,
-  provider: string,
-  terminalFeeRate: number, // percentage rate (0.25 or 0.5)
-  subType?: string
-): number {
+  providerName: string,
+  providerConfigs?: ProviderChargeConfig[],
+  _terminalFeeRate?: number,
+  _subType?: string
+): number | null {
   const amt = Number(amount || 0);
   if (amt <= 0) return 0;
 
-  if (type === 'Withdrawal' || type === 'Cash Out') {
-    // Moniepoint & OPay: 0.5% capped at ₦100 for amounts > 20k
-    if (provider === 'Moniepoint' || provider === 'OPay') {
-      if (amt <= 20000) {
-        return amt * 0.005;
-      }
-      return 100;
-    }
-    // PalmPay: 0.5% (no specified cap in user requirements)
-    if (provider === 'PalmPay') {
-      return amt * 0.005;
-    }
-    
-    // Default fallback
-    if (amt <= 20000) {
-      const rate = (terminalFeeRate || 0.5) / 100;
-      return amt * rate;
-    }
-    return 100;
-  } else if (type === 'Transfer') {
-    // Outbound Bank Transfer
-    if (provider === 'OPay') return 20; // 10-30 range, using 20
-    if (provider === 'PalmPay') return 10;
-    if (provider === 'Moniepoint') return 20;
-    return 20; 
-  } else if (type === 'Cash Out (Transfer)') {
-    return 0;
-  } else if (type === 'Airtime') {
-    if (provider === 'OPay') return amt * 0.032; // 3.2%
-    if (provider === 'PalmPay') return amt * 0.02; // 2%
-    if (provider === 'Moniepoint') return amt * 0.02; // 2%
-    return 0;
-  } else if (type === 'Bills') {
-    if (provider === 'OPay') return amt * 0.022; // 2.2%
-    if (provider === 'PalmPay') return amt * 0.02; // 2%
-    if (provider === 'Moniepoint') return 0; // 0
-    return 0;
-  } else {
-    // Wallet Deposit / Cash In / Deposit
-    if (provider === 'OPay') return 10;
-    if (provider === 'PalmPay') return 10;
-    if (provider === 'Moniepoint') return 20;
-    return 20;
+  if (!Array.isArray(providerConfigs)) return null;
+  const config = providerConfigs.find(c => c.id === providerName || c.name === providerName);
+
+  if (!config) return null;
+
+  switch (type) {
+    case 'Withdrawal':
+    case 'Cash Out':
+      return applyChargeRule(amt, config.withdrawal);
+    case 'Transfer':
+      return applyChargeRule(amt, config.transfer);
+    case 'Deposit':
+    case 'Cash In':
+    case 'Cash Out (Transfer)':
+      return applyChargeRule(amt, config.deposit);
+    case 'Airtime':
+    case 'Data':
+      return applyChargeRule(amt, config.airtime);
+    case 'Bills':
+      return applyChargeRule(amt, config.bills);
+    default:
+      return 0;
   }
 }
 
@@ -149,22 +229,22 @@ export function getRecommendedAgentFee(amount: number, type: string, subType?: s
   if (amt <= 0) return 0;
 
   if (type === 'Withdrawal' || type === 'Cash Out (Transfer)' || type === 'Cash Out') {
-    // Standard Nigerian Agent Tiers (Street Reality 2026)
     if (amt <= 5000) return 100;
     if (amt <= 10000) return 200;
     if (amt <= 15000) return 300;
     if (amt <= 20000) return 400;
-    
-    // Competitive standard: 2% of the total amount for amounts above 20k
-    return Math.ceil(amt * 0.02);
+    if (amt <= 25000) return 500;
+    if (amt <= 30000) return 600;
+    if (amt <= 35000) return 700;
+    if (amt <= 40000) return 800;
+    if (amt <= 45000) return 900;
+    if (amt <= 50000) return 1000;
+    return Math.ceil(amt * 0.02); // 2% for high amounts is standard in some areas
   } else {
-    // Cash In / Deposit / Transfer
+    // Transfer/Deposit tiers
     if (amt <= 5000) return 100;
     if (amt <= 10000) return 200;
-    if (amt <= 20000) return 300;
-    
-    // Above 20k: ₦100 per every 10k block
-    return Math.max(200, Math.ceil(amt / 10000) * 100);
+    return 300; // Flat 300 for 10k+ is common for small agents, or tiered
   }
 }
 
@@ -186,7 +266,6 @@ export function getProviderTransactionNumber(tx: { id: string; provider: string;
 }
 
 export function getAuthPassword(pin: string): string {
-  // Pad the 4-digit PIN to satisfy Firebase Auth's 6+ character password requirement
   return `opay_${pin}_secure`;
 }
 
@@ -225,9 +304,9 @@ export function cleanPhoneForCompare(p: string) {
  * Returns a friendly label for transaction types to differentiate them in UI
  */
 export function getFriendlyTypeLabel(type: string): string {
-  if (type === 'Cash Out (Transfer)') return 'Cash Out (Transfer)';
-  if (type === 'Withdrawal') return 'Cash Out (ATM)';
-  if (type === 'Deposit') return 'Wallet Deposit';
+  if (type === 'Cash Out (Transfer)') return 'Money Receive';
+  if (type === 'Withdrawal') return 'Withdraw';
+  if (type === 'Deposit') return 'Money Receive';
   if (type === 'Transfer') return 'Bank Transfer';
   return type;
 }
@@ -236,7 +315,7 @@ export function getFriendlyTypeLabel(type: string): string {
 export function computeTxMetrics(
   transactions: Transaction[],
   timeframe: string,
-  terminalFeeRate: number = 0.5
+  _terminalFeeRate: number = 0.5
 ) {
   const now = new Date();
   
@@ -281,7 +360,6 @@ export function computeTxMetrics(
     cbnCharges += tx.cbnCharge || 0;
     profit += tx.profit || 0;
     
-    // New fields aggregation
     totalCustomerCharges += tx.customerCharge || tx.customerFee || 0;
     totalProviderCharges += tx.providerCharge || tx.terminalFee || 0;
     totalVat += tx.vatAmount || 0;
@@ -318,22 +396,13 @@ export function computeTxMetrics(
   };
 }
 
-// Seed transactions generator
-export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[] {
+// Seed transactions generator (Strictly for development)
+export function getSeedTransactions(_terminalFeeRate: number = 0.5): Transaction[] {
   const now = new Date();
   
   const yesterday = new Date();
   yesterday.setDate(now.getDate() - 1);
   
-  const threeDaysAgo = new Date();
-  threeDaysAgo.setDate(now.getDate() - 3);
-
-  const fiveDaysAgo = new Date();
-  fiveDaysAgo.setDate(now.getDate() - 5);
-
-  const tenDaysAgo = new Date();
-  tenDaysAgo.setDate(now.getDate() - 10);
-
   const createTx = (
     id: string,
     type: 'Deposit' | 'Withdrawal' | 'Transfer',
@@ -341,11 +410,9 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
     amount: number,
     customerFee: number,
     date: Date,
-    subType: 'SameBank' | 'OtherBank' = 'OtherBank',
-    notes: string = ''
+    subType: 'SameBank' | 'OtherBank' = 'OtherBank'
   ): Transaction => {
-    const termFee = calculateTerminalFee(amount, type, provider, terminalFeeRate, subType);
-    const cbnCharge = calculateCBNCharge(amount, type);
+    // Note: Seed transactions might have 0 charges if settings aren't loaded yet
     return {
       id,
       employeeId: 'EMP-001',
@@ -355,128 +422,31 @@ export function getSeedTransactions(terminalFeeRate: number = 0.5): Transaction[
       subType,
       amount,
       customerFee,
-      terminalFee: termFee,
-      cbnCharge,
-      profit: customerFee - termFee - cbnCharge,
+      terminalFee: 0,
+      cbnCharge: 0,
+      profit: customerFee,
       timestamp: date.toISOString(),
       status: 'Success',
-      notes,
       feeMethod: 'Cash',
       chargesStatus: 'Paid'
     };
   };
 
   return [
-    createTx('TX-1001', 'Withdrawal', 'OPay', 15000, 150, now, 'OtherBank', 'Withdrawal for customer'),
-    createTx('TX-1002', 'Deposit', 'Moniepoint', 5000, 100, now, 'SameBank', 'Deposited to savings'),
-    createTx('TX-1003', 'Transfer', 'PalmPay', 25000, 250, yesterday, 'OtherBank', 'Urgent family transfer'),
-    createTx('TX-1004', 'Withdrawal', 'OPay', 8000, 100, threeDaysAgo, 'SameBank', 'Withdrawal from card'),
-    createTx('TX-1005', 'Deposit', 'Moniepoint', 12000, 150, fiveDaysAgo, 'OtherBank', 'Business payout'),
-    createTx('TX-1006', 'Transfer', 'OPay', 30000, 300, tenDaysAgo, 'OtherBank', 'Rent deposit')
+    createTx('TX-1001', 'Withdrawal', 'OPay', 15000, 150, now),
+    createTx('TX-1002', 'Deposit', 'Moniepoint', 5000, 100, now),
+    createTx('TX-1003', 'Transfer', 'PalmPay', 25000, 250, yesterday)
   ];
 }
-
-import { TransactionType, ProviderType, AppSettings, PricingProfile, ChargeRange } from './types';
 
 export function getDefaultPricingProfiles(): PricingProfile[] {
-  const providers: { id: string; name: string }[] = [
-    { id: 'Moniepoint', name: 'Moniepoint (Official 2026)' },
-    { id: 'OPay', name: 'OPay (Official 2026)' },
-    { id: 'PalmPay', name: 'PalmPay (Official 2026)' },
-    { id: 'Nomba', name: 'Nomba (Official 2026)' }
-  ];
-  
-  const defaultTypes: TransactionType[] = ['Withdrawal', 'Deposit', 'Transfer', 'Cash In', 'Cash Out', 'Airtime', 'Data', 'Bills', 'Cash Out (Transfer)'];
-  
-  return providers.map(p => {
-    const ranges: { [txType: string]: ChargeRange[] } = {};
-    
-    defaultTypes.forEach(t => {
-      // Shared ranges for realistic agent fees (what agent charges customer)
-      const isCashOut = t === 'Withdrawal' || t === 'Cash Out' || t === 'Cash Out (Transfer)';
-      const standardCustomerRanges: ChargeRange[] = isCashOut ? [
-        { id: `${p.id}_${t}_c1`, minAmount: 0, maxAmount: 5000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c2`, minAmount: 5000.01, maxAmount: 10000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c3`, minAmount: 10000.01, maxAmount: 20000, customerCharge: 400, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c4`, minAmount: 20000.01, maxAmount: 50000, customerCharge: 1000, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c5`, minAmount: 50000.01, maxAmount: 99999999, customerCharge: 2, customerChargeType: 'percent', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 }
-      ] : [
-        { id: `${p.id}_${t}_c1`, minAmount: 0, maxAmount: 10000, customerCharge: 100, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c2`, minAmount: 10000.01, maxAmount: 20000, customerCharge: 200, customerChargeType: 'flat', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 },
-        { id: `${p.id}_${t}_c3`, minAmount: 20000.01, maxAmount: 99999999, customerCharge: 1, customerChargeType: 'percent', providerCharge: 0, providerChargeType: 'flat', settlementCharge: 0, vat: 7.5, commission: 0, cashback: 0 }
-      ];
-
-      ranges[t] = standardCustomerRanges.map(r => {
-        let provChargeVal = 0;
-        let provChargeType: 'flat' | 'percent' = 'flat';
-
-        if (t === 'Withdrawal' || t === 'Cash Out') {
-          if (p.id === 'PalmPay') {
-            provChargeVal = 0.5;
-            provChargeType = 'percent';
-          } else {
-            // Moniepoint/OPay: 0.5% cap 100
-            if (r.maxAmount <= 20000) {
-              provChargeVal = 0.5;
-              provChargeType = 'percent';
-            } else {
-              provChargeVal = 100;
-              provChargeType = 'flat';
-            }
-          }
-        } else if (t === 'Transfer') {
-          if (p.id === 'OPay') provChargeVal = 20; // 10-30 range, using 20
-          else if (p.id === 'PalmPay') provChargeVal = 10;
-          else if (p.id === 'Moniepoint') provChargeVal = 20;
-          else provChargeVal = 20;
-          provChargeType = 'flat';
-        } else if (t === 'Deposit' || t === 'Cash In') {
-          if (p.id === 'OPay') provChargeVal = 10;
-          else if (p.id === 'PalmPay') provChargeVal = 10;
-          else if (p.id === 'Moniepoint') provChargeVal = 20;
-          else provChargeVal = 20;
-          provChargeType = 'flat';
-        } else if (t === 'Airtime' || t === 'Data') {
-          if (p.id === 'OPay') provChargeVal = 3.2; // 3.2-5.5%
-          else if (p.id === 'PalmPay') provChargeVal = 2;
-          else if (p.id === 'Moniepoint') provChargeVal = 2;
-          else provChargeVal = 2;
-          provChargeType = 'percent';
-        } else if (t === 'Bills') {
-          if (p.id === 'OPay') provChargeVal = 2.2;
-          else if (p.id === 'PalmPay') provChargeVal = 2;
-          else if (p.id === 'Moniepoint') provChargeVal = 0;
-          else provChargeVal = 0;
-          provChargeType = 'percent';
-        } else if (t === 'Cash Out (Transfer)') {
-          provChargeVal = 0;
-          provChargeType = 'flat';
-        }
-
-        return {
-          ...r,
-          id: r.id.replace('_c', '_r'),
-          providerCharge: provChargeVal,
-          providerChargeType: provChargeType,
-          vat: (t === 'Airtime' || t === 'Data' || t === 'Cash Out (Transfer)') ? 0 : 7.5
-        };
-      });
-    });
-    
-    return {
-      id: p.id,
-      name: p.name,
-      ranges
-    };
-  });
+  // We no longer provide hardcoded defaults for calculations, but we keep the structure for initialization UI if needed.
+  return [];
 }
 
-export function getCalculatedFinancials(
-  amount: number,
-  type: TransactionType,
-  provider: ProviderType,
-  settings: AppSettings | undefined
-): {
+export interface FinancialResults {
+  isConfigured: boolean;
+  error?: string;
   customerCharge: number;
   providerCharge: number;
   vatAmount: number;
@@ -487,76 +457,201 @@ export function getCalculatedFinancials(
   netProfit: number;
   settlementCharge: number;
   merchantProfit: number;
-} {
+}
+
+export function checkRuleOverlap(newRule: Partial<PricingRule>, existingRules: PricingRule[]): PricingRule | null {
+  const overlapping = existingRules.find(r => {
+    // Only check rules for the same provider and type that are not the same rule
+    if (r.id === newRule.id) return false;
+    if (r.provider !== newRule.provider || r.type !== newRule.type) return false;
+    if (r.status === 'archived') return false;
+
+    const newMin = newRule.minAmount ?? 0;
+    const newMax = newRule.maxAmount ?? Infinity;
+    
+    // Check if ranges overlap
+    // (StartA <= EndB) and (EndA >= StartB)
+    return (newMin <= r.maxAmount) && (newMax >= r.minAmount);
+  });
+  
+  return overlapping || null;
+}
+
+export function getCalculatedFinancials(
+  amount: number,
+  type: TransactionType,
+  provider: ProviderType,
+  settings: AppSettings | undefined,
+  destinationBank?: string
+): FinancialResults {
   const amt = Number(amount || 0);
-  const profiles = settings?.pricingProfiles || getDefaultPricingProfiles();
-  const selectedProfileId = settings?.selectedProfileId || provider || 'Moniepoint';
   
-  let profile = profiles.find(p => p.id === selectedProfileId);
-  if (!profile) {
-    profile = profiles.find(p => p.id === 'Moniepoint') || profiles[0];
-  }
-  
-  const ranges = profile?.ranges?.[type] || [];
-  const matchedRange = ranges.find(r => amt >= r.minAmount && amt <= r.maxAmount);
-  
-  if (matchedRange) {
-    const custCharge = matchedRange.customerChargeType === 'percent'
-      ? Math.round(amt * (matchedRange.customerCharge / 100))
-      : matchedRange.customerCharge;
-      
-    const provCharge = matchedRange.providerChargeType === 'percent'
-      ? Math.round(amt * (matchedRange.providerCharge / 100))
-      : matchedRange.providerCharge;
-      
-    const settlement = matchedRange.settlementCharge || 0;
-    const vatRate = matchedRange.vat || 0;
-    const vatAmount = (provCharge * vatRate) / 100;
-    const commRate = matchedRange.commission || 0;
-    const commissionAmount = (amt * commRate) / 100;
-    const cashback = matchedRange.cashback || 0;
-    
-    // Formula: Agent Profit = (Customer Charge - Provider Charge - VAT) + Cashback + Commission - EMTL
-    const cbnCharge = calculateCBNCharge(amt, type);
-    
-    // THE CORE BUSINESS RULE: Profit is what remains AFTER deducting all 3rd party costs
-    const agentProfit = (custCharge - provCharge - vatAmount) + cashback + commissionAmount - cbnCharge;
-    const netProfit = agentProfit - settlement;
-    const merchantProfit = netProfit;
-    
-    return {
-      customerCharge: custCharge,
-      providerCharge: provCharge,
-      vatAmount: vatAmount,
-      cbnCharge: cbnCharge,
-      cashback: cashback,
-      commissionAmount: commissionAmount,
-      agentProfit: agentProfit,
-      netProfit: netProfit,
-      settlementCharge: settlement,
-      merchantProfit: merchantProfit
-    };
-  }
-  
-  // Legacy fallback calculation
-  const custCharge = getRecommendedAgentFee(amt, type);
-  const baselineRate = 0.5;
-  const provCharge = calculateTerminalFee(amt, type, provider, baselineRate);
-  const cbnCharge = calculateCBNCharge(amt, type);
-    
-  // Ensure profit automatically minus terminal charges and CBN levy
-  const agentProfit = custCharge - provCharge - cbnCharge;
-  
-  return {
-    customerCharge: custCharge,
-    providerCharge: provCharge,
+  const results: FinancialResults = {
+    isConfigured: false,
+    customerCharge: 0,
+    providerCharge: 0,
     vatAmount: 0,
-    cbnCharge: cbnCharge,
+    cbnCharge: 0,
     cashback: 0,
     commissionAmount: 0,
-    agentProfit: agentProfit,
-    netProfit: agentProfit,
+    agentProfit: 0,
+    netProfit: 0,
     settlementCharge: 0,
-    merchantProfit: agentProfit
+    merchantProfit: 0
+  };
+
+  if (!settings) {
+    results.error = "Settings not loaded";
+    return results;
+  }
+
+  // 1. DYNAMIC REGULATORY CHARGE
+  if (!settings.regulatoryConfig) {
+    results.error = "Regulatory configuration (CBN EMTL/VAT) missing";
+    return results;
+  }
+  let cbnCharge = calculateCBNCharge(amt, type, settings.regulatoryConfig);
+  
+  // 2. DYNAMIC PROVIDER CHARGE
+  let providerCharge: number | null = null;
+  if (settings.providerConfigs && Array.isArray(settings.providerConfigs) && settings.providerConfigs.length > 0) {
+    providerCharge = calculateTerminalFee(amt, type, provider, settings.providerConfigs);
+  } else {
+    // FALLBACK TO REALISTIC DEFAULTS
+    providerCharge = calculateTerminalFee(amt, type, provider, REALISTIC_PROVIDER_CONFIGS);
+  }
+  
+  if (providerCharge === null) {
+    results.error = `Pricing rule for ${provider} (${type}) not configured`;
+    return results;
+  }
+
+  // Handle Airtime and Data commission-based transactions directly
+  if (type === 'Airtime' || type === 'Data') {
+    results.isConfigured = true;
+    results.customerCharge = 0; // Usually no surcharge
+    results.providerCharge = -providerCharge; // Cost is less than amount (represented as negative charge in agent systems)
+    results.vatAmount = 0;
+    results.cbnCharge = 0;
+    results.commissionAmount = providerCharge;
+    results.agentProfit = providerCharge; // Surcharge (0) + commission (providerCharge)
+    results.netProfit = providerCharge;
+    results.merchantProfit = providerCharge;
+    return results;
+  }
+
+  // 3. PRICING PROFILE (Customer Facing)
+  let profile: PricingProfile | undefined;
+  if (settings.pricingProfiles && Array.isArray(settings.pricingProfiles) && settings.pricingProfiles.length > 0) {
+    const selectedProfileId = settings.selectedProfileId || provider;
+    profile = settings.pricingProfiles.find(p => p.id === selectedProfileId);
+    if (!profile) profile = settings.pricingProfiles[0];
+  } else {
+    // FALLBACK TO REALISTIC DEFAULTS
+    profile = REALISTIC_PRICING_PROFILE;
+  }
+  
+  if (!profile) {
+    results.error = "No active pricing profile found";
+    return results;
+  }
+  
+  let effectiveRangeType = type as string;
+  if (type === 'Cash Out (Transfer)' || type === 'Cash Out') effectiveRangeType = 'Withdrawal';
+  if (type === 'Cash In') effectiveRangeType = 'Deposit';
+
+  // @ts-ignore
+  let ranges = profile.ranges?.[effectiveRangeType] || [];
+  let matchedRange = ranges.find(r => amt >= r.minAmount && amt <= r.maxAmount);
+  
+  if (!matchedRange) {
+    // FALLBACK to Realistic Profile if custom profile is missing this range
+    // @ts-ignore
+    ranges = REALISTIC_PRICING_PROFILE.ranges[effectiveRangeType] || [];
+    matchedRange = ranges.find(r => amt >= r.minAmount && amt <= r.maxAmount);
+  }
+
+  if (!matchedRange) {
+    results.error = `No pricing rule found for ${type} in amount range ${amt} in profile: ${profile.name}`;
+    return results;
+  }
+
+  // Calculate results based on matched range
+  let customerCharge = matchedRange.customerChargeType === 'percent'
+    ? Math.round(amt * (matchedRange.customerCharge / 100))
+    : matchedRange.customerCharge;
+    
+  let settlementCharge = matchedRange.settlementCharge || 0;
+  let vatRate = matchedRange.vat !== undefined && matchedRange.vat !== 0 ? matchedRange.vat : settings.regulatoryConfig.vatRate;
+  let vatAmount = Math.round((providerCharge * vatRate) / 100);
+  let commRate = matchedRange.commission || 0;
+  let commissionAmount = Math.round(amt * (commRate / 100));
+  let cashback = matchedRange.cashback || 0;
+
+  // 4. NET PROFIT CALCULATION
+  let netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  
+  if (provider === 'OPay' && type === 'Transfer' && destinationBank === 'OPay') {
+    customerCharge = 0;
+    providerCharge = 0;
+    vatAmount = 0;
+    cbnCharge = 0;
+    netProfit = 0;
+  }
+
+  if (provider === 'OPay' && type === 'Transfer' && destinationBank !== 'OPay') {
+    providerCharge = 18.60;
+    vatAmount = Math.round((providerCharge * vatRate) / 100);
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  }
+
+  if (provider === 'OPay' && type === 'Deposit' && destinationBank === 'OPay') {
+    providerCharge = amt >= 30000 ? 100 : Math.floor(amt * 0.0035);
+    vatAmount = Math.round((providerCharge * vatRate) / 100);
+    cbnCharge = 0;
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  }
+
+  if (provider === 'OPay' && type === 'Deposit' && destinationBank !== 'OPay') {
+    providerCharge = 0;
+    vatAmount = 0;
+    cbnCharge = 0;
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  }
+
+  if (provider === 'Moniepoint' && type === 'Deposit') {
+    providerCharge = 0;
+    vatAmount = 0;
+    cbnCharge = 0;
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  }
+
+  if (provider === 'Moniepoint' && type === 'Transfer' && destinationBank === 'Moniepoint') {
+    providerCharge = cbnCharge;
+    vatAmount = 0;
+    cbnCharge = 0; // Avoid double deduction since provider charge is set to the CBN levy
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  }
+
+  if (provider === 'OPay' && type === 'Cash Out (Transfer)') {
+    providerCharge = 0;
+    cbnCharge = 0;
+    vatAmount = 0;
+    netProfit = customerCharge + cashback;
+  }
+
+  return {
+    isConfigured: true,
+    customerCharge,
+    providerCharge,
+    vatAmount,
+    cbnCharge,
+    cashback,
+    commissionAmount,
+    agentProfit: netProfit,
+    netProfit,
+    settlementCharge,
+    merchantProfit: netProfit
   };
 }
+

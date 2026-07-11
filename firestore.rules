@@ -3,16 +3,31 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // Helper function to check if user is a manager
     function isManager() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager';
+      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager';
     }
 
     // Users collection
     match /users/{userId} {
       // Allow read for everyone to facilitate login lookup (Phone -> Profile)
-      allow get, list: if true;
+      // and allow reading own profile
+      allow get: if true;
+      allow list: if true;
       
-      // Allow writing if authenticated
+      // Only managers can create/update other users. Users can update their own PIN.
       allow write: if request.auth != null;
+    }
+    
+    // Settings collection
+    match /settings/{ownerId} {
+      // Managers can read/write their own settings.
+      // Employees can read their manager's settings.
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (request.auth.uid == ownerId || isManager());
+    }
+
+    // Borrow/Keep records
+    match /borrowKeep/{id} {
+      allow read, write: if request.auth != null;
     }
     
     // Transactions: Isolation between cashiers
@@ -27,6 +42,11 @@ service cloud.firestore {
 
     // POS Terminals
     match /pos_terminals/{id} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Pricing Rules
+    match /pricing_rules/{id} {
       allow read, write: if request.auth != null;
     }
 

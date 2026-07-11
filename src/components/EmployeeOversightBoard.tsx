@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { User, Transaction, PosTerminal } from '../types';
+import { User, Transaction, PosTerminal, AppSettings } from '../types';
 import { formatNaira, getProviderTransactionNumber } from '../utils';
 import { PosReconciliationTool } from './PosReconciliationTool';
 import { 
@@ -30,6 +30,7 @@ interface EmployeeOversightBoardProps {
   registeredUsers: User[];
   transactions: Transaction[];
   posTerminals: PosTerminal[];
+  settings?: AppSettings;
   activeTimeframe: 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
   selectedEmployeeFilter: string;
   onSetEmployeeFilter: (id: string) => void;
@@ -45,6 +46,7 @@ export function EmployeeOversightBoard({
   registeredUsers,
   transactions,
   posTerminals = [],
+  settings,
   activeTimeframe,
   selectedEmployeeFilter,
   onSetEmployeeFilter,
@@ -241,6 +243,7 @@ export function EmployeeOversightBoard({
       <PosReconciliationTool 
         transactions={transactions}
         registeredUsers={registeredUsers}
+        settings={settings}
         onAddTransaction={onAddTransaction}
         activeTimeframe={activeTimeframe}
       />
@@ -449,7 +452,7 @@ export function EmployeeOversightBoard({
                                   tx.type === 'Deposit' ? 'bg-emerald-500' : tx.type === 'Withdrawal' ? 'bg-amber-500' : 'bg-blue-500'
                                 }`} />
                                 <span className="font-extrabold text-neutral-700 uppercase shrink-0">
-                                  {tx.type.slice(0, 3)}
+                                  {tx.type === 'Withdrawal' ? 'WDR' : tx.type === 'Deposit' ? 'RCV' : tx.type.slice(0, 3)}
                                 </span>
                                 <span className="font-mono text-neutral-800 font-black truncate">
                                   {formatNaira(tx.amount)}
@@ -569,7 +572,7 @@ export function EmployeeOversightBoard({
                           ? 'bg-amber-50 text-amber-800 border-amber-100'
                           : 'bg-blue-50 text-blue-800 border-blue-100'
                       }`}>
-                        {tx.type}
+                        {tx.type === 'Withdrawal' ? 'Withdraw' : tx.type === 'Deposit' ? 'Money Receive' : tx.type}
                       </span>
                       <span className="text-[9px] font-mono text-neutral-400 font-bold">
                         {txTime}

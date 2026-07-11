@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Transaction, User } from '../types';
-import { formatNaira, calculateTerminalFee, calculateCBNCharge, generateId } from '../utils';
+import { Transaction, User, AppSettings } from '../types';
+import { formatNaira, calculateTerminalFee, calculateCBNCharge, generateId, getCalculatedFinancials } from '../utils';
 import { 
   AlertTriangle, 
   Search, 
@@ -35,13 +35,15 @@ interface UnpaidChargesLedgerProps {
   onUpdateTransaction: (tx: Transaction) => void;
   onAddTransaction?: (tx: Transaction) => void;
   currentUser?: User;
+  settings?: AppSettings;
 }
 
 export function UnpaidChargesLedger({
   transactions,
   onUpdateTransaction,
   onAddTransaction,
-  currentUser
+  currentUser,
+  settings
 }: UnpaidChargesLedgerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -380,8 +382,9 @@ export function UnpaidChargesLedger({
       feeNum = 0;
     }
 
-    const terminalFee = calculateTerminalFee(amountNum, newTxType, newTxProvider, 0.5, 'OtherBank');
-    const cbnCharge = calculateCBNCharge(amountNum, newTxType);
+    const financials = getCalculatedFinancials(amountNum, newTxType, newTxProvider, settings);
+    const terminalFee = financials.providerCharge;
+    const cbnCharge = financials.cbnCharge;
     const id = generateId();
 
     const newTx: Transaction = {
@@ -396,7 +399,7 @@ export function UnpaidChargesLedger({
       unpaidFeeAmount: feeNum,
       terminalFee,
       cbnCharge,
-      profit: -terminalFee - cbnCharge,
+      profit: feeNum - terminalFee - cbnCharge,
       feeMethod: newTxFeeMethod,
       totalCustomerCharged: newTxFeeMethod === 'CardDebit' ? (amountNum + feeNum) : amountNum,
       timestamp: new Date().toISOString(),
@@ -1291,9 +1294,9 @@ export function UnpaidChargesLedger({
                         onChange={(e) => setNewTxType(e.target.value as any)}
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-lg p-2 text-xs font-bold focus:outline-none focus:border-amber-500"
                       >
-                        <option value="Withdrawal">Withdrawal</option>
+                        <option value="Withdrawal">Withdraw</option>
                         <option value="Transfer">Transfer</option>
-                        <option value="Deposit">Deposit</option>
+                        <option value="Deposit">Money Receive</option>
                       </select>
                     </div>
 

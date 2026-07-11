@@ -1,7 +1,7 @@
 import { useEffect, Dispatch, SetStateAction } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, query, where, or } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User, AppAction } from '../types';
 import { mapFirestoreUser } from '../utils';
 
@@ -49,6 +49,7 @@ export const useFirebasePersistence = (
       setIsUsersLoaded(true);
     }, (err) => {
       console.error('[Persistence] Users sync failed:', err);
+      handleFirestoreError(err, OperationType.LIST, 'users_sync');
       
       const saved = localStorage.getItem('OPay_Registered_Users_v4');
       if (saved) {
