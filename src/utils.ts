@@ -592,11 +592,11 @@ export function getCalculatedFinancials(
   let netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
   
   if (provider === 'OPay' && type === 'Transfer' && destinationBank === 'OPay') {
-    customerCharge = 0;
+    customerCharge = amt >= 10000 ? 50 : 0;
     providerCharge = 0;
     vatAmount = 0;
-    cbnCharge = 0;
-    netProfit = 0;
+    cbnCharge = amt >= 10000 ? 50 : 0;
+    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
   }
 
   if (provider === 'OPay' && type === 'Transfer' && destinationBank !== 'OPay') {
