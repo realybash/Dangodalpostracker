@@ -6,7 +6,7 @@
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -743,12 +743,12 @@ export default function App() {
     let unsubscribeCashier = () => {};
 
     if (isManager) {
-      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId)), (snap) => {
+      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
         ownerTxsRef.current = snap.docs.map(d => d.data() as Transaction);
         updateCombinedTxs();
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
     } else {
-      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId)), (snap) => {
+      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
         cashierTxsRef.current = snap.docs.map(d => d.data() as Transaction);
         updateCombinedTxs();
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));

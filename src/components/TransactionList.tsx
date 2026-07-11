@@ -1194,6 +1194,15 @@ export function TransactionList({
                             <span className="text-neutral-300">•</span>
                             <span className="font-sans capitalize font-extrabold text-neutral-500">By {tx.employeeName}</span>
                           </div>
+
+                          {/* Added financial summary fields for visibility without interaction */}
+                          <div className="flex items-center gap-2 mt-1.5 text-[8px] sm:text-[9px] font-mono font-bold bg-neutral-50 px-2 py-0.5 rounded-lg text-neutral-600 border border-neutral-100">
+                            <span className="text-neutral-500">Fee: <span className="text-neutral-800">{formatNaira(tx.customerFee || 0)}</span></span>
+                            <span className="text-neutral-200">|</span>
+                            <span className="text-neutral-500">Cost: <span className="text-red-600">-{formatNaira(tx.terminalFee || 0)}</span></span>
+                            <span className="text-neutral-200">|</span>
+                            <span className="text-neutral-500">Prof: <span className="text-emerald-600">{formatNaira(tx.profit || 0)}</span></span>
+                          </div>
                         </div>
                       </div>
  
