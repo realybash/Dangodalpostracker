@@ -867,7 +867,7 @@ export default function App() {
     // Subscribe to POS Terminals
     const terminalsQuery = isManager
       ? query(collection(db, 'pos_terminals'), where('ownerId', '==', currentUserId))
-      : query(collection(db, 'pos_terminals'), where('employeeId', '==', currentUserId));
+      : query(collection(db, 'pos_terminals'), where('employeeId', '==', currentUserId), where('ownerId', '==', syncOwnerId));
 
     const unsubscribeTerminals = onSnapshot(terminalsQuery, (snapshot) => {
       const termList: PosTerminal[] = [];

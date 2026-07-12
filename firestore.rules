@@ -10,7 +10,7 @@ service cloud.firestore {
     match /users/{userId} {
       // Allow read if authenticated. List is restricted to managers.
       allow get: if request.auth != null;
-      allow list: if isManager();
+      allow list: if request.auth != null;
       
       // Only managers can create/update other users. Users can update their own PIN.
       allow create: if isManager();
@@ -21,6 +21,11 @@ service cloud.firestore {
       allow delete: if isManager();
     }
     
+    // Users sync
+    match /users_sync/{id} {
+      allow read: if request.auth != null;
+    }
+
     // Settings collection
     match /settings/{ownerId} {
       // Managers can read/write their own settings.
@@ -80,6 +85,7 @@ service cloud.firestore {
         resource.data.ownerId == request.auth.uid || 
         resource.data.employeeId == request.auth.uid
       );
+      // ONLY the owner can create or delete terminals
       allow create: if request.auth != null && (
         request.resource.data.ownerId == request.auth.uid
       );
