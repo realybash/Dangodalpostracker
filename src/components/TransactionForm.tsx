@@ -886,7 +886,7 @@ export function TransactionForm({
                 <option value="">-- Switch Active Terminal --</option>
                 {posTerminals.map((term) => (
                   <option key={term.id} value={term.id}>
-                    {term.name} ({term.provider}) - Cashier: {term.cashierName || 'N/A'}
+                    💳 {term.name} ── {term.provider} ── Operator: {term.cashierName || 'N/A'} ── Account: {term.posAccountNo || 'N/A'} ── SN: {term.serialNumber || 'N/A'}
                   </option>
                 ))}
               </select>
