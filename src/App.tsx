@@ -6,7 +6,7 @@
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs, orderBy, limit, or } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -867,7 +867,7 @@ export default function App() {
     // Subscribe to POS Terminals
     const terminalsQuery = isManager
       ? query(collection(db, 'pos_terminals'), where('ownerId', '==', currentUserId))
-      : query(collection(db, 'pos_terminals'), where('employeeId', '==', currentUserId));
+      : query(collection(db, 'pos_terminals'), or(where('employeeId', '==', currentUserId), where('ownerId', '==', syncOwnerId)));
 
     const unsubscribeTerminals = onSnapshot(terminalsQuery, (snapshot) => {
       const termList: PosTerminal[] = [];
