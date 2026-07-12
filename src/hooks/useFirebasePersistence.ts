@@ -55,7 +55,7 @@ export const useFirebasePersistence = (
       setIsUsersLoaded(true);
     }, (err) => {
       console.error('[Persistence] Users sync failed:', err);
-      handleFirestoreError(err, OperationType.LIST, 'users_sync');
+      handleFirestoreError(err, OperationType.LIST, 'users');
       
       const saved = localStorage.getItem('OPay_Registered_Users_v4');
       if (saved) {

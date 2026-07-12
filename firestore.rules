@@ -10,7 +10,7 @@ service cloud.firestore {
     match /users/{userId} {
       // Allow read if authenticated. List is restricted to managers.
       allow get: if request.auth != null;
-      allow list: if request.auth != null;
+      allow list: if true;
       
       // Only managers can create/update other users. Users can update their own PIN.
       allow create: if isManager();
