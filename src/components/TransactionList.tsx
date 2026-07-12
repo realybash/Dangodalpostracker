@@ -62,7 +62,7 @@ export const TransactionList = React.memo(({
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [providerFilter, setProviderFilter] = useState<string>('ALL');
-  const [dateFilter, setDateFilter] = useState<'TODAY' | 'YESTERDAY' | 'WEEK' | 'MONTH' | 'YEAR' | 'SPECIFIC' | 'ALL'>('TODAY');
+  const [dateFilter, setDateFilter] = useState<'TODAY' | 'YESTERDAY' | 'THREE_DAYS' | 'SEVEN_DAYS' | 'WEEK' | 'MONTH' | 'YEAR' | 'SPECIFIC' | 'ALL'>('TODAY');
   const [selectedSpecificDate, setSelectedSpecificDate] = useState<string>(new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -232,6 +232,20 @@ export const TransactionList = React.memo(({
       
       if (dateFilter === 'TODAY') {
         if (!isSameDay(txDate, filterDate)) return false;
+      } else if (dateFilter === 'YESTERDAY') {
+        const yesterday = new Date(filterDate);
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (!isSameDay(txDate, yesterday)) return false;
+      } else if (dateFilter === 'THREE_DAYS') {
+        const limit = new Date(filterDate);
+        limit.setDate(limit.getDate() - 3);
+        limit.setHours(0, 0, 0, 0);
+        if (txDate < limit) return false;
+      } else if (dateFilter === 'SEVEN_DAYS') {
+        const limit = new Date(filterDate);
+        limit.setDate(limit.getDate() - 7);
+        limit.setHours(0, 0, 0, 0);
+        if (txDate < limit) return false;
       } else if (dateFilter === 'WEEK') {
         if (!isSameWeek(txDate, filterDate)) return false;
       } else if (dateFilter === 'MONTH') {
@@ -860,6 +874,86 @@ export const TransactionList = React.memo(({
               <option value="Moniepoint" className="text-neutral-700 font-medium">Moniepoint Only</option>
               <option value="PalmPay" className="text-neutral-700 font-medium">PalmPay Only</option>
             </select>
+          </div>
+        </div>
+
+        {/* Unified Transaction History Date Search Panel */}
+        <div className="bg-neutral-50/75 border border-neutral-200/60 p-3.5 rounded-2xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-[#00B87A] flex items-center justify-center border border-emerald-100 shrink-0">
+                <Calendar className="w-4 h-4 stroke-[2.3]" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-black text-neutral-400 uppercase tracking-widest block leading-none">
+                  Date Range Filter
+                </span>
+                <span className="text-xs font-bold text-neutral-800">
+                  Search & Audit Transaction History
+                </span>
+              </div>
+            </div>
+
+            {/* Custom Date Picker / Calendar Input */}
+            <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-neutral-200 shadow-xs">
+              <span className="text-[10px] font-mono font-bold text-neutral-500 uppercase">Calendar:</span>
+              <input
+                type="date"
+                value={filterDate.toISOString().split('T')[0]}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setFilterDate(new Date(e.target.value));
+                    setDateFilter('SPECIFIC');
+                  }
+                }}
+                className="text-xs font-bold text-neutral-700 bg-transparent border-none outline-none focus:ring-0 p-0 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Preset Buttons Grid/Scrollbar */}
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { id: 'TODAY', label: 'Today 📅' },
+              { id: 'YESTERDAY', label: 'Yesterday 🕰️' },
+              { id: 'THREE_DAYS', label: 'Last 3 Days ⏳' },
+              { id: 'SEVEN_DAYS', label: 'Last 7 Days 🗓️' },
+              { id: 'WEEK', label: 'Weekly 📆' },
+              { id: 'MONTH', label: 'Monthly 📊' },
+              { id: 'YEAR', label: 'Yearly 📈' },
+              { id: 'ALL', label: 'All Time 🌐' }
+            ].map((preset) => {
+              const isActive = dateFilter === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setDateFilter(preset.id as any);
+                    if (preset.id !== 'SPECIFIC') {
+                      setFilterDate(new Date());
+                    }
+                  }}
+                  className={`px-3 py-1.5 text-xs font-extrabold rounded-xl border transition-all cursor-pointer active:scale-95 ${
+                    isActive
+                      ? 'bg-[#00B87A] border-[#00B87A] text-white shadow-xs'
+                      : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active Filter description helper */}
+          <div className="text-[11px] text-neutral-500 flex items-center justify-between bg-white px-3 py-1.5 rounded-xl border border-neutral-100">
+            <span className="font-medium">
+              Showing <strong className="text-[#00B87A] font-black">{filteredList.length}</strong> matched of <strong className="text-neutral-700 font-bold">{transactions.length}</strong> total active records
+            </span>
+            <span className="text-[10px] font-mono font-bold text-neutral-400">
+              Active Mode: {dateFilter}
+            </span>
           </div>
         </div>
 

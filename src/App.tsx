@@ -397,7 +397,38 @@ export default function App() {
 
   // Manager Auth states
   const [cloudUser, setCloudUser] = useState<any>(null);
-  const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? window.navigator.onLine : true);
+  
+  const [appMode, setAppMode] = useState<'online' | 'offline'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('POSTrack_Mode') as 'online' | 'offline') || 'online';
+    }
+    return 'online';
+  });
+  const [browserOnline, setBrowserOnline] = useState(typeof window !== 'undefined' ? window.navigator.onLine : true);
+  const [isOnline, setIsOnline] = useState(() => {
+    const initialMode = typeof window !== 'undefined' ? (localStorage.getItem('POSTrack_Mode') || 'online') : 'online';
+    const initialNet = typeof window !== 'undefined' ? window.navigator.onLine : true;
+    return initialNet && initialMode === 'online';
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [indexedDbPendingCount, setIndexedDbPendingCount] = useState(0);
+
+  const updateIndexedDbPendingCount = async () => {
+    try {
+      const { getPendingTransactions, getPendingExpenses, getPendingPosTerminals, getPendingDeletions } = await import('./lib/offlineDb');
+      const [txs, expenses, terminals, deletions] = await Promise.all([
+        getPendingTransactions(),
+        getPendingExpenses(),
+        getPendingPosTerminals(),
+        getPendingDeletions()
+      ]);
+      const totalPending = txs.length + expenses.length + terminals.length + deletions.length;
+      setIndexedDbPendingCount(totalPending);
+      console.log(`[TRANSACTION SYNC TRACE] [IndexedDB State check] Updated pending count from IndexedDB. Total: ${totalPending} (Txs: ${txs.length}, Expenses: ${expenses.length}, Terminals: ${terminals.length}, Deletes: ${deletions.length})`);
+    } catch (err) {
+      console.error('[Sync] Failed to query IndexedDB pending queues:', err);
+    }
+  };
 
   const syncOwnerId = useMemo(() => {
     // If we have a profile loaded in state, that's the most reliable source for ownerId
@@ -413,22 +444,13 @@ export default function App() {
 
   // Compute number of items currently pending cloud sync
   const pendingSyncCount = useMemo(() => {
-    if (!syncOwnerId || syncOwnerId === 'mgr_1' || syncOwnerId === '') return 0;
-    
-    const unsyncedTxs = state.transactions.filter(
-      t => !t.ownerId || t.ownerId === 'local_owner' || t.ownerId === 'mgr_1'
-    ).length;
-    
-    const unsyncedExpenses = state.expenses.filter(
-      e => !e.ownerId || e.ownerId === 'local_owner' || e.ownerId === 'mgr_1'
-    ).length;
-    
-    const unsyncedTerminals = state.posTerminals.filter(
-      pt => !pt.ownerId || pt.ownerId === 'local_owner' || pt.ownerId === 'mgr_1'
-    ).length;
+    return indexedDbPendingCount;
+  }, [indexedDbPendingCount]);
 
-    return unsyncedTxs + unsyncedExpenses + unsyncedTerminals;
-  }, [syncOwnerId, state.transactions, state.expenses, state.posTerminals]);
+  // Sync state to local storage when database records mutate
+  useEffect(() => {
+    updateIndexedDbPendingCount();
+  }, [state.transactions, state.expenses, state.posTerminals]);
 
   const [cloudLoading, setCloudLoading] = useState(true);
 
@@ -500,10 +522,16 @@ export default function App() {
 
    // Manager Auth states
   
-  // Sync network connectivity status listener
+  // Consolidated browser network connectivity status listener
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      console.log('[Sync] Browser online event fired.');
+      setBrowserOnline(true);
+    };
+    const handleOffline = () => {
+      console.log('[Sync] Browser offline event fired.');
+      setBrowserOnline(false);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -513,6 +541,22 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Reactive synchronizer of the isOnline state and sync engine
+  useEffect(() => {
+    const resolvedOnline = browserOnline && appMode === 'online';
+    setIsOnline(resolvedOnline);
+    console.log(`[Sync] Network status evaluated: browserOnline=${browserOnline}, appMode=${appMode} -> isOnline=${resolvedOnline}`);
+    
+    if (resolvedOnline) {
+      console.log('[Sync] Device is online and Online Mode is active. Attempting to synchronize pending local mutations...');
+      import('./lib/sync').then(({ syncOfflineTransactions }) => {
+        syncOfflineTransactions((syncing) => setIsSyncing(syncing)).then(() => {
+          updateIndexedDbPendingCount();
+        });
+      });
+    }
+  }, [browserOnline, appMode, state.currentUser.id]);
 
   // Authentication form modal states
   const [isCloudSyncFormOpen, setIsCloudSyncFormOpen] = useState(false);
@@ -719,12 +763,20 @@ export default function App() {
     };
     testConnection();
     
-    // Initial sync check and local cache loading
-    if (navigator.onLine) {
-        setIsOnline(true);
-        import('./lib/sync').then(({ syncOfflineTransactions }) => syncOfflineTransactions());
+    // Always trigger an initial pending IndexedDB count check
+    updateIndexedDbPendingCount();
+
+    // Initial cache loading
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const actuallyOffline = !navigator.onLine || mode === 'offline';
+
+    if (!actuallyOffline) {
+        import('./lib/sync').then(({ syncOfflineTransactions }) => {
+          syncOfflineTransactions((syncing) => setIsSyncing(syncing)).then(() => {
+            updateIndexedDbPendingCount();
+          });
+        });
     } else {
-        setIsOnline(false);
         // Load offline cached data
         import('./lib/offlineDb').then(async ({ getCachedTransactions, getCachedExpenses, getCachedPosTerminals }) => {
             try {
@@ -748,28 +800,15 @@ export default function App() {
             }
         });
     }
-    
-    // Listen for online status
-    const handleOnline = () => {
-      console.log('[Sync] Network restored, attempting sync...');
-      setIsOnline(true);
-      import('./lib/sync').then(({ syncOfflineTransactions }) => syncOfflineTransactions());
-    };
-    const handleOffline = () => {
-      console.log('[Sync] Network connection lost.');
-      setIsOnline(false);
-    };
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
   }, []);
 
   // Real-time Firestore sync subscriptions when syncOwnerId is active
   useEffect(() => {
+    if (appMode === 'offline') {
+      console.log('[Sync] App is in explicit Offline Mode. Skipping real-time Firestore subscriptions.');
+      return;
+    }
+
     if (!syncOwnerId || !state.currentUser.id) {
       return;
     }
@@ -849,7 +888,7 @@ export default function App() {
       unsubscribeExpenses();
       unsubscribeTerminals();
     };
-  }, [syncOwnerId, state.currentUser.id, state.currentUser.role]);
+  }, [syncOwnerId, state.currentUser.id, state.currentUser.role, appMode]);
 
   // Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
   const prepareFirestoreData = (data: any, collectionName?: string) => {
@@ -872,13 +911,44 @@ export default function App() {
   const handleAddPosTerminal = async (term: PosTerminal) => {
     dispatch({ type: 'ADD_POS_TERMINAL', payload: term });
 
+    const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
+    const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
+
+    // 1. Save directly to local IndexedDB main store first
+    try {
+      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
+      const current = await getCachedPosTerminals();
+      const updated = [...current.filter((t: any) => t.id !== term.id), cleanData];
+      await saveCachedPosTerminals(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to save POS terminal to main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingPosTerminal } = await import('./lib/offlineDb');
+        await savePendingPosTerminal(cleanData);
+      } catch (err) {
+        console.error('[DB] Failed to save POS terminal to pending queue:', err);
+      }
+      return;
+    }
+
     if (syncOwnerId) {
       try {
-        const termWithOwner = { ...term, ownerId: syncOwnerId };
-        const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
         await setDoc(doc(db, 'pos_terminals', term.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
+        // Fallback to offline pending queue if firestore write fails
+        try {
+          const { savePendingPosTerminal } = await import('./lib/offlineDb');
+          await savePendingPosTerminal(cleanData);
+        } catch (queueErr) {
+          console.error('[DB] Fallback save to pending POS terminal failed:', queueErr);
+        }
       }
     }
   };
@@ -886,13 +956,44 @@ export default function App() {
   const handleUpdatePosTerminal = async (term: PosTerminal) => {
     dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
 
+    const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
+    const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
+
+    // 1. Save directly to local IndexedDB main store first
+    try {
+      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
+      const current = await getCachedPosTerminals();
+      const updated = [...current.filter((t: any) => t.id !== term.id), cleanData];
+      await saveCachedPosTerminals(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to update POS terminal in main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingPosTerminal } = await import('./lib/offlineDb');
+        await savePendingPosTerminal(cleanData);
+      } catch (err) {
+        console.error('[DB] Failed to save pending POS terminal update:', err);
+      }
+      return;
+    }
+
     if (syncOwnerId) {
       try {
-        const termWithOwner = { ...term, ownerId: syncOwnerId };
-        const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
         await setDoc(doc(db, 'pos_terminals', term.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
+        // Fallback
+        try {
+          const { savePendingPosTerminal } = await import('./lib/offlineDb');
+          await savePendingPosTerminal(cleanData);
+        } catch (queueErr) {
+          console.error('[DB] Fallback save pending terminal update failed:', queueErr);
+        }
       }
     }
   };
@@ -916,21 +1017,57 @@ export default function App() {
   const handleDeletePosTerminal = async (id: string) => {
     dispatch({ type: 'DELETE_POS_TERMINAL', payload: id });
 
+    // 1. Delete from local IndexedDB main cache first
+    try {
+      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
+      const current = await getCachedPosTerminals();
+      const updated = current.filter((t: any) => t.id !== id);
+      await saveCachedPosTerminals(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to delete POS terminal from main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingDeletion } = await import('./lib/offlineDb');
+        await savePendingDeletion({
+          id: `pos_terminals_${id}`,
+          collection: 'pos_terminals',
+          docId: id
+        });
+      } catch (err) {
+        console.error('[DB] Failed to save pending POS terminal deletion:', err);
+      }
+      return;
+    }
+
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'pos_terminals', id));
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${id}`);
+        // Fallback
+        try {
+          const { savePendingDeletion } = await import('./lib/offlineDb');
+          await savePendingDeletion({
+            id: `pos_terminals_${id}`,
+            collection: 'pos_terminals',
+            docId: id
+          });
+        } catch (queueErr) {
+          console.error('[DB] Fallback save pending terminal deletion failed:', queueErr);
+        }
       }
     }
   };
 
   const handleAddTransaction = async (tx: Transaction) => {
-    // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
-    // This solves the core audit requirement of preventing any lag or delay in showing transaction history, metrics, and reports.
+    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleAddTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
     dispatch({ type: 'ADD_TRANSACTION', payload: tx });
     
-    // Prepare enriched data with IDs needed for cloud sync
     const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
     const txWithIds = { 
         ...tx, 
@@ -939,8 +1076,23 @@ export default function App() {
     };
     const cleanData = prepareFirestoreData(txWithIds, 'transactions');
 
+    // 1. Save directly to local IndexedDB main cache first to avoid losing data across offline restarts
+    try {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Saving transaction ID: "${tx.id}" to IndexedDB main cache...`);
+      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+      const current = await getCachedTransactions();
+      const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
+      await saveCachedTransactions(updated);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" saved to IndexedDB main cache.`);
+    } catch (dbErr) {
+      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save transaction to main cache:', dbErr);
+    }
+
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
-    if (mode === 'offline') {
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing to IndexedDB pending list.`);
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
         return;
@@ -948,21 +1100,25 @@ export default function App() {
 
     if (syncOwnerId) {
       try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore write for transaction ID: "${tx.id}"...`);
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" written to Firestore successfully.`);
       } catch (err) {
+        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore write failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
-        // Fallback to offline storage if write fails (e.g. temporary network drop while in 'online' mode)
+        // Fallback to offline storage if write fails
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
       }
+    } else {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore write for ID: "${tx.id}".`);
     }
   };
 
   const handleUpdateTransaction = async (tx: Transaction) => {
-    // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
+    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleUpdateTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
     dispatch({ type: 'UPDATE_TRANSACTION', payload: tx });
 
-    // Prepare enriched data
     const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
     const txWithIds = { 
         ...tx, 
@@ -971,8 +1127,23 @@ export default function App() {
     };
     const cleanData = prepareFirestoreData(txWithIds, 'transactions');
 
+    // 1. Save directly to local IndexedDB main cache first
+    try {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Updating transaction ID: "${tx.id}" in IndexedDB main cache...`);
+      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+      const current = await getCachedTransactions();
+      const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
+      await saveCachedTransactions(updated);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" updated in IndexedDB main cache.`);
+    } catch (dbErr) {
+      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to update transaction in main cache:', dbErr);
+    }
+
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
-    if (mode === 'offline') {
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing update to IndexedDB pending list.`);
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
         return;
@@ -980,69 +1151,225 @@ export default function App() {
 
     if (syncOwnerId) {
       try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore update for transaction ID: "${tx.id}"...`);
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" updated in Firestore successfully.`);
       } catch (err) {
+        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore update failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
         // Fallback to offline storage
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
       }
+    } else {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore update for ID: "${tx.id}".`);
     }
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    // Unconditionally dispatch locally first
+    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleDeleteTransaction initiated. ID: "${id}"`);
     dispatch({ type: 'DELETE_TRANSACTION', payload: id });
+
+    // 1. Save directly to local IndexedDB main cache first
+    try {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing transaction ID: "${id}" from IndexedDB main cache...`);
+      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+      const current = await getCachedTransactions();
+      const updated = current.filter((t: any) => t.id !== id);
+      await saveCachedTransactions(updated);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${id}" removed from IndexedDB main cache.`);
+    } catch (dbErr) {
+      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to delete transaction from main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Saving deletion request to IndexedDB pending list.`);
+        const { savePendingDeletion } = await import('./lib/offlineDb');
+        await savePendingDeletion({
+          id: `transactions_${id}`,
+          collection: 'transactions',
+          docId: id
+        });
+      } catch (err) {
+        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save pending transaction deletion:', err);
+      }
+      return;
+    }
 
     if (syncOwnerId) {
       try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore deletion for transaction ID: "${id}"...`);
         await deleteDoc(doc(db, 'transactions', id));
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${id}" deleted from Firestore successfully.`);
       } catch (err) {
+        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore deletion failed for transaction ID: "${id}". Saving deletion request to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.DELETE, `transactions/${id}`);
+        // Fallback
+        try {
+          const { savePendingDeletion } = await import('./lib/offlineDb');
+          await savePendingDeletion({
+            id: `transactions_${id}`,
+            collection: 'transactions',
+            docId: id
+          });
+        } catch (queueErr) {
+          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback save pending transaction deletion failed:', queueErr);
+        }
       }
+    } else {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore deletion for ID: "${id}".`);
     }
   };
 
   const handleBulkDeleteTransactions = async (ids: string[]) => {
-    // Unconditionally dispatch locally first
+    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleBulkDeleteTransactions initiated. Total count: ${ids.length}`);
     dispatch({ type: 'BULK_DELETE_TRANSACTIONS', payload: ids });
+
+    // 1. Update IndexedDB main cache first
+    try {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing ${ids.length} transactions from IndexedDB main cache...`);
+      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+      const current = await getCachedTransactions();
+      const updated = current.filter((t: any) => !ids.includes(t.id));
+      await saveCachedTransactions(updated);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk transactions removed from IndexedDB main cache.`);
+    } catch (dbErr) {
+      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed bulk deletion from main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing bulk deletions to IndexedDB pending list.`);
+        const { savePendingDeletion } = await import('./lib/offlineDb');
+        for (const id of ids) {
+          await savePendingDeletion({
+            id: `transactions_${id}`,
+            collection: 'transactions',
+            docId: id
+          });
+        }
+      } catch (err) {
+        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed saving bulk pending deletions:', err);
+      }
+      return;
+    }
 
     if (syncOwnerId) {
       try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate bulk deletion on Firestore...`);
         const batch = writeBatch(db);
         ids.forEach((id) => {
           batch.delete(doc(db, 'transactions', id));
         });
         await batch.commit();
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk Firestore deletions committed successfully.`);
       } catch (err) {
+        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Bulk Firestore deletion failed. Saving bulk deletion requests to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_delete');
+        // Fallback
+        try {
+          const { savePendingDeletion } = await import('./lib/offlineDb');
+          for (const id of ids) {
+            await savePendingDeletion({
+              id: `transactions_${id}`,
+              collection: 'transactions',
+              docId: id
+            });
+          }
+        } catch (queueErr) {
+          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback saving bulk pending deletions failed:', queueErr);
+        }
       }
+    } else {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate bulk Firestore deletion.`);
     }
   };
 
   const handleBulkUpdateTransactions = async (updatedTxs: Transaction[]) => {
-    // Unconditionally dispatch locally first
+    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleBulkUpdateTransactions initiated. Total count: ${updatedTxs.length}`);
     dispatch({ type: 'BULK_UPDATE_TRANSACTIONS', payload: updatedTxs });
+
+    // 1. Update IndexedDB main cache
+    try {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Updating ${updatedTxs.length} transactions in IndexedDB main cache...`);
+      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+      const current = await getCachedTransactions();
+      const idMap = new Map(updatedTxs.map(tx => [tx.id, tx]));
+      const updated = current.map((tx: any) => idMap.has(tx.id) ? { ...tx, ...idMap.get(tx.id) } : tx);
+      await saveCachedTransactions(updated);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk transactions updated in IndexedDB main cache.`);
+    } catch (dbErr) {
+      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed bulk update in main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Saving bulk updates to IndexedDB pending list.`);
+        const { savePendingTransaction } = await import('./lib/offlineDb');
+        for (const tx of updatedTxs) {
+          const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
+          const txWithOwner = { ...tx, ownerId: syncOwnerId || 'mgr_1', cashierId };
+          const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+          await savePendingTransaction(cleanData);
+        }
+      } catch (err) {
+        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed saving pending bulk transaction updates:', err);
+      }
+      return;
+    }
 
     if (syncOwnerId) {
       try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate bulk update on Firestore...`);
         const batch = writeBatch(db);
         updatedTxs.forEach((tx) => {
-          // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
           const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
           const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
           const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
           batch.set(doc(db, 'transactions', tx.id), cleanData, { merge: true });
         });
         await batch.commit();
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk Firestore updates committed successfully.`);
       } catch (err) {
+        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Bulk Firestore update failed. Saving bulk updates to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_update');
+        // Fallback
+        try {
+          const { savePendingTransaction } = await import('./lib/offlineDb');
+          for (const tx of updatedTxs) {
+            const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
+            const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
+            const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
+            await savePendingTransaction(cleanData);
+          }
+        } catch (queueErr) {
+          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback saving pending bulk transaction updates failed:', queueErr);
+        }
       }
     }
   };
 
   const handleCustomResetData = async () => {
     dispatch({ type: 'RESET_DATA' });
+
+    // Seed/Reset IndexedDB main cache
+    const seedTxs = getSeedTransactions(state.terminalFeeRate);
+    try {
+      const { saveCachedTransactions } = await import('./lib/offlineDb');
+      await saveCachedTransactions(seedTxs);
+    } catch (dbErr) {
+      console.error('[DB] Failed resetting transaction main cache:', dbErr);
+    }
 
     if (syncOwnerId) {
       try {
@@ -1052,7 +1379,6 @@ export default function App() {
           batch.delete(doc(db, 'transactions', tx.id));
         });
 
-        const seedTxs = getSeedTransactions(state.terminalFeeRate);
         seedTxs.forEach((tx) => {
           const cashierId = tx.employeeId || tx.cashierId || state.currentUser.id || 'cashier';
           const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
@@ -1068,29 +1394,96 @@ export default function App() {
   };
 
   const handleAddExpense = async (expense: Expense) => {
-    // Unconditionally dispatch locally first
     dispatch({ type: 'ADD_EXPENSE', payload: expense });
+
+    const expenseWithOwner = { ...expense, ownerId: syncOwnerId || 'mgr_1' };
+    const cleanData = prepareFirestoreData(expenseWithOwner, 'expenses');
+
+    // 1. Save directly to local IndexedDB main cache first
+    try {
+      const { saveCachedExpenses, getCachedExpenses } = await import('./lib/offlineDb');
+      const current = await getCachedExpenses();
+      const updated = [...current.filter((e: any) => e.id !== expense.id), cleanData];
+      await saveCachedExpenses(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to save expense to main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingExpense } = await import('./lib/offlineDb');
+        await savePendingExpense(cleanData);
+      } catch (err) {
+        console.error('[DB] Failed to save pending expense:', err);
+      }
+      return;
+    }
 
     if (syncOwnerId) {
       try {
-        const expenseWithOwner = { ...expense, ownerId: syncOwnerId };
-        const cleanData = prepareFirestoreData(expenseWithOwner, 'expenses');
         await setDoc(doc(db, 'expenses', expense.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `expenses/${expense.id}`);
+        // Fallback
+        try {
+          const { savePendingExpense } = await import('./lib/offlineDb');
+          await savePendingExpense(cleanData);
+        } catch (queueErr) {
+          console.error('[DB] Fallback save pending expense failed:', queueErr);
+        }
       }
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
-    // Unconditionally dispatch locally first
     dispatch({ type: 'DELETE_EXPENSE', payload: id });
+
+    // 1. Delete from local IndexedDB main cache first
+    try {
+      const { saveCachedExpenses, getCachedExpenses } = await import('./lib/offlineDb');
+      const current = await getCachedExpenses();
+      const updated = current.filter((e: any) => e.id !== id);
+      await saveCachedExpenses(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to delete expense from main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingDeletion } = await import('./lib/offlineDb');
+        await savePendingDeletion({
+          id: `expenses_${id}`,
+          collection: 'expenses',
+          docId: id
+        });
+      } catch (err) {
+        console.error('[DB] Failed to save pending expense deletion:', err);
+      }
+      return;
+    }
 
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'expenses', id));
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, `expenses/${id}`);
+        // Fallback
+        try {
+          const { savePendingDeletion } = await import('./lib/offlineDb');
+          await savePendingDeletion({
+            id: `expenses_${id}`,
+            collection: 'expenses',
+            docId: id
+          });
+        } catch (queueErr) {
+          console.error('[DB] Fallback save pending expense deletion failed:', queueErr);
+        }
       }
     }
   };
@@ -1098,15 +1491,29 @@ export default function App() {
   const [isLocked, setIsLocked] = useState(() => {
     try {
       const locked = localStorage.getItem('OPay_Terminal_Locked');
-      return locked !== 'false';
+      const isLockedVal = locked !== 'false';
+      console.log(`[OFFLINE AUTH TRACE] Initializing terminal lock status. LocalStorage OPay_Terminal_Locked: "${locked}" -> Resolved isLocked: ${isLockedVal}`);
+      return isLockedVal;
     } catch (e) {
+      console.error('[OFFLINE AUTH TRACE] Error reading OPay_Terminal_Locked from localStorage:', e);
       return true;
     }
   });
 
   const handleLoginSuccess = (user: User) => {
+    const terminalMode = (localStorage.getItem('POSTrack_Mode') as 'online' | 'offline') || 'online';
+    setAppMode(terminalMode);
+    console.log('[OFFLINE AUTH TRACE] handleLoginSuccess successfully invoked:', {
+      userId: user.id,
+      userName: user.name,
+      userRole: user.role,
+      userPhone: user.phone,
+      terminalMode: terminalMode
+    });
+
     setRegisteredUsers((prev) => {
       if (!prev.some(u => u.id === user.id)) {
+        console.log('[OFFLINE AUTH TRACE] Adding logged-in user to active registeredUsers pool and localStorage:', user.id);
         const next = [...prev, user];
         localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
         return next;
@@ -1117,9 +1524,11 @@ export default function App() {
     dispatch({ type: 'SWITCH_USER', payload: user });
     setIsLocked(false);
     localStorage.setItem('OPay_Terminal_Locked', 'false');
+    console.log('[OFFLINE AUTH TRACE] Terminal unlocked. Current active shift operator is:', user.name);
   };
 
   const handleLockTerminal = () => {
+    console.log('[OFFLINE AUTH TRACE] Terminal lock triggered manually. Setting OPay_Terminal_Locked = true.');
     setIsLocked(true);
     localStorage.setItem('OPay_Terminal_Locked', 'true');
   };
@@ -1270,6 +1679,19 @@ export default function App() {
       
       showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
       
+      // Save directly to offline IndexedDB cache immediately so they are available offline right away
+      try {
+        console.log('[OFFLINE AUTH TRACE] App.tsx: caching newly registered user inside IndexedDB "users" store:', newUser.name, 'with raw pin length:', newUser.pin?.length);
+        const { saveCachedUser } = await import('./lib/offlineDb');
+        await saveCachedUser({
+          ...cleanData,
+          pin: newUser.pin
+        });
+        console.log('[OFFLINE AUTH TRACE] Successfully cached registered user in IndexedDB for offline login support.');
+      } catch (cacheErr) {
+        console.error('[OFFLINE AUTH TRACE] Failed to cache newly registered user in IndexedDB:', cacheErr);
+      }
+      
       // Update local state immediately
       const standardizedUser = {
         ...mapFirestoreUser(cleanData, finalUid)
@@ -1305,6 +1727,22 @@ export default function App() {
   };
 
   const handleUpdateUserPin = async (userId: string, newPin: string) => {
+    console.log('[OFFLINE AUTH TRACE] App.tsx: updating user PIN inside IndexedDB "users" store for user ID:', userId, 'with new PIN length:', newPin.length);
+    // 1. Sync directly to local IndexedDB cache
+    try {
+      const { saveCachedUser, getCachedUser } = await import('./lib/offlineDb');
+      const cached = await getCachedUser(userId);
+      if (cached) {
+        console.log('[OFFLINE AUTH TRACE] User found in cache. Proceeding to update PIN in "users" store.');
+        await saveCachedUser({ ...cached, pin: newPin });
+        console.log('[OFFLINE AUTH TRACE] Successfully updated user PIN in offline IndexedDB cache for userId:', userId);
+      } else {
+        console.warn('[OFFLINE AUTH TRACE] Failed to find user in offline cache to update PIN:', userId);
+      }
+    } catch (dbErr) {
+      console.error('[OFFLINE AUTH TRACE] Failed to update PIN in offline cache:', dbErr);
+    }
+
     if (syncOwnerId) {
       try {
         // Since we are instructed to NEVER store user's password or PIN inside Firestore,
@@ -1332,6 +1770,16 @@ export default function App() {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
+    // 1. Sync directly to local IndexedDB cache
+    try {
+      const { saveCachedUser } = await import('./lib/offlineDb');
+      const cleanData = prepareFirestoreData({ ...updatedUser, ownerId: syncOwnerId || 'mgr_1' }, 'users');
+      await saveCachedUser(cleanData);
+      console.log('[User Update] Successfully updated user in offline IndexedDB cache:', updatedUser.id);
+    } catch (dbErr) {
+      console.error('[User Update] Failed to update user in offline cache:', dbErr);
+    }
+
     if (syncOwnerId) {
       try {
         const userWithOwner = { ...updatedUser, ownerId: syncOwnerId };
@@ -1355,6 +1803,15 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
+    // 1. Sync directly to local IndexedDB cache
+    try {
+      const { deleteCachedUser } = await import('./lib/offlineDb');
+      await deleteCachedUser(userId);
+      console.log('[User Delete] Successfully deleted user from offline IndexedDB cache:', userId);
+    } catch (dbErr) {
+      console.error('[User Delete] Failed to delete user from offline cache:', dbErr);
+    }
+
     if (syncOwnerId) {
       try {
         await deleteDoc(doc(db, 'users', userId));
@@ -1600,14 +2057,22 @@ export default function App() {
   const renderSyncStatusBadge = () => {
     let status: 'offline' | 'synced' | 'syncing' | 'pending-offline' = 'offline';
     
-    if (syncOwnerId && syncOwnerId !== 'mgr_1') {
-      if (!isOnline) {
-        status = 'pending-offline';
-      } else if (pendingSyncCount > 0) {
+    const isOnlineCapable = syncOwnerId && syncOwnerId !== 'mgr_1';
+    
+    if (isOnlineCapable) {
+      if (isSyncing) {
         status = 'syncing';
+      } else if (pendingSyncCount > 0) {
+        if (isOnline) {
+          status = 'syncing';
+        } else {
+          status = 'pending-offline';
+        }
       } else {
         status = 'synced';
       }
+    } else {
+      status = 'offline';
     }
 
     const badgeConfig = {

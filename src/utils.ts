@@ -301,6 +301,30 @@ export function cleanPhoneForCompare(p: string) {
 }
 
 /**
+ * Super robust comparison for phone numbers
+ */
+export function isPhoneMatch(p1: string, p2: string): boolean {
+  if (!p1 || !p2) return false;
+  const digits1 = p1.replace(/\D/g, '');
+  const digits2 = p2.replace(/\D/g, '');
+  if (!digits1 || !digits2) return false;
+  
+  // If both have at least 10 digits, compare their last 10 digits
+  const clean1 = digits1.length >= 10 ? digits1.slice(-10) : digits1;
+  const clean2 = digits2.length >= 10 ? digits2.slice(-10) : digits2;
+  
+  if (clean1 === clean2) return true;
+  
+  // Suffix fallback (minimum 7 digits)
+  const minLen = Math.min(digits1.length, digits2.length);
+  if (minLen >= 7) {
+    return digits1.endsWith(digits2) || digits2.endsWith(digits1);
+  }
+  
+  return false;
+}
+
+/**
  * Returns a friendly label for transaction types to differentiate them in UI
  */
 export function getFriendlyTypeLabel(type: string): string {

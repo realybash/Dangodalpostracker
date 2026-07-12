@@ -5,7 +5,7 @@ import { User, UserRole } from '../types';
 import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { normalizePhone, normalizeName, cleanPhoneForCompare, mapFirestoreUser, getAuthPassword } from '../utils';
+import { normalizePhone, normalizeName, cleanPhoneForCompare, isPhoneMatch, mapFirestoreUser, getAuthPassword } from '../utils';
 import { 
   Lock, 
   UserCheck, 
@@ -169,32 +169,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
     if (mode === 'offline') {
       try {
-        const { getAllCachedUsers, hashPin } = await import('../lib/offlineDb');
-        const cachedUsers = await getAllCachedUsers();
-        console.log('[Login] Offline cachedUsers:', cachedUsers);
-        const enteredPinHash = await hashPin(pin);
-        console.log('[Login] Offline enteredPinHash:', enteredPinHash);
-        
-        const inputClean = inputRaw.toLowerCase().trim();
-        const inputDigits = inputRaw.replace(/\D/g, '');
-
-        const user = cachedUsers.find(u => {
-          const dbPhoneDigits = (u.phone || u.phoneNumber || '').replace(/\D/g, '');
-          const dbName = (u.name || u.fullName || '').toLowerCase();
-          
-          const phoneMatch = inputDigits.length > 5 && dbPhoneDigits.includes(inputDigits);
-          const nameMatch = dbName.includes(inputClean);
-          
-          const match = (phoneMatch || nameMatch) && u.pin === enteredPinHash;
-          if (match) console.log('[Login] Offline match found for user:', u.name);
-          return match;
-        });
+        const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+        const user = await verifyOfflineUserCredentials(inputRaw, pin, 'Employee');
         
         if (user) {
-          console.log('[Login] Offline login success for:', user.name);
+          console.log('[Login] Offline login success for staff:', user.name);
           onLogin(user);
         } else {
-          console.log('[Login] Offline login failed: No matching user found.');
           setError('Invalid credentials for offline login. Please log in online at least once.');
         }
       } catch (err) {
@@ -328,32 +309,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
     if (mode === 'offline') {
       try {
-        const { getAllCachedUsers, hashPin } = await import('../lib/offlineDb');
-        const cachedUsers = await getAllCachedUsers();
-        console.log('[Login] Manager Offline cachedUsers:', cachedUsers);
-        const enteredPinHash = await hashPin(pin);
-        console.log('[Login] Manager Offline enteredPinHash:', enteredPinHash);
-        
-        const inputClean = inputRaw.toLowerCase().trim();
-        const inputDigits = inputRaw.replace(/\D/g, '');
-
-        const user = cachedUsers.find(u => {
-          const dbPhoneDigits = (u.phone || u.phoneNumber || '').replace(/\D/g, '');
-          const dbName = (u.name || u.fullName || '').toLowerCase();
-          
-          const phoneMatch = inputDigits.length > 5 && dbPhoneDigits.includes(inputDigits);
-          const nameMatch = dbName.includes(inputClean);
-          
-          const match = (phoneMatch || nameMatch) && u.pin === enteredPinHash;
-          if (match) console.log('[Login] Manager Offline match found for user:', u.name);
-          return match;
-        });
+        const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+        const user = await verifyOfflineUserCredentials(inputRaw, pin, 'Manager');
         
         if (user) {
           console.log('[Login] Manager Offline login success for:', user.name);
           onLogin(user);
         } else {
-          console.log('[Login] Manager Offline login failed: No matching user found.');
           setError('Invalid credentials for offline login. Please log in online at least once.');
         }
       } catch (err) {
