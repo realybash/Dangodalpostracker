@@ -46,6 +46,12 @@ export const useFirebasePersistence = (
       dispatch({ type: 'SET_REGISTERED_USERS', payload: cloudUsersList });
       
       localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(cloudUsersList));
+      
+      // Also cache in IndexedDB for robust offline login
+      import('../lib/offlineDb').then(({ saveCachedUsersBatch }) => {
+        saveCachedUsersBatch(cloudUsersList).catch(err => console.error('[Persistence] IndexedDB user cache failed:', err));
+      });
+      
       setIsUsersLoaded(true);
     }, (err) => {
       console.error('[Persistence] Users sync failed:', err);

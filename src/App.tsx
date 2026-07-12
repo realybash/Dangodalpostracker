@@ -718,6 +718,54 @@ export default function App() {
       }
     };
     testConnection();
+    
+    // Initial sync check and local cache loading
+    if (navigator.onLine) {
+        setIsOnline(true);
+        import('./lib/sync').then(({ syncOfflineTransactions }) => syncOfflineTransactions());
+    } else {
+        setIsOnline(false);
+        // Load offline cached data
+        import('./lib/offlineDb').then(async ({ getCachedTransactions, getCachedExpenses, getCachedPosTerminals }) => {
+            try {
+                const [txs, expenses, terminals] = await Promise.all([
+                    getCachedTransactions(),
+                    (getCachedExpenses as any)?.() || Promise.resolve([]),
+                    (getCachedPosTerminals as any)?.() || Promise.resolve([])
+                ]);
+                
+                if (txs?.length) dispatch({ type: 'SET_TRANSACTIONS', payload: txs });
+                if (expenses?.length) dispatch({ type: 'SET_EXPENSES', payload: expenses });
+                if (terminals?.length) dispatch({ type: 'SET_POS_TERMINALS', payload: terminals });
+                
+                console.log('[Offline] Loaded cached data from IndexedDB:', { 
+                    txs: txs?.length, 
+                    expenses: expenses?.length, 
+                    terminals: terminals?.length 
+                });
+            } catch (err) {
+                console.error('[Offline] Failed to load cached data:', err);
+            }
+        });
+    }
+    
+    // Listen for online status
+    const handleOnline = () => {
+      console.log('[Sync] Network restored, attempting sync...');
+      setIsOnline(true);
+      import('./lib/sync').then(({ syncOfflineTransactions }) => syncOfflineTransactions());
+    };
+    const handleOffline = () => {
+      console.log('[Sync] Network connection lost.');
+      setIsOnline(false);
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Real-time Firestore sync subscriptions when syncOwnerId is active
@@ -744,13 +792,17 @@ export default function App() {
 
     if (isManager) {
       unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
-        ownerTxsRef.current = snap.docs.map(d => d.data() as Transaction);
+        const txs = snap.docs.map(d => d.data() as Transaction);
+        ownerTxsRef.current = txs;
         updateCombinedTxs();
+        import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
     } else {
       unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
-        cashierTxsRef.current = snap.docs.map(d => d.data() as Transaction);
+        const txs = snap.docs.map(d => d.data() as Transaction);
+        cashierTxsRef.current = txs;
         updateCombinedTxs();
+        import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
     }
 
@@ -768,6 +820,7 @@ export default function App() {
       expList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       
       dispatch({ type: 'SET_EXPENSES', payload: expList });
+      import('./lib/offlineDb').then(({ saveCachedExpenses }) => saveCachedExpenses(expList));
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'expenses');
     });
@@ -785,6 +838,7 @@ export default function App() {
       termList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       
       dispatch({ type: 'SET_POS_TERMINALS', payload: termList });
+      import('./lib/offlineDb').then(({ saveCachedPosTerminals }) => saveCachedPosTerminals(termList));
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'pos_terminals');
     });
@@ -875,17 +929,31 @@ export default function App() {
     // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
     // This solves the core audit requirement of preventing any lag or delay in showing transaction history, metrics, and reports.
     dispatch({ type: 'ADD_TRANSACTION', payload: tx });
+    
+    // Prepare enriched data with IDs needed for cloud sync
+    const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
+    const txWithIds = { 
+        ...tx, 
+        ownerId: syncOwnerId || state.currentUser.ownerId || state.currentUser.id, 
+        cashierId 
+    };
+    const cleanData = prepareFirestoreData(txWithIds, 'transactions');
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    if (mode === 'offline') {
+        const { savePendingTransaction } = await import('./lib/offlineDb');
+        await savePendingTransaction(cleanData);
+        return;
+    }
 
     if (syncOwnerId) {
       try {
-        // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
-        // This ensures the cashier's onSnapshot listener query (where('cashierId', '==', currentUserId)) matches successfully.
-        const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
-        const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
-        const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
+        // Fallback to offline storage if write fails (e.g. temporary network drop while in 'online' mode)
+        const { savePendingTransaction } = await import('./lib/offlineDb');
+        await savePendingTransaction(cleanData);
       }
     }
   };
@@ -894,15 +962,30 @@ export default function App() {
     // Unconditionally dispatch locally first to ensure absolute zero-latency UI updates & instant stats re-computations.
     dispatch({ type: 'UPDATE_TRANSACTION', payload: tx });
 
+    // Prepare enriched data
+    const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
+    const txWithIds = { 
+        ...tx, 
+        ownerId: syncOwnerId || state.currentUser.ownerId || state.currentUser.id, 
+        cashierId 
+    };
+    const cleanData = prepareFirestoreData(txWithIds, 'transactions');
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    if (mode === 'offline') {
+        const { savePendingTransaction } = await import('./lib/offlineDb');
+        await savePendingTransaction(cleanData);
+        return;
+    }
+
     if (syncOwnerId) {
       try {
-        // Core structural fix: cashierId MUST always be a valid string (never undefined) matching the operator's user ID.
-        const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
-        const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
-        const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
+        // Fallback to offline storage
+        const { savePendingTransaction } = await import('./lib/offlineDb');
+        await savePendingTransaction(cleanData);
       }
     }
   };
@@ -1143,9 +1226,7 @@ export default function App() {
       console.log('[Registration Profile Pre-Check]', {
         uid: finalUid,
         fullName: newUser.name,
-        phoneNumber: newUser.phone,
-        pin: newUser.pin,
-        password: newUser.password
+        phoneNumber: newUser.phone
       });
 
       // 2. Map safe fields only (never store user's password or PIN inside Firestore)
@@ -1191,8 +1272,8 @@ export default function App() {
       
       // Update local state immediately
       const standardizedUser = {
-        ...mapFirestoreUser(cleanData, finalUid),
-        pin: newUser.pin // Preserve local PIN for smooth transition
+        ...mapFirestoreUser(cleanData, finalUid)
+        // pin is removed here to prevent plain-text leakage in application state and localStorage
       };
       setRegisteredUsers(prev => {
         const next = prev.filter(u => u.id !== standardizedUser.id && u.phone !== standardizedUser.phone);

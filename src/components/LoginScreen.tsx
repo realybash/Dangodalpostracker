@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { hashPin, saveCachedUsersBatch } from '../lib/offlineDb';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
 import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -36,6 +37,14 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllAccounts, isUsersLoaded }: LoginScreenProps) {
+  const [mode, setMode] = useState<'online' | 'offline'>(() => {
+    try {
+      return (localStorage.getItem('POSTrack_Mode') as 'online' | 'offline') || 'online';
+    } catch {
+      return 'online';
+    }
+  });
+  
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
 
   // Automatically switch to registration mode if there are zero registered users in the database
@@ -151,12 +160,56 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       setError('Please enter your 4-digit PIN.');
       return;
     }
-    
+
     const inputRaw = loginPhone.trim();
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    
+    setIsSubmitting(true);
+    console.log(`[Login] Staff login attempt in ${mode} mode for:`, inputRaw);
+
+    if (mode === 'offline') {
+      try {
+        const { getAllCachedUsers, hashPin } = await import('../lib/offlineDb');
+        const cachedUsers = await getAllCachedUsers();
+        console.log('[Login] Offline cachedUsers:', cachedUsers);
+        const enteredPinHash = await hashPin(pin);
+        console.log('[Login] Offline enteredPinHash:', enteredPinHash);
+        
+        const inputClean = inputRaw.toLowerCase().trim();
+        const inputDigits = inputRaw.replace(/\D/g, '');
+
+        const user = cachedUsers.find(u => {
+          const dbPhoneDigits = (u.phone || u.phoneNumber || '').replace(/\D/g, '');
+          const dbName = (u.name || u.fullName || '').toLowerCase();
+          
+          const phoneMatch = inputDigits.length > 5 && dbPhoneDigits.includes(inputDigits);
+          const nameMatch = dbName.includes(inputClean);
+          
+          const match = (phoneMatch || nameMatch) && u.pin === enteredPinHash;
+          if (match) console.log('[Login] Offline match found for user:', u.name);
+          return match;
+        });
+        
+        if (user) {
+          console.log('[Login] Offline login success for:', user.name);
+          onLogin(user);
+        } else {
+          console.log('[Login] Offline login failed: No matching user found.');
+          setError('Invalid credentials for offline login. Please log in online at least once.');
+        }
+      } catch (err) {
+        console.error('[Login] Offline login error:', err);
+        setError('Offline login failed.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // ... (rest of the existing online login logic)
     const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
     const inputNameNormalized = inputRaw.toLowerCase().replace(/\s+/g, '');
     
-    setIsSubmitting(true);
     console.log('[Login] Staff login attempt for:', inputRaw);
 
     try {
@@ -216,12 +269,19 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           if (rememberMe) {
             localStorage.setItem('OPay_Last_Login_Tab', 'staff');
             localStorage.setItem('OPay_Last_Staff_Phone', loginPhone);
-            localStorage.setItem('OPay_Last_Staff_Pin', pin);
           } else {
             localStorage.removeItem('OPay_Last_Staff_Phone');
-            localStorage.removeItem('OPay_Last_Staff_Pin');
           }
         } catch (e) {}
+        
+        // Cache all users for offline mode
+        try {
+            const userWithPin = { ...user, pin }; // Inject raw pin for hashing in cache
+            await saveCachedUsersBatch([...registeredUsers, userWithPin]);
+            setSuccess(`Welcome back, ${user.name}! Offline access has been successfully prepared.`);
+        } catch (e) {
+            console.error('Failed to cache users', e);
+        }
 
         onLogin(user);
       } catch (authErr: any) {
@@ -261,11 +321,55 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     }
 
     const inputRaw = managerPhone.trim();
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    
+    setIsSubmitting(true);
+    console.log(`[Login] Manager login attempt in ${mode} mode for:`, inputRaw);
+
+    if (mode === 'offline') {
+      try {
+        const { getAllCachedUsers, hashPin } = await import('../lib/offlineDb');
+        const cachedUsers = await getAllCachedUsers();
+        console.log('[Login] Manager Offline cachedUsers:', cachedUsers);
+        const enteredPinHash = await hashPin(pin);
+        console.log('[Login] Manager Offline enteredPinHash:', enteredPinHash);
+        
+        const inputClean = inputRaw.toLowerCase().trim();
+        const inputDigits = inputRaw.replace(/\D/g, '');
+
+        const user = cachedUsers.find(u => {
+          const dbPhoneDigits = (u.phone || u.phoneNumber || '').replace(/\D/g, '');
+          const dbName = (u.name || u.fullName || '').toLowerCase();
+          
+          const phoneMatch = inputDigits.length > 5 && dbPhoneDigits.includes(inputDigits);
+          const nameMatch = dbName.includes(inputClean);
+          
+          const match = (phoneMatch || nameMatch) && u.pin === enteredPinHash;
+          if (match) console.log('[Login] Manager Offline match found for user:', u.name);
+          return match;
+        });
+        
+        if (user) {
+          console.log('[Login] Manager Offline login success for:', user.name);
+          onLogin(user);
+        } else {
+          console.log('[Login] Manager Offline login failed: No matching user found.');
+          setError('Invalid credentials for offline login. Please log in online at least once.');
+        }
+      } catch (err) {
+        console.error('[Login] Manager Offline login error:', err);
+        setError('Offline login failed.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+    
+    // ... (rest of the existing online login logic)
     const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
     const inputNameSearch = inputRaw.toLowerCase().replace(/\s+/g, '');
     const normalizedInputPhone = normalizePhone(inputRaw);
     
-    setIsSubmitting(true);
     console.log('[Login] Manager login attempt for:', inputRaw);
 
     try {
@@ -403,14 +507,20 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           if (rememberMe) {
             localStorage.setItem('OPay_Last_Login_Tab', 'manager');
             localStorage.setItem('OPay_Last_Manager_Phone', managerPhone);
-            localStorage.setItem('OPay_Last_Manager_Pin', pin);
           } else {
             localStorage.removeItem('OPay_Last_Manager_Phone');
-            localStorage.removeItem('OPay_Last_Manager_Pin');
           }
         } catch (e) {}
 
-        setSuccess(`Access Granted! Welcome back, ${matchedManager.name}.`);
+        // Cache all users for offline mode
+        try {
+          const managerWithPin = { ...matchedManager, pin }; // Inject raw pin for hashing in cache
+          await saveCachedUsersBatch([...registeredUsers, managerWithPin]);
+          setSuccess(`Access Granted! Welcome back, ${matchedManager.name}. Offline access has been successfully prepared.`);
+        } catch (e) {
+            console.error('Failed to cache users', e);
+        }
+
         onLogin(matchedManager);
       } catch (authErr: any) {
         console.warn('[Login] Manager Auth failed:', authErr.code);
@@ -573,7 +683,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           try {
             localStorage.setItem('OPay_Last_Login_Tab', 'staff');
             localStorage.setItem('OPay_Last_Staff_Phone', newUser.phone || newUser.name);
-            localStorage.setItem('OPay_Last_Staff_Pin', newUser.pin || '');
           } catch (e) {}
         } else {
           setLoginTab('manager');
@@ -582,7 +691,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           try {
             localStorage.setItem('OPay_Last_Login_Tab', 'manager');
             localStorage.setItem('OPay_Last_Manager_Phone', newUser.phone || newUser.name);
-            localStorage.setItem('OPay_Last_Manager_Pin', newUser.pin || '');
           } catch (e) {}
         }
         // Reset registration form
@@ -644,6 +752,35 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           <p className="text-emerald-100/80 text-[11px] font-bold mt-2 max-w-xs mx-auto uppercase tracking-[0.2em] leading-relaxed">
             Premium POS Audit Terminal
           </p>
+        </div>
+
+        {/* Mode Selector */}
+        <div className="bg-neutral-50 px-8 py-4 border-b border-neutral-100 flex items-center justify-between">
+          <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">System Mode</span>
+          <div className="flex gap-4">
+            <button
+              onClick={() => { localStorage.setItem('POSTrack_Mode', 'online'); setMode('online'); setAuthMode('login'); }}
+              className={`px-8 py-4 rounded-full text-[13px] font-black uppercase flex items-center gap-3 transition-all active:scale-95 cursor-pointer shadow-sm ${
+                mode === 'online'
+                  ? 'bg-emerald-500 text-white shadow-emerald-500/20'
+                  : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'
+              }`}
+            >
+              <div className={`w-3 h-3 rounded-full ${mode === 'online' ? 'bg-emerald-100 animate-pulse' : 'bg-neutral-400'}`}></div>
+              Online
+            </button>
+            <button
+              onClick={() => { localStorage.setItem('POSTrack_Mode', 'offline'); setMode('offline'); setAuthMode('login'); }}
+              className={`px-8 py-4 rounded-full text-[13px] font-black uppercase flex items-center gap-3 transition-all active:scale-95 cursor-pointer shadow-sm ${
+                mode === 'offline'
+                  ? 'bg-amber-500 text-white shadow-amber-500/20'
+                  : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'
+              }`}
+            >
+              <div className={`w-3 h-3 rounded-full ${mode === 'offline' ? 'bg-amber-100 animate-pulse' : 'bg-neutral-400'}`}></div>
+              Offline
+            </button>
+          </div>
         </div>
 
         {/* Mode Selector Tab (Login vs Register) */}

@@ -34,7 +34,7 @@ interface MetricCardsProps {
   language: 'en' | 'ha';
 }
 
-export function MetricCards({
+export const MetricCards = React.memo(({
   profit,
   volume,
   totalExpenses,
@@ -46,7 +46,7 @@ export function MetricCards({
   onOpenAddModal,
   isManager = true,
   language
-}: MetricCardsProps) {
+}: MetricCardsProps) => {
   const [editingTarget, setEditingTarget] = useState(false);
   const [targetInputValue, setTargetInputValue] = useState(dailyTarget.toString());
 
@@ -327,4 +327,4 @@ export function MetricCards({
       )}
     </div>
   );
-}
+});

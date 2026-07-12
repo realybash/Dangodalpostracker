@@ -8,47 +8,94 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      // Allow read for everyone to facilitate login lookup (Phone -> Profile)
-      // and allow reading own profile
-      allow get: if true;
-      allow list: if true;
+      // Allow read if authenticated. List is restricted to managers.
+      allow get: if request.auth != null;
+      allow list: if isManager();
       
       // Only managers can create/update other users. Users can update their own PIN.
-      allow write: if request.auth != null;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pin']);
+      allow create: if isManager();
+      allow update: if request.auth != null && (
+        (request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pin'])) ||
+        isManager()
+      );
+      allow delete: if isManager();
     }
     
     // Settings collection
     match /settings/{ownerId} {
       // Managers can read/write their own settings.
-      // Employees can read their manager's settings.
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && (request.auth.uid == ownerId || isManager());
+      // Employees can read their manager's settings if they are linked.
+      allow read: if request.auth != null && (
+        request.auth.uid == ownerId || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId == ownerId
+      );
+      allow write: if request.auth != null && request.auth.uid == ownerId && isManager();
     }
 
     // Borrow/Keep records
     match /borrowKeep/{id} {
-      allow read, write: if request.auth != null;
+      allow read, write: if request.auth != null && (
+        resource == null || 
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.cashierId == request.auth.uid ||
+        isManager()
+      );
     }
     
-    // Transactions: Isolation between cashiers
+    // Transactions: Isolation between cashiers and owners
     match /transactions/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.cashierId == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        request.resource.data.cashierId == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update, delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.cashierId == request.auth.uid
+      );
     }
 
     // Expenses
     match /expenses/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.employeeId == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        request.resource.data.employeeId == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update, delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.employeeId == request.auth.uid
+      );
     }
 
     // POS Terminals
     match /pos_terminals/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.employeeId == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.employeeId == request.auth.uid
+      );
+      allow delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid
+      );
     }
     
     // Pricing Rules
     match /pricing_rules/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow write: if isManager();
     }
 
     match /test_connection/{id} {

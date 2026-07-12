@@ -47,7 +47,7 @@ interface TransactionListProps {
   onOpenSettings?: () => void;
 }
 
-export function TransactionList({
+export const TransactionList = React.memo(({
   currentUser,
   transactions,
   onDeleteTransaction,
@@ -58,7 +58,7 @@ export function TransactionList({
   onBulkUpdateTransactions,
   settings,
   onOpenSettings
-}: TransactionListProps) {
+}: TransactionListProps) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [providerFilter, setProviderFilter] = useState<string>('ALL');
@@ -1938,4 +1938,4 @@ export function TransactionList({
       )}
     </div>
   );
-}
+});
