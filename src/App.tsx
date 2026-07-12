@@ -3645,6 +3645,7 @@ export default function App() {
                     terminalFeeRate: newTerminalRate,
                     serialNumber: newTerminalSN.trim(),
                     ownerId: state.impersonatedUserId || (syncOwnerId || 'local_owner'),
+                    employeeId: state.currentUser.role === 'Employee' ? state.currentUser.id : undefined,
                     addedBy: state.currentUser.name,
                     status: 'Active',
                     timestamp: new Date().toISOString(),
