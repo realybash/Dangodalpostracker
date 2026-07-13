@@ -1297,8 +1297,8 @@ export const TransactionList = React.memo(({
                             <span className="text-neutral-200">|</span>
                             <span className="text-neutral-500">Prof: <span className="text-emerald-600">{formatNaira(tx.profit || 0)}</span></span>
                             { (tx.chargesStatus !== 'Paid') && (
-                              <span className="ml-auto px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700">
-                                {tx.chargesStatus || 'Waived'}
+                              <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-black text-[9px] uppercase border border-amber-200">
+                                {tx.chargesStatus === 'Unpaid' ? 'Unpaid' : 'Waived'}
                               </span>
                             )}
                           </div>

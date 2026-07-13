@@ -617,10 +617,8 @@ export function getCalculatedFinancials(
   let cashback = matchedRange.cashback || 0;
 
   // 4. NET PROFIT CALCULATION
-  // If customer charge is 0 (waived), don't deduct provider/CBN costs from profit
-  let netProfit = customerCharge > 0 
-    ? (customerCharge - providerCharge - vatAmount - cbnCharge + cashback)
-    : (customerCharge + cashback); // Assuming cashback applies regardless
+  // Net Profit is simply Customer Charge - Provider Cost + Cashback, ignoring VAT and other deductions
+  let netProfit = customerCharge - providerCharge + cashback;
 
   
   if (provider === 'OPay' && type === 'Transfer' && destinationBank === 'OPay') {
@@ -628,41 +626,41 @@ export function getCalculatedFinancials(
     providerCharge = 0;
     vatAmount = 0;
     cbnCharge = amt >= 10000 ? 50 : 0;
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'OPay' && type === 'Transfer' && destinationBank !== 'OPay') {
     providerCharge = 18.60;
     vatAmount = Math.round((providerCharge * vatRate) / 100);
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'OPay' && type === 'Deposit' && destinationBank === 'OPay') {
     providerCharge = amt >= 30000 ? 100 : Math.floor(amt * 0.0035);
     vatAmount = Math.round((providerCharge * vatRate) / 100);
     cbnCharge = 0;
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'OPay' && type === 'Deposit' && destinationBank !== 'OPay') {
     providerCharge = 0;
     vatAmount = 0;
     cbnCharge = 0;
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'Moniepoint' && type === 'Deposit') {
     providerCharge = 0;
     vatAmount = 0;
     cbnCharge = 0;
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'Moniepoint' && type === 'Transfer' && destinationBank === 'Moniepoint') {
     providerCharge = cbnCharge;
     vatAmount = 0;
     cbnCharge = 0; // Avoid double deduction since provider charge is set to the CBN levy
-    netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+    netProfit = customerCharge - providerCharge + cashback;
   }
 
   if (provider === 'OPay' && type === 'Cash Out (Transfer)') {

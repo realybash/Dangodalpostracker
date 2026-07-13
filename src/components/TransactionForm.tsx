@@ -396,7 +396,7 @@ export function TransactionForm({
     
     // Adjust profit based on manual fee overrides
     const isWaivedOrUnpaid = chargesStatus !== 'Paid' || isFeeWaived;
-    const actualProfit = isWaivedOrUnpaid ? 0 : (financials.agentProfit + (customerFee - financials.customerCharge));
+    const actualProfit = isWaivedOrUnpaid ? 0 : (customerFee - financials.providerCharge + financials.cashback);
 
     // Customer card debit / total charged amount
     const totalCustomerCharged = actualAmount;
@@ -1587,7 +1587,12 @@ export function TransactionForm({
               </div>
               <div className="bg-[#00B87A] px-3.5 py-1.5 rounded-xl shadow-sm">
                 <span className="text-sm font-black text-white font-mono">
-                  {formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).agentProfit)}
+                  {(() => {
+                    const effectiveType = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
+                    const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
+                    const previewProfit = isFeeWaived ? 0 : (customerFee - financials.providerCharge + financials.cashback);
+                    return formatNaira(previewProfit);
+                  })()}
                 </span>
               </div>
             </div>
