@@ -382,7 +382,9 @@ export function computeTxMetrics(
     volume += tx.amount || 0;
     terminalFees += tx.terminalFee || 0;
     cbnCharges += tx.cbnCharge || 0;
-    profit += tx.profit || 0;
+    if (tx.chargesStatus === 'Paid' && (tx.profit || 0) >= 0) {
+      profit += tx.profit || 0;
+    }
     
     totalCustomerCharges += tx.customerCharge || tx.customerFee || 0;
     totalProviderCharges += tx.providerCharge || tx.terminalFee || 0;
@@ -394,7 +396,9 @@ export function computeTxMetrics(
     if (breakdowns[tType as keyof typeof breakdowns]) {
       const b = breakdowns[tType as keyof typeof breakdowns];
       b.count += 1;
-      b.profit += tx.profit || 0;
+      if (tx.chargesStatus === 'Paid' && (tx.profit || 0) >= 0) {
+        b.profit += tx.profit || 0;
+      }
       b.volume += tx.amount || 0;
     }
   });
