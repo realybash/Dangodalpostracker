@@ -122,14 +122,10 @@ export function TransactionForm({
   const [subType, setSubType] = useState<'OtherBank'>('OtherBank');
   const [destinationBank, setDestinationBank] = useState<ProviderType>('OPay');
   const [amount, setAmount] = useState<number>(
-    initialTransaction ? initialTransaction.amount : 10000
+    initialTransaction ? initialTransaction.amount : 0
   );
   const [customerFee, setCustomerFee] = useState<number>(
-    initialTransaction 
-      ? (initialTransaction.chargesStatus === 'Unpaid' 
-          ? (initialTransaction.unpaidFeeAmount ?? initialTransaction.customerFee) 
-          : initialTransaction.customerFee) 
-      : 0
+    initialTransaction ? initialTransaction.customerFee : 0
   );
   const [employeeId, setEmployeeId] = useState<string>(
     initialTransaction ? initialTransaction.employeeId : currentUser.id
@@ -319,9 +315,16 @@ export function TransactionForm({
     }
   }, [provider, isNetworkLocked]);
 
+  // Helper to format numbers with commas
+  const formatNumber = (val: string): string => {
+    const parts = val.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
+  };
+
   // Sync state values on input change
   useEffect(() => {
-    const parsedAmount = parseFloat(amountInput);
+    const parsedAmount = parseFloat(amountInput.replace(/,/g, ''));
     if (!isNaN(parsedAmount)) {
       setAmount(parsedAmount);
     } else {
@@ -330,7 +333,7 @@ export function TransactionForm({
   }, [amountInput]);
 
   useEffect(() => {
-    const parsedFee = parseFloat(feeInput);
+    const parsedFee = parseFloat(feeInput.replace(/,/g, ''));
     if (!isNaN(parsedFee)) {
       setCustomerFee(parsedFee);
       if (parsedFee > 0 && isFeeWaived) {
@@ -351,15 +354,10 @@ export function TransactionForm({
     setCustomerFee(financials.customerCharge);
   };
 
-  // Automatically calculate fee when amount, type, or provider changes
+  // Automatic fee calculation removed as requested by user.
   useEffect(() => {
-    if (!isFeeWaived) {
-        const effectiveType = ((type === 'Withdrawal' || type === 'Transfer') && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-        const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
-        setFeeInput(financials.customerCharge.toString());
-        setCustomerFee(financials.customerCharge);
-    }
-  }, [amount, type, provider, settings, paymentMethod, destinationBank]);
+    // Fee remains as manually entered.
+  }, []);
 
 
   const isFirstRender = useRef(true);
@@ -397,8 +395,8 @@ export function TransactionForm({
     const unpaidFeeAmount = chargesStatus === 'Unpaid' ? customerFee : undefined;
     
     // Adjust profit based on manual fee overrides
-    const feeDifference = customerFee - financials.customerCharge;
-    const actualProfit = financials.agentProfit + feeDifference;
+    const isWaivedOrUnpaid = chargesStatus !== 'Paid' || isFeeWaived;
+    const actualProfit = isWaivedOrUnpaid ? 0 : (financials.agentProfit + (customerFee - financials.customerCharge));
 
     // Customer card debit / total charged amount
     const totalCustomerCharged = actualAmount;
@@ -1008,31 +1006,22 @@ export function TransactionForm({
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">₦</span>
                 <input
                   id="amount-input"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={amountInput}
-                  onChange={(e) => setAmountInput(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/,/g, '');
+                    if (/^\d*\.?\d*$/.test(val)) {
+                      setAmountInput(formatNumber(val));
+                    }
+                  }}
                   className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-8 pr-3 py-2.5 text-neutral-800 font-mono text-sm focus:outline-none focus:border-[#00B87A] font-bold"
                   placeholder="0.00"
                   required
                 />
               </div>
 
-              {/* Quick Select Buttons */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {fastAmounts.map((val) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => {
-                      setAmountInput(val.toString());
-                      setAmount(val);
-                    }}
-                    className="text-[10px] font-mono font-bold text-neutral-500 hover:text-neutral-900 bg-neutral-100 hover:bg-neutral-200 px-2 py-1 rounded-lg cursor-pointer transition-colors"
-                  >
-                    +{formatNaira(val).replace('.00', '').replace('₦', '')}
-                  </button>
-                ))}
-              </div>
+              {/* Quick Select Buttons Removed - Manual entry only */}
             </div>
 
             {/* Customer Fee Input & Auto Guide */}
@@ -1083,23 +1072,19 @@ export function TransactionForm({
                 <div className="space-y-2 animate-in slide-in-from-top-1 duration-150">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] text-neutral-400 font-bold uppercase font-mono">Custom Fee Amount (₦)</span>
-                    <button
-                      type="button"
-                      onClick={applyRecommendedFee}
-                      className="text-[9px] text-[#00B87A] hover:text-[#009b66] font-mono font-extrabold bg-[#00B87A]/10 hover:bg-[#00B87A]/15 px-2 py-0.5 rounded transition"
-                    >
-                      ⚡ Calculate Recommended
-                    </button>
                   </div>
                   <div className="relative">
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">₦</span>
                     <input
                       id="fee-input"
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={feeInput}
                       onChange={(e) => {
-                        setFeeInput(e.target.value);
-                        setCustomerFee(parseFloat(e.target.value) || 0);
+                        const val = e.target.value.replace(/,/g, '');
+                        if (/^\d*\.?\d*$/.test(val)) {
+                          setFeeInput(formatNumber(val));
+                        }
                       }}
                       className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-8 pr-3 py-2.5 text-neutral-800 font-mono text-sm focus:outline-none focus:border-[#00B87A] font-bold"
                       placeholder="Enter Fee Amount"

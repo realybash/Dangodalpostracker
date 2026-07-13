@@ -613,7 +613,11 @@ export function getCalculatedFinancials(
   let cashback = matchedRange.cashback || 0;
 
   // 4. NET PROFIT CALCULATION
-  let netProfit = customerCharge - providerCharge - vatAmount - cbnCharge + cashback;
+  // If customer charge is 0 (waived), don't deduct provider/CBN costs from profit
+  let netProfit = customerCharge > 0 
+    ? (customerCharge - providerCharge - vatAmount - cbnCharge + cashback)
+    : (customerCharge + cashback); // Assuming cashback applies regardless
+
   
   if (provider === 'OPay' && type === 'Transfer' && destinationBank === 'OPay') {
     customerCharge = amt >= 10000 ? 50 : 0;

@@ -23,7 +23,7 @@ service cloud.firestore {
     
     // Users sync
     match /users_sync/{id} {
-      allow read: if request.auth != null;
+      allow read: if true;
     }
 
     // Settings collection
