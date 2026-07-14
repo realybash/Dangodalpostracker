@@ -44,8 +44,8 @@ export function ProviderBreakdown({ transactions, terminalFeeRate, settings }: P
       
       const cbnCharge = tx.cbnCharge !== undefined ? tx.cbnCharge : financials.cbnCharge;
       
-      const prf = tx.netProfit !== undefined ? tx.netProfit : 
-                  (tx.profit !== undefined ? tx.profit : (tx.customerFee - termCost - cbnCharge));
+      const prf = Math.max(0, tx.netProfit !== undefined ? tx.netProfit : 
+                  (tx.profit !== undefined ? tx.profit : (tx.customerFee - termCost - cbnCharge)));
       
       stats[p].volume += tx.amount;
       stats[p].customerFees += tx.customerFee;

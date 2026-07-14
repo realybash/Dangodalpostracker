@@ -1,27 +1,45 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global Catch-all safety net - very first rule block inside match
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // Helper function to check if user is a manager
     function isManager() {
-      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager';
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager';
+    }
+
+    // Helper to check if the user is an employee under the specified owner
+    function isEmployeeOf(ownerId) {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId == ownerId;
+    }
+
+    // Helper to check if the user is either the owner or an employee of that owner
+    function isOwnerOrEmployee(ownerId) {
+      return request.auth != null && (
+        request.auth.uid == ownerId || 
+        isEmployeeOf(ownerId)
+      );
     }
 
     // Users collection
     match /users/{userId} {
-      // Allow read if authenticated. List is restricted to managers.
-      allow get: if request.auth != null;
-      allow list: if true;
+      // Allow get/list publicly to support local lookup/matching prior to active session authentication.
+      allow get, list: if true;
       
-      // Only managers can create/update other users. Users can update their own PIN.
-      allow create: if isManager();
-      allow update: if request.auth != null && (
-        (request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pin'])) ||
-        isManager()
-      );
+      // Only managers can create/update other users. Users can update their own profile/PIN.
+      allow create: if request.auth != null && (request.auth.uid == userId || isManager());
+      allow update: if request.auth != null && (request.auth.uid == userId || isManager());
       allow delete: if isManager();
     }
     
-    // Users sync
+    // Users sync (legacy or auxiliary match)
     match /users_sync/{id} {
       allow read: if true;
     }
@@ -30,19 +48,30 @@ service cloud.firestore {
     match /settings/{ownerId} {
       // Managers can read/write their own settings.
       // Employees can read their manager's settings if they are linked.
-      allow read: if request.auth != null && (
-        request.auth.uid == ownerId || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId == ownerId
-      );
+      allow read: if isOwnerOrEmployee(ownerId) || isManager();
       allow write: if request.auth != null && request.auth.uid == ownerId && isManager();
     }
 
     // Borrow/Keep records
     match /borrowKeep/{id} {
-      allow read, write: if request.auth != null && (
-        resource == null || 
+      allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.cashierId == request.auth.uid ||
+        isEmployeeOf(resource.data.ownerId) ||
+        isManager()
+      );
+      allow create: if request.auth != null && (
+        request.resource.data.ownerId == request.auth.uid ||
+        isEmployeeOf(request.resource.data.ownerId) ||
+        isManager()
+      );
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        isEmployeeOf(resource.data.ownerId) ||
+        isManager()
+      );
+      allow delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        isEmployeeOf(resource.data.ownerId) ||
         isManager()
       );
     }
@@ -51,15 +80,18 @@ service cloud.firestore {
     match /transactions/{id} {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.cashierId == request.auth.uid
+        resource.data.cashierId == request.auth.uid ||
+        isManager()
       );
       allow create: if request.auth != null && (
         request.resource.data.cashierId == request.auth.uid ||
-        request.resource.data.ownerId == request.auth.uid
+        request.resource.data.ownerId == request.auth.uid ||
+        isManager()
       );
       allow update, delete: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.cashierId == request.auth.uid
+        resource.data.cashierId == request.auth.uid ||
+        isManager()
       );
     }
 
@@ -67,15 +99,18 @@ service cloud.firestore {
     match /expenses/{id} {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid
+        resource.data.employeeId == request.auth.uid ||
+        isManager()
       );
       allow create: if request.auth != null && (
         request.resource.data.employeeId == request.auth.uid ||
-        request.resource.data.ownerId == request.auth.uid
+        request.resource.data.ownerId == request.auth.uid ||
+        isManager()
       );
       allow update, delete: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid
+        resource.data.employeeId == request.auth.uid ||
+        isManager()
       );
     }
 
@@ -83,18 +118,22 @@ service cloud.firestore {
     match /pos_terminals/{id} {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid
+        resource.data.employeeId == request.auth.uid ||
+        isManager()
       );
-      // ONLY the owner can create or delete terminals
+      // ONLY the owner/manager can create or delete terminals
       allow create: if request.auth != null && (
-        request.resource.data.ownerId == request.auth.uid
+        request.resource.data.ownerId == request.auth.uid ||
+        isManager()
       );
       allow update: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid
+        resource.data.employeeId == request.auth.uid ||
+        isManager()
       );
       allow delete: if request.auth != null && (
-        resource.data.ownerId == request.auth.uid
+        resource.data.ownerId == request.auth.uid ||
+        isManager()
       );
     }
     

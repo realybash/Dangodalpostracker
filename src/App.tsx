@@ -6,7 +6,7 @@
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
 import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocFromServer, getDocs, orderBy, limit, or } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocs, orderBy, limit, or } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -23,6 +23,7 @@ import {
   mapFirestoreUser,
   cleanPhoneForCompare,
   getAuthPassword,
+  prepareFirestoreData,
   getDefaultPricingProfiles,
   getCalculatedFinancials,
   REALISTIC_PROVIDER_CONFIGS,
@@ -701,33 +702,113 @@ export default function App() {
             }
           } else {
             console.warn('[Auth] Auth account exists but Firestore document is missing for UID:', user.uid);
-            if (isRegisteringUser.current) {
-              const fallback: User = {
-                id: user.uid,
-                name: user.displayName || 'User',
-                role: 'Employee', // Default to employee if unknown
-                phone: user.email?.split('@')[0] || '',
-                ownerId: 'mgr_1',
-                activated: true
-              };
-              updatePoolAndDispatch(fallback);
-            } else {
-              console.log('[Auth] Database cleared/orphaned session. Signing out of Firebase Auth and clearing cache.');
+            
+            // Self-healing: Trigger recovery to restore the operator's record
+            const recoverFirestoreProfile = async () => {
+              console.log('[Auth Recovery] Attempting to recover and restore missing Firestore profile for UID:', user.uid);
               try {
-                await signOut(auth);
-                localStorage.removeItem('OPay_Registered_Users_v4');
-                localStorage.removeItem('OPay_Terminal_Locked');
-                localStorage.removeItem('OPay_Last_Login_Tab');
-                localStorage.removeItem('OPay_Last_Staff_Phone');
-                localStorage.removeItem('OPay_Last_Staff_Pin');
-                localStorage.removeItem('OPay_Last_Manager_Phone');
-                localStorage.removeItem('OPay_Last_Manager_Pin');
-                setRegisteredUsers([]);
-                window.location.reload();
-              } catch (signOutErr) {
-                console.error('[Auth] Failed to sign out orphaned user:', signOutErr);
+                let recoveredUser: User | null = null;
+                
+                // 1. Check local registeredUsers or OPay_Registered_Users_v4 cache
+                const cachedUsersStr = localStorage.getItem('OPay_Registered_Users_v4');
+                if (cachedUsersStr) {
+                  try {
+                    const parsed = JSON.parse(cachedUsersStr) as User[];
+                    const found = parsed.find(u => u.id === user.uid);
+                    if (found) {
+                      recoveredUser = found;
+                      console.log('[Auth Recovery] Found user in localStorage cache:', recoveredUser.name);
+                    }
+                  } catch (e) {
+                    console.error('[Auth Recovery] Failed to parse localStorage cached users:', e);
+                  }
+                }
+
+                // 2. Query offline IndexedDB cache as secondary fallback
+                if (!recoveredUser) {
+                  try {
+                    const { getCachedUser } = await import('./lib/offlineDb');
+                    const cached = await getCachedUser(user.uid);
+                    if (cached) {
+                      recoveredUser = mapFirestoreUser(cached, user.uid);
+                      console.log('[Auth Recovery] Found user in IndexedDB offline cache:', recoveredUser.name);
+                    }
+                  } catch (e) {
+                    console.error('[Auth Recovery] Failed to query IndexedDB cache:', e);
+                  }
+                }
+
+                // 3. Reconstruct a safe default user profile if not cached anywhere
+                if (!recoveredUser) {
+                  const fallbackName = user.displayName || user.email?.split('@')[0] || 'Operator';
+                  const emailClean = user.email || '';
+                  const fallbackRole: UserRole = emailClean.toLowerCase().includes('manager') ? 'Manager' : 'Employee';
+                  
+                  recoveredUser = {
+                    id: user.uid,
+                    name: fallbackName,
+                    role: fallbackRole,
+                    phone: user.email?.split('@')[0] || '',
+                    ownerId: fallbackRole === 'Manager' ? user.uid : 'mgr_1',
+                    activated: true,
+                    email: emailClean
+                  };
+                  console.log('[Auth Recovery] Reconstructed default profile:', recoveredUser.name, 'Role:', recoveredUser.role);
+                }
+
+                // 4. Save self-healed profile to Firestore
+                const firestoreDocRaw = {
+                  uid: user.uid,
+                  id: user.uid,
+                  fullName: recoveredUser.name,
+                  phoneNumber: recoveredUser.phone,
+                  phone: recoveredUser.phone,
+                  role: recoveredUser.role,
+                  ownerId: recoveredUser.ownerId || (recoveredUser.role === 'Manager' ? user.uid : 'mgr_1'),
+                  email: recoveredUser.email || user.email || '',
+                  activated: true,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  status: 'active',
+                  permissions: recoveredUser.role === 'Manager' ? ['admin', 'manager'] : ['cashier']
+                };
+
+                const cleanData = prepareFirestoreData(firestoreDocRaw, 'users');
+                await setDoc(doc(db, 'users', user.uid), cleanData, { merge: true });
+                console.log('[Auth Recovery] Successfully self-healed and restored user document in Firestore for:', recoveredUser.name);
+                showAppNotification('Operator profile recovered and synchronized successfully.', 'success');
+
+                // 5. Cache locally to ensure offline availability
+                try {
+                  const { saveCachedUser } = await import('./lib/offlineDb');
+                  await saveCachedUser(cleanData);
+                } catch (dbErr) {
+                  console.error('[Auth Recovery] Local cache update failed:', dbErr);
+                }
+
+                // 6. Complete flow and dispatch to app state
+                updatePoolAndDispatch(recoveredUser);
+              } catch (recoveryErr) {
+                console.error('[Auth Recovery] Profile recovery completely failed:', recoveryErr);
+                console.log('[Auth Recovery] Forced fallback: signing out to prevent stale state.');
+                try {
+                  await signOut(auth);
+                  localStorage.removeItem('OPay_Registered_Users_v4');
+                  localStorage.removeItem('OPay_Terminal_Locked');
+                  localStorage.removeItem('OPay_Last_Login_Tab');
+                  localStorage.removeItem('OPay_Last_Staff_Phone');
+                  localStorage.removeItem('OPay_Last_Staff_Pin');
+                  localStorage.removeItem('OPay_Last_Manager_Phone');
+                  localStorage.removeItem('OPay_Last_Manager_Pin');
+                  setRegisteredUsers([]);
+                  window.location.reload();
+                } catch (signOutErr) {
+                  console.error('[Auth Recovery Fallback] Sign out failed:', signOutErr);
+                }
               }
-            }
+            };
+
+            await recoverFirestoreProfile();
           }
         } catch (err) {
           console.error('[Auth] Failed to retrieve user profile:', err);
@@ -754,15 +835,6 @@ export default function App() {
 
 
   useEffect(() => {
-    const testConnection = async () => {
-      try {
-        await getDocFromServer(doc(db, 'test_connection', 'ping'));
-      } catch (e) {
-        console.warn('Initial server connection failed (expected if offline)');
-      }
-    };
-    testConnection();
-    
     // Always trigger an initial pending IndexedDB count check
     updateIndexedDbPendingCount();
 
@@ -889,23 +961,6 @@ export default function App() {
       unsubscribeTerminals();
     };
   }, [syncOwnerId, state.currentUser.id, state.currentUser.role, appMode]);
-
-  // Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
-  const prepareFirestoreData = (data: any, collectionName?: string) => {
-    const copy = { ...data };
-    
-    // Explicitly delete sensitive authentication fields so they are never stored in Firestore
-    delete (copy as any).password;
-    delete (copy as any).pin;
-    
-    // Remove every undefined property before calling setDoc()
-    const cleanData = Object.fromEntries(
-      Object.entries(copy).filter(([_, value]) => value !== undefined)
-    );
-    
-    console.log(`[Firestore Write] Cleaned object for "${collectionName || 'unknown'}":`, cleanData);
-    return cleanData;
-  };
 
   // Firestore mutation wrappers
   const handleAddPosTerminal = async (term: PosTerminal) => {
@@ -1585,60 +1640,58 @@ export default function App() {
     try {
       let finalUid = newUser.id;
       
-      // All users MUST have a Firebase Auth account for standardized single-provider authentication
+      // 1. Thorough Pre-Registration Checks
       const phoneKey = cleanPhoneForCompare(newUser.phone || '');
-      // Fallback to random if phone is missing (should not happen with validation)
+      const emailLower = newUser.email?.trim().toLowerCase();
+
+      // Check against local state
+      let phoneExists = phoneKey && registeredUsers.some(u => cleanPhoneForCompare(u.phone || '') === phoneKey);
+      let emailExists = emailLower && registeredUsers.some(u => u.email && u.email.trim().toLowerCase() === emailLower);
+
+      // Robust check: Query Firestore directly if not found locally
+      if (!phoneExists || !emailExists) {
+        try {
+          const usersRef = collection(db, 'users');
+          if (!phoneExists && phoneKey) {
+            const q = query(usersRef, where('phone', '==', newUser.phone));
+            const snap = await getDocs(q);
+            phoneExists = !snap.empty;
+          }
+          if (!emailExists && emailLower) {
+            const q = query(usersRef, where('email', '==', emailLower));
+            const snap = await getDocs(q);
+            emailExists = !snap.empty;
+          }
+        } catch (err) {
+          console.error('[Registration] Firestore pre-check failed:', err);
+        }
+      }
+
+      if (phoneExists || emailExists) {
+        const dupError = new Error(`An account already exists with this ${phoneExists ? 'phone number' : 'email address'}. Please sign in instead.`);
+        (dupError as any).code = 'auth/email-already-in-use';
+        console.error('[Registration] Pre-check failed: User already exists');
+        throw dupError;
+      }
+
+      // Firebase Auth User Creation
       const loginIdentifier = phoneKey || Math.random().toString(36).substring(7);
       const authEmail = `${loginIdentifier}@opay-pos.com`;
-      // Use getAuthPassword helper to ensure it satisfies Firebase Auth's minimum password length constraint of 6 characters
       const authPass = getAuthPassword(newUser.pin || '1111'); 
       
       console.log(`[Registration] Creating Auth account for ${newUser.role}:`, authEmail);
       
-      // 1. Verify duplicate email or duplicate phone in local state first
-      if (phoneKey) {
-        const phoneExists = registeredUsers.some(u => cleanPhoneForCompare(u.phone || '') === phoneKey);
-        if (phoneExists) {
-          const dupError = new Error(`Phone number ${newUser.phone} is already registered to another account.`);
-          (dupError as any).code = 'already-exists';
-          console.error('[Registration] Pre-check failed: Phone already exists', phoneKey);
-          throw dupError;
-        }
-      }
-
-      if (newUser.email) {
-        const emailExists = registeredUsers.some(u => u.email && u.email.trim().toLowerCase() === newUser.email?.trim().toLowerCase());
-        if (emailExists) {
-          const dupError = new Error(`Email ${newUser.email} is already registered to another account.`);
-          (dupError as any).code = 'already-exists';
-          console.error('[Registration] Pre-check failed: Email already exists', newUser.email);
-          throw dupError;
-        }
-      }
-
-      // 2. Firebase Authentication User Creation
       let userCred;
       try {
         userCred = await createUserWithEmailAndPassword(auth, authEmail, authPass);
         finalUid = userCred.user.uid;
         await updateProfile(userCred.user, { displayName: newUser.name });
-        console.log('[Registration] Firebase Auth account successfully created with UID:', finalUid);
       } catch (authErr: any) {
-        console.error('[Registration] Firebase Authentication failed:', authErr.code || authErr.message, authErr);
-        // Map common auth errors to clean, informative errors
-        const err = new Error(authErr.message || 'Firebase Authentication user creation failed');
-        (err as any).code = authErr.code || 'auth-error';
-        throw err;
+        console.error('[Registration] Firebase Authentication failed:', authErr.code, authErr.message);
+        throw authErr;
       }
 
-      // 1. Verify that every required variable exists before writing:
-      console.log('[Registration Profile Pre-Check]', {
-        uid: finalUid,
-        fullName: newUser.name,
-        phoneNumber: newUser.phone
-      });
-
-      // 2. Map safe fields only (never store user's password or PIN inside Firestore)
+      // Prepare Firestore document
       const firestoreDocRaw = {
         uid: finalUid,
         id: finalUid,
@@ -1647,7 +1700,7 @@ export default function App() {
         phone: newUser.phone,
         role: newUser.role,
         ownerId: newUser.role === 'Manager' ? finalUid : (newUser.ownerId || syncOwnerId || 'mgr_1'),
-        email: newUser.email || authEmail, // Store the login email for recovery
+        email: newUser.email || authEmail,
         activated: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1659,72 +1712,50 @@ export default function App() {
         avatar: newUser.avatar
       };
 
-      // 3. Remove every undefined property before calling setDoc()
       const cleanData = prepareFirestoreData(firestoreDocRaw, 'users');
-
-      const userDocRef = doc(db, 'users', finalUid);
-      
-      // 4. Firestore Document Write
-      try {
-        await setDoc(userDocRef, cleanData, { merge: true });
-        console.log('[Registration] Firestore document successfully created at /users/' + finalUid);
-      } catch (fsErr: any) {
-        console.error('[Registration] Firestore write failed:', fsErr.code || fsErr.message, fsErr);
-        // Check for specific error codes like permission-denied (Security Rules violation)
-        const code = fsErr.code || 'permission-denied';
-        const err = new Error(fsErr.message || 'Firestore database write operation failed.');
-        (err as any).code = code;
-        throw err;
-      }
+      await setDoc(doc(db, 'users', finalUid), cleanData, { merge: true });
       
       showAppNotification(`Account for ${newUser.name} created successfully.`, 'success');
       
-      // Save directly to offline IndexedDB cache immediately so they are available offline right away
-      try {
-        console.log('[OFFLINE AUTH TRACE] App.tsx: caching newly registered user inside IndexedDB "users" store:', newUser.name, 'with raw pin length:', newUser.pin?.length);
-        const { saveCachedUser } = await import('./lib/offlineDb');
-        await saveCachedUser({
-          ...cleanData,
-          pin: newUser.pin
-        });
-        console.log('[OFFLINE AUTH TRACE] Successfully cached registered user in IndexedDB for offline login support.');
-      } catch (cacheErr) {
-        console.error('[OFFLINE AUTH TRACE] Failed to cache newly registered user in IndexedDB:', cacheErr);
-      }
+      // Update local state and cache
+      const { saveCachedUser } = await import('./lib/offlineDb');
+      await saveCachedUser({ ...cleanData, pin: newUser.pin });
       
-      // Update local state immediately
-      const standardizedUser = {
-        ...mapFirestoreUser(cleanData, finalUid)
-        // pin is removed here to prevent plain-text leakage in application state and localStorage
-      };
-      setRegisteredUsers(prev => {
-        const next = prev.filter(u => u.id !== standardizedUser.id && u.phone !== standardizedUser.phone);
-        return [...next, standardizedUser];
-      });
+      setRegisteredUsers(prev => [...prev.filter(u => u.id !== finalUid), mapFirestoreUser(cleanData, finalUid)]);
 
     } catch (err: any) {
-      console.error('[Registration Flow] Critical error captured:', err.code || 'unknown', err.message);
-      // Construct specific detailed message for feedback
-      let friendlyMsg = err.message;
-      if (err.code === 'auth/weak-password') {
-        friendlyMsg = 'The passcode/PIN is too weak (minimum 6 characters required by Firebase Authentication).';
-      } else if (err.code === 'auth/email-already-in-use') {
-        friendlyMsg = 'This phone number (or recovery email) is already registered under an existing authentication account.';
-      } else if (err.code === 'auth/network-request-failed') {
-        friendlyMsg = 'A network error occurred. Please verify your internet connection and try again.';
-      } else if (err.code === 'permission-denied') {
-        friendlyMsg = 'Firestore Security Rules blocked the operation: Permission denied writing to the "users" collection.';
-      } else if (err.code === 'already-exists') {
-        friendlyMsg = err.message;
+      if (['auth/email-already-in-use', 'auth/weak-password', 'auth/network-request-failed'].includes(err.code)) {
+        console.warn(`[Registration Flow] Handled auth error: ${err.code}`);
+      } else {
+        console.error('[Registration Flow] Error captured:', err.code, err.message);
       }
       
-      showAppNotification(`Error [${err.code || 'unknown'}]: ${friendlyMsg}`, 'error');
-      // Re-throw so LoginScreen can handle and display the exact error to the user
+      let friendlyMsg = 'Registration failed. Please try again later.';
+      switch (err.code) {
+        case 'auth/email-already-in-use':
+          friendlyMsg = 'This account already exists. Please login using your existing account.';
+          break;
+        case 'auth/weak-password':
+          friendlyMsg = 'The passcode/PIN is too weak.';
+          break;
+        case 'auth/network-request-failed':
+          friendlyMsg = 'No internet connection. Please reconnect and try again.';
+          break;
+        case 'permission-denied':
+          friendlyMsg = 'Database permission error. Please contact support.';
+          break;
+        default:
+          friendlyMsg = err.message || friendlyMsg;
+      }
+      
+      // We throw to allow LoginScreen to handle the UI update
+      (err as any).userFriendlyMessage = friendlyMsg;
       throw err;
     } finally {
       isRegisteringUser.current = false;
     }
   };
+
 
   const handleUpdateUserPin = async (userId: string, newPin: string) => {
     console.log('[OFFLINE AUTH TRACE] App.tsx: updating user PIN inside IndexedDB "users" store for user ID:', userId, 'with new PIN length:', newPin.length);
@@ -1937,16 +1968,23 @@ export default function App() {
 
   // Compute Active Selection Metrics
   const activeMetrics = useMemo(() => {
-    return computeTxMetrics(authorizedTransactions, state.activeTimeframe, state.terminalFeeRate);
-  }, [authorizedTransactions, state.activeTimeframe, state.terminalFeeRate]);
+    const targetTxs = (state.currentUser.role === 'Manager' && !state.impersonatedUserId)
+      ? state.transactions
+      : authorizedTransactions;
+    return computeTxMetrics(targetTxs, state.activeTimeframe, state.terminalFeeRate);
+  }, [authorizedTransactions, state.transactions, state.activeTimeframe, state.terminalFeeRate, state.currentUser.role, state.impersonatedUserId]);
 
   // Compute Timeframe Blocks metrics for Overview Matrix items
   const summaryOverviews = useMemo(() => {
-    const dailyVec = computeTxMetrics(authorizedTransactions, 'Daily', state.terminalFeeRate);
-    const weeklyVec = computeTxMetrics(authorizedTransactions, 'Weekly', state.terminalFeeRate);
-    const monthlyVec = computeTxMetrics(authorizedTransactions, 'Monthly', state.terminalFeeRate);
-    const yearlyVec = computeTxMetrics(authorizedTransactions, 'Yearly', state.terminalFeeRate);
-    const allTimeVec = computeTxMetrics(authorizedTransactions, 'All-Time', state.terminalFeeRate);
+    const targetTxs = (state.currentUser.role === 'Manager' && !state.impersonatedUserId)
+      ? state.transactions
+      : authorizedTransactions;
+
+    const dailyVec = computeTxMetrics(targetTxs, 'Daily', state.terminalFeeRate);
+    const weeklyVec = computeTxMetrics(targetTxs, 'Weekly', state.terminalFeeRate);
+    const monthlyVec = computeTxMetrics(targetTxs, 'Monthly', state.terminalFeeRate);
+    const yearlyVec = computeTxMetrics(targetTxs, 'Yearly', state.terminalFeeRate);
+    const allTimeVec = computeTxMetrics(targetTxs, 'All-Time', state.terminalFeeRate);
 
     return {
       daily: dailyVec,
@@ -1955,7 +1993,7 @@ export default function App() {
       yearly: yearlyVec,
       allTime: allTimeVec
     };
-  }, [authorizedTransactions, state.terminalFeeRate]);
+  }, [authorizedTransactions, state.transactions, state.terminalFeeRate, state.currentUser.role, state.impersonatedUserId]);
 
   // Handle immediate test simulation injections
   const triggerSimulation = () => {
@@ -4193,7 +4231,7 @@ export default function App() {
           <MetricCards
             profit={activeMetrics.profit}
             volume={activeMetrics.volume}
-            totalExpenses={(activeMetrics.terminalFees + (activeMetrics.cbnCharges || 0)) + state.expenses.filter(e => {
+            totalExpenses={state.expenses.filter(e => {
               const d = new Date(e.timestamp);
               const now = new Date();
               if (state.activeTimeframe === 'Daily') return isSameDay(d, now);

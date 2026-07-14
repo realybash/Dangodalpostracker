@@ -269,6 +269,23 @@ export function getAuthPassword(pin: string): string {
   return `opay_${pin}_secure`;
 }
 
+// Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
+export const prepareFirestoreData = (data: any, collectionName?: string) => {
+  const copy = { ...data };
+  
+  // Explicitly delete sensitive authentication fields so they are never stored in Firestore
+  delete (copy as any).password;
+  delete (copy as any).pin;
+  
+  // Remove every undefined property before calling setDoc()
+  const cleanData = Object.fromEntries(
+    Object.entries(copy).filter(([_, value]) => value !== undefined)
+  );
+  
+  console.log(`[Firestore Write] Cleaned object for "${collectionName || 'unknown'}":`, cleanData);
+  return cleanData;
+};
+
 /**
  * Standardizes user object from Firestore data
  */
@@ -382,7 +399,7 @@ export function computeTxMetrics(
     volume += tx.amount || 0;
     terminalFees += tx.terminalFee || 0;
     cbnCharges += tx.cbnCharge || 0;
-    if (tx.chargesStatus === 'Paid' && (tx.profit || 0) >= 0) {
+    if (tx.status === 'Success') {
       profit += tx.profit || 0;
     }
     
@@ -396,7 +413,7 @@ export function computeTxMetrics(
     if (breakdowns[tType as keyof typeof breakdowns]) {
       const b = breakdowns[tType as keyof typeof breakdowns];
       b.count += 1;
-      if (tx.chargesStatus === 'Paid' && (tx.profit || 0) >= 0) {
+      if (tx.status === 'Success') {
         b.profit += tx.profit || 0;
       }
       b.volume += tx.amount || 0;
@@ -679,7 +696,7 @@ export function getCalculatedFinancials(
     cashback,
     commissionAmount,
     agentProfit: netProfit,
-    netProfit,
+    netProfit: netProfit,
     settlementCharge,
     merchantProfit: netProfit
   };

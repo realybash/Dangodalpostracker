@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { hashPin, saveCachedUsersBatch } from '../lib/offlineDb';
+import { getFriendlyErrorMessage } from '../lib/errorMapper';
+import { saveCachedUsersBatch } from '../lib/offlineDb';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from '../types';
 import { collection, getDocs, query, where, doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -209,18 +210,18 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         console.log('[Login] Staff not found locally, checking Firestore...');
         try {
           const usersRef = collection(db, 'users');
-          const snap = await getDocs(query(usersRef, where('role', '==', 'Employee')));
-          const allEmployees = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
+          // Search without role constraint first for robustness
+          let q = query(usersRef, where('phone', '==', inputRaw)); // Try exact phone match
+          let snap = await getDocs(q);
+          if (snap.empty) {
+            q = query(usersRef, where('fullName', '==', inputRaw)); // Try exact name match
+            snap = await getDocs(q);
+          }
           
-          user = allEmployees.find(u => {
-            const dbPhoneDigits = cleanPhoneForCompare(u.phone || '');
-            const dbName = u.name.trim().toLowerCase().replace(/\s+/g, '');
-            
-            const phoneMatches = dbPhoneDigits && inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-            const nameMatches = dbName === inputNameNormalized || u.name.trim().toLowerCase() === inputRaw.toLowerCase();
-            
-            return phoneMatches || nameMatches;
-          });
+          if (!snap.empty) {
+             user = mapFirestoreUser(snap.docs[0].data(), snap.docs[0].id);
+             console.log('[Login] Found user in Firestore (role-agnostic search):', user.name);
+          }
         } catch (err) {
           console.warn('[Login] Remote staff lookup failed:', err);
           handleFirestoreError(err, OperationType.LIST, 'users_staff_lookup');
@@ -267,15 +268,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         onLogin(user);
       } catch (authErr: any) {
         console.warn('[Login] Staff Auth failed:', authErr.code);
-        if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
-          setError('Incorrect 4-digit PIN Passcode.');
-        } else if (authErr.code === 'auth/network-request-failed') {
-          setError('Network error. Please check your internet connection.');
-        } else if (authErr.code === 'auth/user-not-found') {
-          setError('Employee authentication account is missing. Please contact your manager to recreate your profile.');
-        } else {
-          setError(`Login Error: ${authErr.message || authErr.code}`);
-        }
+        setError(getFriendlyErrorMessage(authErr.code));
       }
     } catch (err: any) {
       console.error('[Login] Critical staff login error:', err);
@@ -354,71 +347,17 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         console.log('[Login] Manager not found locally. Querying Firestore directly from "users" collection...');
         try {
           const usersRef = collection(db, 'users');
+          // Try search by phone or name without role constraint
+          let q = query(usersRef, where('phoneNumber', '==', inputRaw));
+          let snap = await getDocs(q);
+          if (snap.empty) {
+            q = query(usersRef, where('fullName', '==', inputRaw));
+            snap = await getDocs(q);
+          }
           
-          console.log('[Login Audit - Direct Query Invariant]', {
-            collection: 'users',
-            queryFilters: {
-              role: 'Manager',
-              phoneNumber: normalizedInputPhone
-            }
-          });
-
-          // Query by role and phoneNumber field
-          if (normalizedInputPhone) {
-            try {
-              const q = query(usersRef, where('role', '==', 'Manager'), where('phoneNumber', '==', normalizedInputPhone));
-              const snap = await getDocs(q);
-              fetchedDocsCount = snap.size;
-              console.log(`[Login] Firestore query returned ${fetchedDocsCount} documents for phone ${normalizedInputPhone}`);
-              
-              if (!snap.empty) {
-                const docSnap = snap.docs[0];
-                matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
-                console.log('[Login] Matched manager via direct phoneNumber field:', matchedManager.name, 'UID:', matchedManager.uid);
-              }
-            } catch (qErr) {
-              handleFirestoreError(qErr, OperationType.LIST, 'users_manager_phone_query');
-            }
-          }
-
-          // Fallback direct query by fullName
-          if (!matchedManager) {
-            console.log('[Login] Trying fallback query by fullName in Firestore...');
-            try {
-              const q = query(usersRef, where('role', '==', 'Manager'), where('fullName', '==', inputRaw));
-              const snap = await getDocs(q);
-              if (!snap.empty) {
-                const docSnap = snap.docs[0];
-                matchedManager = mapFirestoreUser(docSnap.data(), docSnap.id);
-                console.log('[Login] Matched manager via direct fullName field:', matchedManager.name, 'UID:', matchedManager.uid);
-              }
-            } catch (fnErr) {
-              handleFirestoreError(fnErr, OperationType.LIST, 'users_manager_name_query');
-            }
-          }
-
-          // Fallback query all managers if queries didn't work (e.g. slight mismatch)
-          if (!matchedManager) {
-            console.log('[Login] Trying absolute fallback: fetching all Managers in Firestore...');
-            try {
-              const q = query(usersRef, where('role', '==', 'Manager'));
-              const snap = await getDocs(q);
-              const allManagers = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
-              console.log('[Login] Retrieved all managers list size:', allManagers.length);
-              
-              matchedManager = allManagers.find(m => {
-                const dbPhoneDigits = cleanPhoneForCompare(m.phone || m.phoneNumber || '');
-                const dbName = m.name.toLowerCase().replace(/\s+/g, '');
-                const phoneMatch = inputPhoneDigits && dbPhoneDigits === inputPhoneDigits;
-                const nameMatch = dbName === inputNameSearch || m.name.trim().toLowerCase() === inputRaw.trim().toLowerCase();
-                return phoneMatch || nameMatch;
-              });
-              if (matchedManager) {
-                console.log('[Login] Found matched manager in retrieved managers list:', matchedManager.name, 'UID:', matchedManager.uid);
-              }
-            } catch (fallbackErr) {
-              handleFirestoreError(fallbackErr, OperationType.LIST, 'users_manager_all_fallback');
-            }
+          if (!snap.empty) {
+            matchedManager = mapFirestoreUser(snap.docs[0].data(), snap.docs[0].id);
+            console.log('[Login] Found manager in Firestore (role-agnostic search):', matchedManager.name, 'UID:', matchedManager.uid);
           }
         } catch (err) {
           console.warn('[Login] Firestore manager query/lookup failed:', err);
@@ -486,19 +425,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         onLogin(matchedManager);
       } catch (authErr: any) {
         console.warn('[Login] Manager Auth failed:', authErr.code);
-        console.log('[Login Result] FAILURE: Firebase Auth authentication error.', {
-          code: authErr.code,
-          message: authErr.message
-        });
-        if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
-          setError('Incorrect Manager Passcode PIN.');
-        } else if (authErr.code === 'auth/network-request-failed') {
-          setError('Network error. Please check your internet connection.');
-        } else if (authErr.code === 'auth/user-not-found') {
-          setError('Manager authentication account is missing. Please re-register or use a different phone number.');
-        } else {
-          setError(`Login Error: ${authErr.message || authErr.code}`);
-        }
+        setError(getFriendlyErrorMessage(authErr.code));
       }
     } catch (err: any) {
       console.error('[Login] Critical manager login error:', err);
@@ -667,21 +594,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       }, 1800);
     } catch (err: any) {
       console.error('[Registration] Failed with error details:', err);
-      const errorCode = err.code || 'unknown-error';
-      const errorMessage = err.message || String(err);
-      
-      let userFriendlyMsg = errorMessage;
-      if (errorCode === 'auth/weak-password') {
-        userFriendlyMsg = 'The passcode/PIN is too weak (minimum 6 characters required by Firebase Authentication).';
-      } else if (errorCode === 'auth/email-already-in-use') {
-        userFriendlyMsg = 'This phone number (or recovery email) is already registered under an existing authentication account.';
-      } else if (errorCode === 'auth/network-request-failed') {
-        userFriendlyMsg = 'A network error occurred. Please verify your internet connection and try again.';
-      } else if (errorCode === 'permission-denied') {
-        userFriendlyMsg = 'Firestore Security Rules blocked this operation: Permission denied writing to the "users" collection.';
-      }
-      
-      setError(`Registration Failed [${errorCode}]: ${userFriendlyMsg}`);
+      setError(getFriendlyErrorMessage(err.code || ''));
       setIsRegistering(false);
     }
   };
@@ -689,7 +602,23 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
   return (
     <div className="min-h-screen bg-gradient-to-tr from-emerald-50/40 via-neutral-50 to-indigo-50/40 flex flex-col justify-center items-center p-4 sm:p-6 font-sans selection:bg-[#00B87A]/20 relative overflow-hidden">
       
-      <div className="absolute top-10 left-10 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      {/* Show Error with Login link if needed */}
+      {error && (
+        <div className="fixed top-4 z-50 w-full max-w-sm px-4">
+          <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl shadow-lg">
+            <p className="text-sm font-medium">{error}</p>
+            {error.includes('already exists') && (
+              <button 
+                onClick={() => setAuthMode('login')}
+                className="mt-2 w-full bg-red-600 text-white text-xs font-bold py-2 rounded-xl"
+              >
+                Login Now
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
       <div className="absolute top-1/2 left-1/3 w-96 h-96 bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none" />
 

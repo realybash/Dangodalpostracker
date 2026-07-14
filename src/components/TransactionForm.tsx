@@ -391,12 +391,21 @@ export function TransactionForm({
     const financials = getCalculatedFinancials(actualAmount, effectiveType, provider, settings, destinationBank);
 
     // Maintain legacy compatibility while populating new fields
-    const actualCustomerFee = chargesStatus === 'Unpaid' ? 0 : customerFee;
+    const actualCustomerFee = isFeeWaived ? 0 : (chargesStatus === 'Unpaid' ? 0 : customerFee);
     const unpaidFeeAmount = chargesStatus === 'Unpaid' ? customerFee : undefined;
     
     // Adjust profit based on manual fee overrides
-    const isWaivedOrUnpaid = chargesStatus !== 'Paid' || isFeeWaived;
-    const actualProfit = isWaivedOrUnpaid ? 0 : (customerFee - financials.providerCharge + financials.cashback);
+    // We do NOT want waived transactions to reduce or deduct the agent's profit.
+    const isUnpaid = chargesStatus === 'Unpaid';
+    const actualProfit = isUnpaid 
+      ? 0 
+      : isFeeWaived
+        ? 0 // Waived transactions yield exactly ₦0 profit (company absorbs cost, daily profit does NOT decrease)
+        : customerFee - financials.providerCharge - (financials.cbnCharge || 0) + (financials.cashback || 0);
+
+    // We keep the standard realistic provider charge and CBN charge even if profit is floored to 0
+    const actualTerminalFee = financials.providerCharge;
+    const actualCbnCharge = financials.cbnCharge;
 
     // Customer card debit / total charged amount
     const totalCustomerCharged = actualAmount;
@@ -426,8 +435,8 @@ export function TransactionForm({
       subType,
       amount: type === 'Withdrawal' ? baseCash : amount,
       customerFee: actualCustomerFee,
-      terminalFee: financials.providerCharge, 
-      cbnCharge: financials.cbnCharge, 
+      terminalFee: actualTerminalFee, 
+      cbnCharge: actualCbnCharge, 
       profit: actualProfit, 
       feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
       paymentMethod,
@@ -451,7 +460,7 @@ export function TransactionForm({
       audioNote: audioNote || undefined,
       // Comprehensive Senior Fintech Fields
       customerCharge: actualCustomerFee,
-      providerCharge: financials.providerCharge,
+      providerCharge: actualTerminalFee,
       agentProfit: actualProfit,
       netProfit: actualProfit,
       vatAmount: financials.vatAmount,
@@ -1572,11 +1581,15 @@ export function TransactionForm({
               </div>
               <div className="flex flex-col">
                 <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Provider Cost</span>
-                <span className="text-xs font-black text-red-500 font-mono">-{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).providerCharge)}</span>
+                <span className="text-xs font-black text-red-500 font-mono">
+                  -{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : amount, (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).providerCharge)}
+                </span>
               </div>
               <div className="flex flex-col text-right">
                 <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Regulatory Levy (CBN)</span>
-                <span className="text-xs font-black text-red-500 font-mono">-{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : (amount + (withdrawChargeMode === 'CardAddOn' ? customerFee : 0)), (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).cbnCharge)}</span>
+                <span className="text-xs font-black text-red-500 font-mono">
+                  -{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : amount, (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).cbnCharge)}
+                </span>
               </div>
             </div>
 
@@ -1590,7 +1603,7 @@ export function TransactionForm({
                   {(() => {
                     const effectiveType = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
                     const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
-                    const previewProfit = isFeeWaived ? 0 : (customerFee - financials.providerCharge + financials.cashback);
+                    const previewProfit = financials.agentProfit;
                     return formatNaira(previewProfit);
                   })()}
                 </span>

@@ -120,7 +120,8 @@ export function EmployeeOversightBoard({
       const grossFees = timeframeTxs.reduce((sum, tx) => sum + tx.customerFee, 0);
       const terminalFees = timeframeTxs.reduce((sum, tx) => sum + tx.terminalFee, 0);
       const cbnCharges = timeframeTxs.reduce((sum, tx) => sum + (tx.cbnCharge || 0), 0);
-      const profit = grossFees - terminalFees - cbnCharges;
+      // Use stored profit to respect "never decrease" business rule
+      const profit = timeframeTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
 
       const unpaidFees = employeeTxs
         .filter((tx) => tx.chargesStatus === 'Unpaid' && (tx.status || 'Success') !== 'Failed')
