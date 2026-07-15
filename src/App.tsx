@@ -28,7 +28,8 @@ import {
   getCalculatedFinancials,
   REALISTIC_PROVIDER_CONFIGS,
   REALISTIC_REGULATORY_CONFIG,
-  REALISTIC_PRICING_PROFILE
+  REALISTIC_PRICING_PROFILE,
+  generateId
 } from './utils';
 import { MetricCards } from './components/MetricCards';
 import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
@@ -113,6 +114,8 @@ import {
   CloudOff,
   WifiOff
 } from 'lucide-react';
+
+import { motion, AnimatePresence } from 'motion/react';
 
 const LOCAL_STORAGE_KEY = 'POSTrack_State_Store_v5';
 
@@ -513,11 +516,29 @@ export default function App() {
     setTimeout(() => setAppNotification(null), 5000);
   };
 
-  const unpaidCount = useMemo(() => {
+  const unpaidTransactions = useMemo(() => {
     return state.transactions.filter(
       (tx) => (tx.chargesStatus === 'Unpaid' || tx.chargesStatus === 'PartiallyPaid') && (tx.status || 'Success') !== 'Failed'
-    ).length;
+    );
   }, [state.transactions]);
+
+  const unpaidCount = unpaidTransactions.length;
+
+  const [activeUnpaidIndex, setActiveUnpaidIndex] = useState(0);
+
+  useEffect(() => {
+    if (unpaidTransactions.length <= 1) return;
+    const interval = setInterval(() => {
+      setActiveUnpaidIndex((prev) => (prev + 1) % unpaidTransactions.length);
+    }, 4500); // rotate every 4.5 seconds for readability
+    return () => clearInterval(interval);
+  }, [unpaidTransactions.length]);
+
+  useEffect(() => {
+    if (activeUnpaidIndex >= unpaidTransactions.length) {
+      setActiveUnpaidIndex(0);
+    }
+  }, [unpaidTransactions.length, activeUnpaidIndex]);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
 
@@ -587,6 +608,24 @@ export default function App() {
   const [newTerminalSignal, setNewTerminalSignal] = useState<number>(5);
   const [newTerminalRate, setNewTerminalRate] = useState<number>(0.5);
   const [dashboardTab, setDashboardTab] = useState<'pos' | 'expenses' | 'unpaid' | 'terminals' | 'reports' | 'settings' | 'audit' | 'pricing' | 'airtime'>('pos');
+  
+  // Dashboard-level partial payment modal states
+  const [carouselSettlingTx, setCarouselSettlingTx] = useState<Transaction | null>(null);
+  const [carouselSettleAmount, setCarouselSettleAmount] = useState<string>('');
+  const [carouselSettleMethod, setCarouselSettleMethod] = useState<'Cash' | 'CardDebit'>('Cash');
+  const [carouselSettleNote, setCarouselSettleNote] = useState<string>('Partial payment');
+
+  useEffect(() => {
+    if (carouselSettlingTx) {
+      const remaining = carouselSettlingTx.unpaidFeeAmount !== undefined 
+        ? carouselSettlingTx.unpaidFeeAmount 
+        : (carouselSettlingTx.customerFee || 200);
+      setCarouselSettleAmount(remaining.toString());
+      setCarouselSettleMethod(carouselSettlingTx.feeMethod || 'Cash');
+      setCarouselSettleNote('Partial payment from Dashboard');
+    }
+  }, [carouselSettlingTx]);
+
   const ownerTxsRef = useRef<Transaction[]>([]);
   const cashierTxsRef = useRef<Transaction[]>([]);
   const isRegisteringUser = useRef(false);
@@ -1218,6 +1257,66 @@ export default function App() {
       }
     } else {
       console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore update for ID: "${tx.id}".`);
+    }
+  };
+
+  const handleQuickMarkAsPaid = async (tx: Transaction) => {
+    const remainingAmount = tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : (tx.customerFee || 0);
+    if (confirm(`Are you sure you want to mark this debt of ₦${remainingAmount.toLocaleString()} for ${tx.customerName || 'Walk-in Customer'} as FULLY PAID?`)) {
+      const originalFee = tx.originalFeeAmount !== undefined ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : tx.customerFee);
+      const prevPaid = tx.chargesPaidAmount || 0;
+      const totalPaidSoFar = prevPaid + remainingAmount;
+      
+      const newPaymentRecord = {
+        id: generateId(),
+        date: new Date().toISOString(),
+        amount: remainingAmount,
+        collectorName: state.currentUser?.name || 'Manager',
+        note: 'Quick Settle (Mark as Paid Shortcut)'
+      };
+
+      const updatedPayments = [...(tx.chargePayments || []), newPaymentRecord];
+
+      const finalCustomerFee = totalPaidSoFar;
+      const updatedProfit = finalCustomerFee - tx.terminalFee - (tx.cbnCharge || 0);
+      const updatedTotalCustomerCharged = tx.feeMethod === 'CardDebit' ? (tx.amount + finalCustomerFee) : tx.amount;
+
+      const updatedTx: Transaction = {
+        ...tx,
+        customerFee: finalCustomerFee,
+        profit: updatedProfit,
+        totalCustomerCharged: updatedTotalCustomerCharged,
+        chargesStatus: 'Paid',
+        unpaidFeeAmount: undefined,
+        originalFeeAmount: originalFee,
+        chargesPaidAmount: totalPaidSoFar,
+        chargePayments: updatedPayments
+      };
+
+      await handleUpdateTransaction(updatedTx);
+
+      // Play elegant success sound
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          const now = ctx.currentTime;
+          const osc1 = ctx.createOscillator();
+          const gain1 = ctx.createGain();
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(523.25, now); // C5
+          gain1.gain.setValueAtTime(0.12, now);
+          gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+          osc1.connect(gain1);
+          gain1.connect(ctx.destination);
+          osc1.start(now);
+          osc1.stop(now + 0.2);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+
+      alert(`Successfully marked the debt as FULLY PAID for ${tx.customerName || 'Walk-in Customer'}!`);
     }
   };
 
@@ -2220,17 +2319,120 @@ export default function App() {
       )}
 
       {unpaidCount > 0 && (
-        <div className="bg-amber-500 text-white p-3 flex items-center justify-between shadow-lg z-40 sticky top-0">
-          <div className="text-xs font-bold flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
-            <span>You have {unpaidCount} pending unpaid charge{unpaidCount !== 1 ? 's' : ''}.</span>
+        <div 
+          onClick={() => setDashboardTab('unpaid')}
+          className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white py-2 px-3 sm:py-2.5 sm:px-4 shadow-md z-40 sticky top-0 border-b border-amber-600/30 select-none cursor-pointer hover:brightness-[1.02] transition-all duration-150 group"
+        >
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1 w-full">
+              {/* Alert Icon Badge */}
+              <div className="bg-white/20 p-1.5 rounded-lg shrink-0 flex items-center justify-center animate-pulse shadow-sm border border-white/10">
+                <AlertTriangle className="w-4 h-4 text-white" />
+              </div>
+              
+              {/* Carousel Container */}
+              <div className="flex-1 min-w-0 relative py-1.5 flex items-center">
+                <AnimatePresence mode="wait">
+                  {(() => {
+                    const currentTx = unpaidTransactions[activeUnpaidIndex];
+                    if (!currentTx) return null;
+                    const remainingAmount = currentTx.unpaidFeeAmount !== undefined ? currentTx.unpaidFeeAmount : (currentTx.customerFee || 0);
+                    const debtorName = currentTx.customerName || 'Walk-in Customer';
+                    
+                    // Simple wording for non-well-educated / general users
+                    const friendlyType = currentTx.type === 'Withdrawal' ? 'Withdrawal' :
+                                         currentTx.type === 'Deposit' ? 'Receive Money' :
+                                         currentTx.type === 'Transfer' ? 'Bank Transfer' :
+                                         currentTx.type === 'Airtime' ? 'Airtime' :
+                                         currentTx.type === 'Data' ? 'Data' : currentTx.type;
+
+                    const getFriendlyTransactionDate = (timestampStr: string) => {
+                      try {
+                        const d = new Date(timestampStr);
+                        const now = new Date();
+                        
+                        // Check if same day
+                        const isToday = d.toDateString() === now.toDateString();
+                        
+                        // Check if yesterday
+                        const yesterday = new Date();
+                        yesterday.setDate(now.getDate() - 1);
+                        const isYesterday = d.toDateString() === yesterday.toDateString();
+                        
+                        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        
+                        if (isToday) {
+                          return `Today at ${timeStr}`;
+                        } else if (isYesterday) {
+                          return `Yesterday at ${timeStr}`;
+                        } else {
+                          const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric', weekday: 'short' });
+                          return `${dateStr} at ${timeStr}`;
+                        }
+                      } catch (e) {
+                        return 'Recently';
+                      }
+                    };
+
+                    return (
+                      <motion.div
+                        key={currentTx.id}
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className="w-full flex items-center justify-between gap-3 min-w-0"
+                      >
+                        <div className="flex-1 min-w-0 flex items-center flex-wrap gap-x-1.5 gap-y-1 text-xs sm:text-sm leading-tight text-white/95">
+                          {/* Alert Label */}
+                          <span className="bg-amber-950/40 text-amber-300 font-extrabold px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] tracking-wide uppercase flex items-center gap-1 shrink-0 shadow-inner">
+                            <span>Pending Charge</span>
+                            {unpaidCount > 1 && <span className="font-mono text-white/80">({activeUnpaidIndex + 1}/{unpaidCount})</span>}
+                          </span>
+
+                          {/* Friendly readable sentence */}
+                          <div className="text-[11px] sm:text-xs text-amber-50 leading-relaxed sm:leading-normal">
+                            <strong className="text-white font-black underline decoration-white/20">{debtorName}</strong> is owing you <strong className="text-red-100 bg-red-950/40 px-1.5 py-0.5 rounded font-black font-mono shadow-inner text-[10px] sm:text-xs">₦{remainingAmount.toLocaleString()}</strong> from a <strong className="text-white font-bold">₦{currentTx.amount.toLocaleString()} {friendlyType}</strong> on <span className="text-amber-100 font-semibold">{getFriendlyTransactionDate(currentTx.timestamp)}</span>
+                            <span className="inline-flex items-center gap-0.5 ml-1.5 bg-emerald-600/90 text-white font-bold px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] animate-pulse">
+                              📢 Please Collect Money!
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Quick Settle Button inside Carousel */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation(); // Avoid triggering parent click which navigates to ledger
+                            setCarouselSettlingTx(currentTx);
+                          }}
+                          className="shrink-0 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-2.5 py-1 rounded-md text-[10px] font-black tracking-tight flex items-center gap-1 shadow-sm border border-emerald-400/20 transition-all duration-150 cursor-pointer"
+                          title="Settle this pending charge with a full or partial payment"
+                        >
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          <span>Settle Debt</span>
+                        </button>
+                      </motion.div>
+                    );
+                  })()}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            {/* View Debts Action Button */}
+            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent duplicate calls since container also clicks
+                  setDashboardTab('unpaid');
+                }}
+                className="w-full sm:w-auto bg-white/10 hover:bg-white text-white hover:text-amber-900 border border-white/20 hover:border-white px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black shadow-inner active:scale-95 transition-all duration-150 cursor-pointer flex items-center justify-center gap-1 uppercase tracking-tight"
+              >
+                <span>View All Debts</span>
+                <span className="text-xs sm:text-sm group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+              </button>
+            </div>
           </div>
-          <button 
-            onClick={() => setDashboardTab('unpaid')}
-            className="bg-white text-amber-600 px-3 py-1 rounded-lg text-xs font-black hover:bg-amber-50 transition cursor-pointer"
-          >
-            View Debts &rarr;
-          </button>
         </div>
       )}
       
@@ -4771,6 +4973,279 @@ export default function App() {
             'bg-[#00B87A]/10 border-[#00B87A]/30 text-[#00B87A]'
           }`}>
             <p className="text-sm font-bold tracking-tight">{appNotification.message}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Partial Debt Settlement Modal (Carousel Triggered) */}
+      {carouselSettlingTx && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white text-neutral-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 relative border border-neutral-100 animate-in slide-in-from-bottom-4 duration-250">
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setCarouselSettlingTx(null)}
+              className="absolute right-4 top-4 p-1.5 rounded-full bg-neutral-100 text-neutral-500 hover:text-neutral-800 transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Header */}
+            <div className="space-y-1 pr-6">
+              <span className="text-[10px] bg-amber-100 text-amber-800 font-mono font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                Quick Debt Settle
+              </span>
+              <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight flex items-center gap-1.5 mt-1">
+                Settle Deferred Charge
+              </h3>
+              <p className="text-xs text-neutral-500">
+                Record a partial or full payment for this customer's pending debt.
+              </p>
+            </div>
+
+            {/* Debtor Snapshot Panel */}
+            <div className="bg-neutral-50 border border-neutral-200/60 p-3.5 rounded-2xl space-y-2.5 text-xs text-neutral-700 font-medium">
+              <div className="flex justify-between items-center border-b border-neutral-200/50 pb-2">
+                <span className="text-neutral-400 uppercase font-mono text-[9px] font-bold">Client / Debtor</span>
+                <span className="font-extrabold text-neutral-800">{carouselSettlingTx.customerName || 'Walk-in Client'}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <span className="text-neutral-400 uppercase font-mono text-[8px] block font-bold">Transaction Info</span>
+                  <span className="font-bold text-neutral-800">{carouselSettlingTx.type} ({carouselSettlingTx.provider})</span>
+                </div>
+                <div>
+                  <span className="text-neutral-400 uppercase font-mono text-[8px] block font-bold">Tx Amount</span>
+                  <span className="font-bold text-neutral-800 font-mono">{formatNaira(carouselSettlingTx.amount)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Settlement Calculations & Presets */}
+            {(() => {
+              const totalTarget = carouselSettlingTx.originalFeeAmount !== undefined 
+                ? carouselSettlingTx.originalFeeAmount 
+                : (carouselSettlingTx.customerFee || 200);
+              const prevPaid = carouselSettlingTx.chargesPaidAmount || 0;
+              const remainingUnpaid = Math.max(0, totalTarget - prevPaid);
+              
+              const currentPayment = parseFloat(carouselSettleAmount) || 0;
+              const finalOutstanding = Math.max(0, remainingUnpaid - currentPayment);
+              const isCompleted = finalOutstanding <= 0.01;
+
+              return (
+                <div className="space-y-4">
+                  {/* Financial Grid */}
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
+                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Total Debt</span>
+                      <span className="font-black text-neutral-800 font-mono">{formatNaira(totalTarget)}</span>
+                    </div>
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
+                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Paid Prior</span>
+                      <span className="font-black text-emerald-600 font-mono">{formatNaira(prevPaid)}</span>
+                    </div>
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
+                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Current Bal</span>
+                      <span className="font-black text-red-600 font-mono">{formatNaira(remainingUnpaid)}</span>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full h-2 bg-neutral-100 rounded-full overflow-hidden flex border border-neutral-200/30">
+                    {totalTarget > 0 && (
+                      <>
+                        <div style={{ width: `${(prevPaid / totalTarget) * 100}%` }} className="h-full bg-emerald-500" />
+                        <div style={{ width: `${(Math.min(remainingUnpaid, currentPayment) / totalTarget) * 100}%` }} className="h-full bg-emerald-400 animate-pulse" />
+                        <div style={{ width: `${(finalOutstanding / totalTarget) * 100}%` }} className="h-full bg-red-100" />
+                      </>
+                    )}
+                  </div>
+
+                  {/* Input field */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label htmlFor="carousel-settle-amount" className="block text-xs font-bold uppercase tracking-wider text-neutral-800 font-mono">
+                        💵 Amount Paid Today (₦)
+                      </label>
+                      <span className="text-[9px] text-neutral-400 font-mono">
+                        Max: {formatNaira(remainingUnpaid)}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 font-mono text-xs">₦</span>
+                      <input
+                        id="carousel-settle-amount"
+                        type="number"
+                        value={carouselSettleAmount}
+                        onChange={(e) => setCarouselSettleAmount(e.target.value)}
+                        className="w-full bg-white border-2 border-emerald-500 focus:border-emerald-600 rounded-xl pl-7 pr-3 py-2 text-neutral-850 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-emerald-500/10"
+                        placeholder="Enter amount paid now"
+                        max={remainingUnpaid || undefined}
+                      />
+                    </div>
+
+                    {/* Presets */}
+                    {remainingUnpaid > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setCarouselSettleAmount(Math.round(remainingUnpaid * 0.25).toString())}
+                          className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 rounded-lg cursor-pointer transition active:scale-95"
+                        >
+                          25% ({formatNaira(Math.round(remainingUnpaid * 0.25))})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCarouselSettleAmount(Math.round(remainingUnpaid * 0.50).toString())}
+                          className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 rounded-lg cursor-pointer transition active:scale-95"
+                        >
+                          50% ({formatNaira(Math.round(remainingUnpaid * 0.50))})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCarouselSettleAmount(Math.round(remainingUnpaid * 0.75).toString())}
+                          className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 rounded-lg cursor-pointer transition active:scale-95"
+                        >
+                          75% ({formatNaira(Math.round(remainingUnpaid * 0.75))})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCarouselSettleAmount(remainingUnpaid.toString())}
+                          className="px-2.5 py-1 text-[10px] font-black font-mono bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-lg cursor-pointer transition active:scale-95 border border-emerald-200/50"
+                        >
+                          100% Full ({formatNaira(remainingUnpaid)})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Settle Details Form */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[9px] font-bold uppercase tracking-wider text-neutral-400 font-mono">
+                        Payment Method
+                      </label>
+                      <select
+                        value={carouselSettleMethod}
+                        onChange={(e: any) => setCarouselSettleMethod(e.target.value)}
+                        className="w-full bg-white border border-neutral-200 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none"
+                      >
+                        <option value="Cash">💵 Cash</option>
+                        <option value="CardDebit">💳 Card Debit</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[9px] font-bold uppercase tracking-wider text-neutral-400 font-mono">
+                        Note
+                      </label>
+                      <input
+                        type="text"
+                        value={carouselSettleNote}
+                        onChange={(e) => setCarouselSettleNote(e.target.value)}
+                        className="w-full bg-white border border-neutral-200 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none"
+                        placeholder="E.g. Paid cash balance"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Outcome Preview Card */}
+                  <div className={`p-3 rounded-2xl border text-xs space-y-1 ${
+                    isCompleted ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+                  }`}>
+                    <div className="font-bold flex justify-between">
+                      <span>Settle Preview:</span>
+                      <span className="font-mono uppercase text-[10px]">{isCompleted ? 'Cleared' : 'Partial'}</span>
+                    </div>
+                    <p className="text-[10px] opacity-95">
+                      {isCompleted 
+                        ? `Paying ${formatNaira(currentPayment)} clears this debt in full with 0 balance.` 
+                        : `Paying ${formatNaira(currentPayment)} leaves an active remaining debt of ${formatNaira(finalOutstanding)}.`
+                      }
+                    </p>
+                  </div>
+
+                  {/* Settle Action Button */}
+                  <div className="grid grid-cols-2 gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setCarouselSettlingTx(null)}
+                      className="py-2.5 px-4 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold rounded-xl text-xs font-mono uppercase cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const originalFee = carouselSettlingTx.originalFeeAmount !== undefined 
+                          ? carouselSettlingTx.originalFeeAmount 
+                          : (carouselSettlingTx.customerFee || 200);
+                        
+                        const totalPaid = prevPaid + currentPayment;
+                        const remaining = Math.max(0, originalFee - totalPaid);
+                        const isDone = remaining <= 0.01;
+
+                        const newPaymentRecord = {
+                          id: generateId(),
+                          date: new Date().toISOString(),
+                          amount: currentPayment,
+                          collectorName: state.currentUser?.name || 'Manager',
+                          note: carouselSettleNote.trim() || 'Direct settlement from Carousel'
+                        };
+
+                        const updatedPayments = [...(carouselSettlingTx.chargePayments || []), newPaymentRecord];
+
+                        const finalCustomerFee = totalPaid;
+                        const updatedProfit = finalCustomerFee - carouselSettlingTx.terminalFee - (carouselSettlingTx.cbnCharge || 0);
+                        const updatedTotalCustomerCharged = carouselSettleMethod === 'CardDebit' 
+                          ? (carouselSettlingTx.amount + finalCustomerFee) 
+                          : carouselSettlingTx.amount;
+
+                        const updatedTx: Transaction = {
+                          ...carouselSettlingTx,
+                          customerFee: finalCustomerFee,
+                          profit: updatedProfit,
+                          totalCustomerCharged: updatedTotalCustomerCharged,
+                          feeMethod: carouselSettleMethod,
+                          chargesStatus: isDone ? 'Paid' : 'PartiallyPaid',
+                          unpaidFeeAmount: isDone ? undefined : remaining,
+                          originalFeeAmount: originalFee,
+                          chargesPaidAmount: totalPaid,
+                          chargePayments: updatedPayments
+                        };
+
+                        await handleUpdateTransaction(updatedTx);
+
+                        // Audio chime
+                        try {
+                          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                          if (AudioContextClass) {
+                            const ctx = new AudioContextClass();
+                            const now = ctx.currentTime;
+                            const osc = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            osc.type = 'sine';
+                            osc.frequency.setValueAtTime(523.25, now);
+                            gain.gain.setValueAtTime(0.12, now);
+                            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.start(now);
+                            osc.stop(now + 0.15);
+                          }
+                        } catch (e) {}
+
+                        alert(`Successfully recorded payment of ${formatNaira(currentPayment)} for ${carouselSettlingTx.customerName || 'Customer'}!`);
+                        setCarouselSettlingTx(null);
+                      }}
+                      className="py-2.5 px-4 bg-[#00B87A] hover:bg-emerald-600 text-white font-black rounded-xl text-xs font-mono uppercase shadow-md active:scale-95 cursor-pointer flex items-center justify-center"
+                    >
+                      ✓ Save Payment
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

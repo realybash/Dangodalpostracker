@@ -27,8 +27,52 @@ import {
   FolderOpen,
   ChevronRight,
   Trash2,
-  ListFilter
+  ListFilter,
+  PieChart,
+  Building2
 } from 'lucide-react';
+
+const getProviderStyle = (provider: string) => {
+  const p = provider.toLowerCase();
+  if (p.includes('opay')) {
+    return {
+      bg: 'bg-emerald-50/50 border-emerald-200/40 text-emerald-800',
+      progress: 'bg-emerald-500',
+      badge: 'bg-emerald-100 text-emerald-800 border-emerald-200/50',
+      iconColor: 'text-emerald-500'
+    };
+  }
+  if (p.includes('moniepoint')) {
+    return {
+      bg: 'bg-blue-50/50 border-blue-200/40 text-blue-800',
+      progress: 'bg-blue-600',
+      badge: 'bg-blue-100 text-blue-800 border-blue-200/50',
+      iconColor: 'text-blue-500'
+    };
+  }
+  if (p.includes('palmpay')) {
+    return {
+      bg: 'bg-purple-50/50 border-purple-200/40 text-purple-800',
+      progress: 'bg-purple-600',
+      badge: 'bg-purple-100 text-purple-800 border-purple-200/50',
+      iconColor: 'text-purple-500'
+    };
+  }
+  if (p.includes('nomba')) {
+    return {
+      bg: 'bg-amber-50/50 border-amber-200/40 text-amber-800',
+      progress: 'bg-amber-500',
+      badge: 'bg-amber-100 text-amber-800 border-amber-200/50',
+      iconColor: 'text-amber-500'
+    };
+  }
+  return {
+    bg: 'bg-neutral-50 border-neutral-200/40 text-neutral-800',
+    progress: 'bg-neutral-500',
+    badge: 'bg-neutral-200 text-neutral-800 border-neutral-350',
+    iconColor: 'text-neutral-500'
+  };
+};
 
 interface UnpaidChargesLedgerProps {
   transactions: Transaction[];
@@ -81,8 +125,9 @@ export function UnpaidChargesLedger({
 
   useEffect(() => {
     if (settlingTx) {
-      const remaining = settlingTx.unpaidFeeAmount !== undefined ? settlingTx.unpaidFeeAmount : (settlingTx.customerFee || 200);
-      setSettleFeeInput(remaining.toString());
+      const orig = settlingTx.originalFeeAmount !== undefined ? settlingTx.originalFeeAmount : (settlingTx.customerFee || 200);
+      const remaining = settlingTx.unpaidFeeAmount !== undefined ? settlingTx.unpaidFeeAmount : orig;
+      setSettleFeeInput(orig.toString());
       setSettleAmountPaid(remaining.toString());
       setSettleFeeMethod(settlingTx.feeMethod || 'Cash');
       
@@ -182,6 +227,46 @@ export function UnpaidChargesLedger({
     };
   }, [unpaidTransactions]);
 
+  // Aggregate outstanding debts by normalized provider
+  const providerDebtStats = useMemo(() => {
+    const providerMap: Record<string, { total: number; count: number }> = {};
+    
+    unpaidTransactions.forEach((tx) => {
+      const rawProvider = tx.provider || 'Others';
+      let provider = rawProvider.trim();
+      const lower = provider.toLowerCase();
+      if (lower.includes('opay')) {
+        provider = 'OPay';
+      } else if (lower.includes('moniepoint')) {
+        provider = 'Moniepoint';
+      } else if (lower.includes('palmpay')) {
+        provider = 'PalmPay';
+      } else if (lower.includes('nomba')) {
+        provider = 'Nomba';
+      } else if (lower === '' || lower === 'others' || lower === 'other') {
+        provider = 'Others';
+      }
+      
+      const debt = tx.unpaidFeeAmount ?? tx.customerFee ?? 0;
+      if (!providerMap[provider]) {
+        providerMap[provider] = { total: 0, count: 0 };
+      }
+      providerMap[provider].total += debt;
+      providerMap[provider].count += 1;
+    });
+
+    const totalDebt = stats.totalDebt || 1; // avoid divide by zero
+
+    return Object.entries(providerMap)
+      .map(([provider, data]) => ({
+        provider,
+        total: data.total,
+        count: data.count,
+        percentage: (data.total / totalDebt) * 100
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [unpaidTransactions, stats.totalDebt]);
+
   // Search and timeperiod filter
   const filteredUnpaid = useMemo(() => {
     let list = unpaidTransactions;
@@ -258,6 +343,65 @@ export function UnpaidChargesLedger({
   // Settle single transaction charges - open editing modal
   const handleSettleDebt = (tx: Transaction) => {
     setSettlingTx(tx);
+  };
+
+  // Quick Settle - Mark as Fully Paid directly with one click (great for managers)
+  const handleQuickMarkAsPaid = (tx: Transaction) => {
+    const remainingAmount = tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : (tx.customerFee || 0);
+    if (confirm(`Are you sure you want to mark this debt of ₦${remainingAmount.toLocaleString()} for ${tx.customerName || 'Walk-in Customer'} as FULLY PAID?`)) {
+      const originalFee = tx.originalFeeAmount !== undefined ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : tx.customerFee);
+      const prevPaid = tx.chargesPaidAmount || 0;
+      const totalPaidSoFar = prevPaid + remainingAmount;
+      
+      const newPaymentRecord = {
+        id: generateId(),
+        date: new Date().toISOString(),
+        amount: remainingAmount,
+        collectorName: currentUser?.name || 'Manager',
+        note: 'Quick Settle (Mark as Paid Shortcut)'
+      };
+
+      const updatedPayments = [...(tx.chargePayments || []), newPaymentRecord];
+
+      const finalCustomerFee = totalPaidSoFar;
+      const updatedProfit = finalCustomerFee - tx.terminalFee - (tx.cbnCharge || 0);
+      const updatedTotalCustomerCharged = tx.feeMethod === 'CardDebit' ? (tx.amount + finalCustomerFee) : tx.amount;
+
+      onUpdateTransaction({
+        ...tx,
+        customerFee: finalCustomerFee,
+        profit: updatedProfit,
+        totalCustomerCharged: updatedTotalCustomerCharged,
+        chargesStatus: 'Paid',
+        unpaidFeeAmount: undefined,
+        originalFeeAmount: originalFee,
+        chargesPaidAmount: totalPaidSoFar,
+        chargePayments: updatedPayments
+      });
+
+      // Simple sound effect for professional feel
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          const now = ctx.currentTime;
+          const osc1 = ctx.createOscillator();
+          const gain1 = ctx.createGain();
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(523.25, now); // C5
+          gain1.gain.setValueAtTime(0.12, now);
+          gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+          osc1.connect(gain1);
+          gain1.connect(ctx.destination);
+          osc1.start(now);
+          osc1.stop(now + 0.2);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      
+      alert(`Successfully marked the debt as FULLY PAID for ${tx.customerName || 'Walk-in Customer'}!`);
+    }
   };
 
   // Settle all debts for a customer
@@ -515,6 +659,79 @@ export function UnpaidChargesLedger({
             <p className="text-emerald-600 font-semibold">
               Great job! There are currently no outstanding unpaid transaction charges recorded.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Total Debts Overview Categorized by Provider */}
+      {stats.debtorCount > 0 && (
+        <div id="total-debts-overview-card" className="border border-neutral-150 rounded-2xl p-4 bg-neutral-50/20 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <PieChart className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black uppercase tracking-wider text-neutral-850 font-mono">
+                🏦 Total Debts Overview
+              </h4>
+              <p className="text-[10px] text-neutral-500 font-medium">
+                Consolidated outstanding client balances and transaction counts, categorized by POS provider.
+              </p>
+            </div>
+          </div>
+
+          {/* Dynamic Segmented Distribution Bar */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center text-[9px] text-neutral-400 font-mono font-bold uppercase tracking-wider">
+              <span>Debt Distribution Share</span>
+              <span>100% of outstanding</span>
+            </div>
+            <div className="w-full h-3 bg-neutral-100/70 rounded-full overflow-hidden flex border border-neutral-200/40 shadow-inner">
+              {providerDebtStats.map((item, index) => {
+                const styles = getProviderStyle(item.provider);
+                return (
+                  <div
+                    key={item.provider}
+                    style={{ width: `${item.percentage}%` }}
+                    className={`h-full ${styles.progress} transition-all duration-300 ${
+                      index > 0 ? 'border-l border-white/25' : ''
+                    }`}
+                    title={`${item.provider}: ${formatNaira(item.total)} (${item.percentage.toFixed(1)}%)`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Responsive Provider Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {providerDebtStats.map((item) => {
+              const styles = getProviderStyle(item.provider);
+              return (
+                <div 
+                  id={`provider-debt-${item.provider.toLowerCase()}`}
+                  key={item.provider}
+                  className="border border-neutral-200/50 p-3 rounded-xl transition duration-200 bg-white flex flex-col justify-between hover:shadow-md hover:border-neutral-300"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[9px] font-black uppercase font-mono px-2 py-0.5 rounded-full border tracking-wide ${styles.badge}`}>
+                      {item.provider}
+                    </span>
+                    <span className="text-[9px] text-neutral-450 font-mono font-bold bg-neutral-100 px-1.5 py-0.5 rounded-md">
+                      {item.count} {item.count === 1 ? 'Tx' : 'Txs'}
+                    </span>
+                  </div>
+                  <div className="mt-3.5 flex justify-between items-baseline">
+                    <span className="text-sm font-black text-neutral-850 font-mono leading-none">
+                      {formatNaira(item.total)}
+                    </span>
+                    <span className="text-[9.5px] font-extrabold text-neutral-500 font-mono">
+                      {item.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -868,15 +1085,25 @@ export function UnpaidChargesLedger({
                           )}
                         </button>
 
-                        {/* Settle Debt Button */}
+                        {/* Adjust & Settle Button (Opens full edit overlay) */}
                         <button
                           type="button"
                           onClick={() => handleSettleDebt(tx)}
-                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-extrabold transition active:scale-95 shadow-sm flex items-center gap-1 cursor-pointer"
-                          title="Mark charges as paid now"
+                          className="px-2.5 py-1.5 bg-neutral-150 hover:bg-neutral-200 text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                          title="Settle partial payments or edit fee details"
+                        >
+                          <span>Adjust & Settle</span>
+                        </button>
+
+                        {/* Quick Settle - Mark as Paid (Direct 1-click full settle) */}
+                        <button
+                          type="button"
+                          onClick={() => handleQuickMarkAsPaid(tx)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition active:scale-95 shadow-sm flex items-center gap-1 cursor-pointer hover:shadow"
+                          title="Mark full remaining amount as paid with one click"
                         >
                           <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Settle Fee</span>
+                          <span>Mark as Paid</span>
                         </button>
                       </div>
                     </div>
@@ -970,73 +1197,169 @@ export function UnpaidChargesLedger({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Total Adjusted Fee Input */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <label htmlFor="settle-fee-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                      Original Total Fee (₦)
-                    </label>
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-xs">₦</span>
-                    <input
-                      id="settle-fee-input"
-                      type="number"
-                      value={settleFeeInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSettleFeeInput(val);
-                        setSettleAmountPaid(val);
-                      }}
-                      className="w-full bg-neutral-100 border border-neutral-200 rounded-xl pl-7 pr-3 py-2 text-neutral-850 font-mono text-xs font-bold focus:outline-none"
-                      placeholder="e.g. 200"
-                    />
-                  </div>
-                </div>
-
-                {/* Amount Paid Today */}
-                <div className="space-y-1.5">
-                  <label htmlFor="settle-amount-paid-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-800 font-mono">
-                    💵 Amount Paid Today (₦)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 font-mono text-xs">₦</span>
-                    <input
-                      id="settle-amount-paid-input"
-                      type="number"
-                      value={settleAmountPaid}
-                      onChange={(e) => setSettleAmountPaid(e.target.value)}
-                      className="w-full bg-white border border-[#00B87A] focus:border-emerald-600 rounded-xl pl-7 pr-3 py-2 text-neutral-850 font-mono text-xs font-black focus:outline-none"
-                      placeholder="Enter amount customer is paying now"
-                      max={parseFloat(settleFeeInput) || undefined}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Outstanding payment calculations preview badge */}
+              {/* Detailed Financial Summary & Balances */}
               {(() => {
                 const totalTarget = parseFloat(settleFeeInput) || 0;
                 const paidAmt = parseFloat(settleAmountPaid) || 0;
                 const prevPaid = settlingTx.chargesPaidAmount || 0;
-                const finalOutstanding = Math.max(0, totalTarget - prevPaid - paidAmt);
+                const remainingUnpaid = Math.max(0, totalTarget - prevPaid);
+                const finalOutstanding = Math.max(0, remainingUnpaid - paidAmt);
                 const isCompleted = finalOutstanding <= 0.01;
 
                 return (
-                  <div className={`p-2.5 rounded-xl border text-xs flex justify-between items-center font-bold ${
-                    isCompleted
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-amber-50 border-amber-200 text-amber-800'
-                  }`}>
-                    <span>Payment Outcome:</span>
-                    <span className="font-mono text-[11px] font-extrabold uppercase">
-                      {isCompleted ? (
-                        '🎉 Charges Fully Completed (No Remaining)'
-                      ) : (
-                        `🛑 Charges Incomplete: Remaining ${formatNaira(finalOutstanding)}`
+                  <div className="space-y-4">
+                    {/* Visual Progress / Metrics Card deck */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                        <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Total Fee</span>
+                        <span className="text-sm font-black text-neutral-800 font-mono">{formatNaira(totalTarget)}</span>
+                      </div>
+                      <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                        <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Prior Paid</span>
+                        <span className="text-sm font-black text-emerald-600 font-mono">{formatNaira(prevPaid)}</span>
+                      </div>
+                      <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                        <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Current Debt</span>
+                        <span className="text-sm font-black text-red-600 font-mono">{formatNaira(remainingUnpaid)}</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar visual indicator */}
+                    <div className="w-full h-2.5 bg-neutral-100 rounded-full overflow-hidden flex border border-neutral-200/40">
+                      {totalTarget > 0 && (
+                        <>
+                          <div 
+                            style={{ width: `${(prevPaid / totalTarget) * 100}%` }} 
+                            className="h-full bg-emerald-500" 
+                            title={`Paid previously: ${formatNaira(prevPaid)}`}
+                          />
+                          <div 
+                            style={{ width: `${(Math.min(remainingUnpaid, paidAmt) / totalTarget) * 100}%` }} 
+                            className="h-full bg-emerald-400 animate-pulse border-l border-white/20" 
+                            title={`Paying now: ${formatNaira(paidAmt)}`}
+                          />
+                          <div 
+                            style={{ width: `${(finalOutstanding / totalTarget) * 100}%` }} 
+                            className="h-full bg-red-100 border-l border-white/20" 
+                            title={`Outstanding remaining: ${formatNaira(finalOutstanding)}`}
+                          />
+                        </>
                       )}
-                    </span>
+                    </div>
+
+                    <div className="space-y-3.5">
+                      {/* Amount Paid Today */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label htmlFor="settle-amount-paid-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-800 font-mono">
+                            💵 Amount Paid Today (₦)
+                          </label>
+                          <span className="text-[10px] text-neutral-400 font-mono font-medium">
+                            Max Allowed: {formatNaira(remainingUnpaid)}
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 font-mono text-xs">₦</span>
+                          <input
+                            id="settle-amount-paid-input"
+                            type="number"
+                            value={settleAmountPaid}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSettleAmountPaid(val);
+                            }}
+                            className="w-full bg-white border-2 border-emerald-500 focus:border-emerald-600 rounded-xl pl-7 pr-3 py-2 text-neutral-850 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all"
+                            placeholder="Enter amount customer is paying now"
+                            max={remainingUnpaid || undefined}
+                          />
+                        </div>
+
+                        {/* Quick Presets Buttons */}
+                        {remainingUnpaid > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setSettleAmountPaid(Math.round(remainingUnpaid * 0.25).toString())}
+                              className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg cursor-pointer transition active:scale-95"
+                            >
+                              25% ({formatNaira(Math.round(remainingUnpaid * 0.25))})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettleAmountPaid(Math.round(remainingUnpaid * 0.50).toString())}
+                              className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg cursor-pointer transition active:scale-95"
+                            >
+                              50% ({formatNaira(Math.round(remainingUnpaid * 0.50))})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettleAmountPaid(Math.round(remainingUnpaid * 0.75).toString())}
+                              className="px-2.5 py-1 text-[10px] font-bold font-mono bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg cursor-pointer transition active:scale-95"
+                            >
+                              75% ({formatNaira(Math.round(remainingUnpaid * 0.75))})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettleAmountPaid(remainingUnpaid.toString())}
+                              className="px-2.5 py-1 text-[10px] font-black font-mono bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-lg cursor-pointer transition active:scale-95 border border-emerald-200/50"
+                            >
+                              100% Full Pay ({formatNaira(remainingUnpaid)})
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Advanced Accordion: Adjust Original Fee Target */}
+                      <details className="group border border-neutral-150 rounded-2xl bg-neutral-50/30 overflow-hidden transition-all duration-200">
+                        <summary className="px-3.5 py-2.5 text-[11px] font-bold text-neutral-500 uppercase tracking-wider font-mono flex justify-between items-center cursor-pointer select-none hover:bg-neutral-50 transition">
+                          <span>⚙️ Adjust Original Fee Target</span>
+                          <span className="transition-transform group-open:rotate-180 text-xs text-neutral-400">&darr;</span>
+                        </summary>
+                        <div className="p-3.5 bg-white border-t border-neutral-150 space-y-2">
+                          <p className="text-[10px] text-neutral-400 leading-relaxed">
+                            Use this only if you need to increase or decrease the total commission fee itself (e.g. waiving parts of it or charging extra).
+                          </p>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-xs">₦</span>
+                            <input
+                              id="settle-fee-input"
+                              type="number"
+                              value={settleFeeInput}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSettleFeeInput(val);
+                                // Set payment today to be the new remaining balance
+                                const newRemaining = Math.max(0, (parseFloat(val) || 0) - prevPaid);
+                                setSettleAmountPaid(newRemaining.toString());
+                              }}
+                              className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-7 pr-3 py-2 text-neutral-800 font-mono text-xs font-bold focus:outline-none"
+                              placeholder="Original total fee"
+                            />
+                          </div>
+                        </div>
+                      </details>
+
+                      {/* Outcome Announcement Card */}
+                      <div className={`p-3 rounded-2xl border text-xs space-y-1 ${
+                        isCompleted
+                          ? 'bg-emerald-50 border-emerald-200/70 text-emerald-800'
+                          : 'bg-amber-50 border-amber-200/70 text-amber-800'
+                      }`}>
+                        <div className="flex justify-between items-center font-bold">
+                          <span>Settle Outcome Preview:</span>
+                          <span className="font-mono text-[11px] font-extrabold uppercase">
+                            {isCompleted ? '🎉 FULLY CLEARED' : '🛑 PARTIALLY PAID'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] leading-relaxed opacity-90">
+                          {isCompleted ? (
+                            `The customer is paying ${formatNaira(paidAmt)}. This transaction's debt of ${formatNaira(remainingUnpaid)} will be fully paid with 0 balance.`
+                          ) : (
+                            `The customer is paying ${formatNaira(paidAmt)}. A remaining debt of ${formatNaira(finalOutstanding)} will remain active on their account.`
+                          )}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
