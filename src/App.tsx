@@ -3079,6 +3079,17 @@ export default function App() {
               <span className="text-[11px] font-bold text-neutral-700 leading-tight">Airtime</span>
             </button>
 
+            {/* Data Sale */}
+            <button 
+              onClick={() => openWithPreset('Data')}
+              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
+            >
+              <div className="w-12 h-12 rounded-full bg-violet-100 group-hover:bg-violet-200 transition-colors flex items-center justify-center text-violet-600 shadow-sm active:scale-90 duration-100">
+                <Globe className="w-5 h-5 stroke-[2.2]" />
+              </div>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Data Sale</span>
+            </button>
+
             {/* Simulate Random TX */}
             <button 
               onClick={triggerSimulation}

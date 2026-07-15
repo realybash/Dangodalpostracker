@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search, Globe, Wifi } from 'lucide-react';
 
 // @ts-ignore
 import moniepointPosImg from '../assets/images/moniepoint_pos_1784102666214.jpg';
@@ -120,6 +120,45 @@ export const BANK_OPTIONS = [
   { id: 'Others', title: 'Others', abbrev: 'OTH', color: 'border-neutral-100 text-neutral-800 bg-white hover:bg-neutral-50', activeColor: 'bg-neutral-700 border-neutral-700 text-white shadow-sm', logoBg: 'bg-neutral-700 text-white' }
 ];
 
+export const DATA_PLANS: Record<string, { name: string; price: number }[]> = {
+  MTN: [
+    { name: '100MB (1-Day)', price: 100 },
+    { name: '1.5GB (30-Day)', price: 1200 },
+    { name: '2GB (30-Day)', price: 1500 },
+    { name: '3GB (30-Day)', price: 2000 },
+    { name: '5GB (30-Day)', price: 3000 },
+    { name: '10GB (30-Day)', price: 5000 },
+    { name: '20GB (30-Day)', price: 8000 }
+  ],
+  Airtel: [
+    { name: '100MB (1-Day)', price: 100 },
+    { name: '1.5GB (30-Day)', price: 1200 },
+    { name: '2GB (30-Day)', price: 1500 },
+    { name: '3GB (30-Day)', price: 2000 },
+    { name: '5GB (30-Day)', price: 3000 },
+    { name: '10GB (30-Day)', price: 5000 },
+    { name: '20GB (30-Day)', price: 8000 }
+  ],
+  Glo: [
+    { name: '150MB (1-Day)', price: 100 },
+    { name: '1.9GB (30-Day)', price: 1000 },
+    { name: '3.5GB (30-Day)', price: 1500 },
+    { name: '5.2GB (30-Day)', price: 2000 },
+    { name: '10.8GB (30-Day)', price: 3000 },
+    { name: '15.6GB (30-Day)', price: 4000 },
+    { name: '32.5GB (30-Day)', price: 8000 }
+  ],
+  '9mobile': [
+    { name: '100MB (1-Day)', price: 100 },
+    { name: '1.5GB (30-Day)', price: 1200 },
+    { name: '2GB (30-Day)', price: 1500 },
+    { name: '3GB (30-Day)', price: 2000 },
+    { name: '5GB (30-Day)', price: 3000 },
+    { name: '10GB (30-Day)', price: 5000 },
+    { name: '20GB (30-Day)', price: 8000 }
+  ]
+};
+
 interface TransactionFormProps {
   currentUser: User;
   availableEmployees: User[];
@@ -167,6 +206,7 @@ export function TransactionForm({
   const [notes, setNotes] = useState<string>(
     initialTransaction ? (initialTransaction.notes || '') : ''
   );
+  const [selectedPlanName, setSelectedPlanName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>(
     initialTransaction ? (initialTransaction.customerPhone || '') : ''
   );
@@ -214,7 +254,7 @@ export function TransactionForm({
   const [withdrawScenario, setWithdrawScenario] = useState<'CashHandout' | 'CardSwipe'>('CashHandout');
 
   useEffect(() => {
-    if (type === 'Withdrawal' || type === 'Transfer' || type === 'Deposit' || type === 'Airtime') {
+    if (type === 'Withdrawal' || type === 'Transfer' || type === 'Deposit' || type === 'Airtime' || type === 'Data') {
       if (provider.toLowerCase() === destinationBank.toLowerCase()) {
         setSubType('SameBank');
       } else {
@@ -486,7 +526,7 @@ export function TransactionForm({
       profit: actualProfit, 
       feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
       paymentMethod,
-      destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime' || type === 'Withdrawal') ? destinationBank : undefined,
+      destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime' || type === 'Data' || type === 'Withdrawal') ? destinationBank : undefined,
       totalCustomerCharged,
       timestamp: customTimestamp,
       notes: finalNotes.trim() || undefined,
@@ -859,12 +899,14 @@ export function TransactionForm({
                 type === 'Withdrawal' ? 'bg-blue-600' :
                 type === 'Deposit' ? 'bg-emerald-600' :
                 type === 'Transfer' ? 'bg-indigo-600' :
-                'bg-purple-600'
+                type === 'Airtime' ? 'bg-purple-600' :
+                'bg-violet-600'
               }`}>
                 {type === 'Withdrawal' && <Wallet className="w-5.5 h-5.5 stroke-[2]" />}
                 {type === 'Deposit' && <Wallet className="w-5.5 h-5.5 stroke-[2]" />}
                 {type === 'Transfer' && <Landmark className="w-5.5 h-5.5 stroke-[2]" />}
                 {type === 'Airtime' && <Smartphone className="w-5.5 h-5.5 stroke-[2]" />}
+                {type === 'Data' && <Globe className="w-5.5 h-5.5 stroke-[2]" />}
               </div>
               <div>
                 <span className="block text-[9.5px] font-black uppercase tracking-widest text-neutral-450 font-mono mb-0.5">
@@ -875,6 +917,7 @@ export function TransactionForm({
                   {type === 'Deposit' && '📤 Money Receive Mode'}
                   {type === 'Transfer' && '💸 Bank Transfer Mode'}
                   {type === 'Airtime' && '📱 Airtime Sale Mode'}
+                  {type === 'Data' && '🌐 Data Bundle Sale Mode'}
                 </h4>
               </div>
             </div>
@@ -884,7 +927,8 @@ export function TransactionForm({
               type === 'Withdrawal' ? 'bg-blue-100 text-blue-800' :
               type === 'Deposit' ? 'bg-emerald-100 text-emerald-800' :
               type === 'Transfer' ? 'bg-indigo-100 text-indigo-800' :
-              'bg-purple-100 text-purple-800'
+              type === 'Airtime' ? 'bg-purple-100 text-purple-800' :
+              'bg-violet-100 text-violet-800'
             }`}>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
               Selected
@@ -1096,49 +1140,95 @@ export function TransactionForm({
                     <span>Telecommunication Network</span>
                   </>
                 )}
+                {type === 'Data' && (
+                  <>
+                    <Globe className="w-3.5 h-3.5 text-violet-500" />
+                    <span>Data Network Operator</span>
+                  </>
+                )}
               </label>
-              {type !== 'Airtime' && (
+              {type !== 'Airtime' && type !== 'Data' && (
                 <span className="text-[10px] font-mono text-neutral-400 font-bold">
                   Selected: <span className="text-neutral-700 font-extrabold">{destinationBank || 'None'}</span>
                 </span>
               )}
             </div>
 
-            {type === 'Airtime' ? (
-              <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
-                {([
-                  { id: 'MTN', title: 'MTN', color: 'border-amber-200 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-500 border-amber-500 text-white shadow-md' },
-                  { id: 'Airtel', title: 'Airtel', color: 'border-red-200 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-md' },
-                  { id: 'Glo', title: 'Glo', color: 'border-green-200 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-600 border-green-600 text-white shadow-md' },
-                  { id: '9mobile', title: '9mobile', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-md' }
-                ] as const).map((opt) => {
-                  const isActive = destinationBank === opt.id;
+            {type === 'Airtime' || type === 'Data' ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
+                  {([
+                    { id: 'MTN', title: 'MTN', color: 'border-amber-200 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-500 border-amber-500 text-white shadow-md' },
+                    { id: 'Airtel', title: 'Airtel', color: 'border-red-200 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-md' },
+                    { id: 'Glo', title: 'Glo', color: 'border-green-200 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-600 border-green-600 text-white shadow-md' },
+                    { id: '9mobile', title: '9mobile', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-md' }
+                  ] as const).map((opt) => {
+                    const isActive = destinationBank === opt.id;
 
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setDestinationBank(opt.id as any)}
-                      className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
-                        isActive 
-                          ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ring-amber-500` 
-                          : `${opt.color}`
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                          isActive ? 'bg-white text-black' : 
-                          opt.id === 'MTN' ? 'bg-amber-500 text-white' :
-                          opt.id === 'Airtel' ? 'bg-red-600 text-white' :
-                          opt.id === 'Glo' ? 'bg-green-600 text-white' : 'bg-emerald-600 text-white'
-                        }`}>
-                          {opt.id[0]}
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setDestinationBank(opt.id as any);
+                          setSelectedPlanName('');
+                        }}
+                        className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
+                          isActive 
+                            ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ring-amber-500` 
+                            : `${opt.color}`
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
+                            isActive ? 'bg-white text-black' : 
+                            opt.id === 'MTN' ? 'bg-amber-500 text-white' :
+                            opt.id === 'Airtel' ? 'bg-red-600 text-white' :
+                            opt.id === 'Glo' ? 'bg-green-600 text-white' : 'bg-emerald-600 text-white'
+                          }`}>
+                            {opt.id[0]}
+                          </div>
+                          <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
                         </div>
-                        <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
-                      </div>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {type === 'Data' && (
+                  <div className="animate-in fade-in slide-in-from-top-3 duration-200 bg-neutral-50/50 border border-neutral-200/60 p-3.5 rounded-2xl">
+                    <p className="text-[10px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                      <Wifi className="w-3.5 h-3.5 text-violet-500" />
+                      <span>Select Data Bundle Plan</span>
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[145px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-neutral-300">
+                      {(DATA_PLANS[destinationBank as string] || DATA_PLANS['MTN']).map((plan) => {
+                        const isPlanActive = selectedPlanName === plan.name;
+                        return (
+                          <button
+                            key={plan.name}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPlanName(plan.name);
+                              setAmountInput(plan.price.toString());
+                              setNotes(`${destinationBank} Data Bundle: ${plan.name}`);
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition-all duration-150 cursor-pointer flex flex-col justify-between select-none active:scale-[0.98] min-h-[52px] ${
+                              isPlanActive
+                                ? 'bg-violet-50 border-violet-500 text-violet-900 ring-2 ring-offset-1 ring-violet-500 scale-[1.01] font-bold'
+                                : 'bg-white border-neutral-200 hover:border-violet-300 text-neutral-700 hover:bg-neutral-50'
+                            }`}
+                          >
+                            <span className="text-[10px] sm:text-[11px] font-extrabold leading-tight block truncate w-full">{plan.name}</span>
+                            <span className={`text-[10px] font-mono font-black block mt-1 ${isPlanActive ? 'text-violet-600' : 'text-neutral-500'}`}>
+                              ₦{plan.price.toLocaleString()}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="bg-neutral-50 border border-neutral-200/60 rounded-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-150">
