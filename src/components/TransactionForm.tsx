@@ -852,52 +852,43 @@ export function TransactionForm({
             </div>
           </div>
 
-          {/* Operation Status Selection */}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-                Operational Category
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {(['Withdrawal', 'Deposit', 'Transfer', 'Airtime'] as const).map((cat) => {
-                  const isSelected = type === cat;
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => {
-                        setType(cat);
-                        if (cat === 'Airtime') {
-                          setDestinationBank('MTN' as any);
-                        }
-                      }}
-                      className={`relative py-3 px-1 rounded-2xl text-[10px] font-black border transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 ${
-                        isSelected 
-                          ? 'bg-emerald-50 border-[#00B87A] text-[#00B87A] shadow-sm scale-[1.02]' 
-                          : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:text-neutral-600 hover:border-neutral-200'
-                      }`}
-                    >
-                      <div className={`p-1.5 rounded-xl transition-colors ${
-                        isSelected ? 'bg-[#00B87A] text-white' : 'bg-neutral-100'
-                      }`}>
-                        {cat === 'Withdrawal' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
-                        {cat === 'Deposit' && <Wallet className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-orange-700'}`} />}
-                        {cat === 'Transfer' && <Landmark className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-emerald-600'}`} />}
-                        {cat === 'Airtime' && <Smartphone className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-purple-600'}`} />}
-                      </div>
-                      <span className="font-bold tracking-tight text-[11px] leading-tight">
-                        {cat === 'Withdrawal' && 'Withdraw'}
-                        {cat === 'Deposit' && 'Money Receive'}
-                        {cat === 'Transfer' && 'Bank Transfer'}
-                        {cat === 'Airtime' && 'Airtime Sale'}
-                      </span>
-                    </button>
-                  );
-                })}
+          {/* Active Category Display - Highly friendly and accessible for all operators */}
+          <div className="bg-neutral-50/60 border border-neutral-200/50 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+            <div className="flex items-center gap-3.5">
+              <div className={`p-3 rounded-2xl text-white shadow-md ${
+                type === 'Withdrawal' ? 'bg-blue-600' :
+                type === 'Deposit' ? 'bg-emerald-600' :
+                type === 'Transfer' ? 'bg-indigo-600' :
+                'bg-purple-600'
+              }`}>
+                {type === 'Withdrawal' && <Wallet className="w-5.5 h-5.5 stroke-[2]" />}
+                {type === 'Deposit' && <Wallet className="w-5.5 h-5.5 stroke-[2]" />}
+                {type === 'Transfer' && <Landmark className="w-5.5 h-5.5 stroke-[2]" />}
+                {type === 'Airtime' && <Smartphone className="w-5.5 h-5.5 stroke-[2]" />}
+              </div>
+              <div>
+                <span className="block text-[9.5px] font-black uppercase tracking-widest text-neutral-450 font-mono mb-0.5">
+                  ACTIVE OPERATION MODE
+                </span>
+                <h4 className="text-sm sm:text-base font-black text-neutral-800 leading-tight">
+                  {type === 'Withdrawal' && '📥 Cash Withdrawal Mode'}
+                  {type === 'Deposit' && '📤 Money Receive Mode'}
+                  {type === 'Transfer' && '💸 Bank Transfer Mode'}
+                  {type === 'Airtime' && '📱 Airtime Sale Mode'}
+                </h4>
               </div>
             </div>
-
-
+            
+            {/* Active Status Pill */}
+            <span className={`text-[10px] font-black px-3 py-1 rounded-full font-mono uppercase tracking-wider flex items-center gap-1.5 ${
+              type === 'Withdrawal' ? 'bg-blue-100 text-blue-800' :
+              type === 'Deposit' ? 'bg-emerald-100 text-emerald-800' :
+              type === 'Transfer' ? 'bg-indigo-100 text-indigo-800' :
+              'bg-purple-100 text-purple-800'
+            }`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+              Selected
+            </span>
           </div>
 
           {/* Active POS Sync: OPay provider rate and settlement rules are locked for this transaction. */}
@@ -1172,43 +1163,13 @@ export function TransactionForm({
                   )}
                 </div>
 
-                {/* Popular Quick-Select Banks Section when no search */}
-                {!bankSearchQuery && (
-                  <div className="mb-2.5">
-                    <p className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-1.5">⚡ Popular Banks</p>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {BANK_OPTIONS.slice(0, 8).map((opt) => {
-                        const isActive = destinationBank === opt.id;
-                        return (
-                          <button
-                            key={`pop-${opt.id}`}
-                            type="button"
-                            onClick={() => setDestinationBank(opt.id)}
-                            className={`p-1.5 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] ${
-                              isActive
-                                ? `${opt.activeColor} scale-[1.03] font-black ring-2 ring-offset-1 ring-[#00B87A]`
-                                : `${opt.color} border-neutral-200/70`
-                            }`}
-                          >
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black mb-1 shadow-sm ${
-                              isActive ? 'bg-white text-black' : opt.logoBg
-                            }`}>
-                              {opt.abbrev}
-                            </div>
-                            <span className="text-[9px] font-black tracking-tight leading-none truncate w-full px-0.5">{opt.title}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 {/* Search Results / All Banks Section */}
                 <div>
-                  <p className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-1.5">
-                    {bankSearchQuery ? `🔍 Search Results (${BANK_OPTIONS.filter(b => b.title.toLowerCase().includes(bankSearchQuery.toLowerCase())).length})` : '🏦 All Supported Banks'}
+                  <p className="text-[9.5px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-1.5 flex items-center justify-between gap-1">
+                    <span>{bankSearchQuery ? `🔍 Search Results (${BANK_OPTIONS.filter(b => b.title.toLowerCase().includes(bankSearchQuery.toLowerCase())).length})` : '🏦 Supported Banks'}</span>
+                    {!bankSearchQuery && <span className="text-[8.5px] text-neutral-450 normal-case font-sans font-bold bg-neutral-150 px-1.5 py-0.5 rounded-md animate-pulse">(Scroll to find your bank)</span>}
                   </p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-neutral-300">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-[145px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-neutral-300 scrollbar-track-transparent scroll-smooth">
                     {BANK_OPTIONS.filter(b => 
                       b.title.toLowerCase().includes(bankSearchQuery.toLowerCase()) || 
                       b.abbrev.toLowerCase().includes(bankSearchQuery.toLowerCase())
@@ -1219,18 +1180,18 @@ export function TransactionForm({
                           key={opt.id}
                           type="button"
                           onClick={() => setDestinationBank(opt.id)}
-                          className={`p-1.5 rounded-xl border text-center transition-all duration-150 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[56px] ${
+                          className={`p-1 sm:p-1.5 rounded-xl border text-center transition-all duration-150 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[48px] sm:min-h-[52px] ${
                             isActive
                               ? `${opt.activeColor} scale-[1.03] font-black ring-2 ring-offset-1 ring-[#00B87A]`
                               : `${opt.color} border-neutral-200/50`
                           }`}
                         >
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black mb-1 shadow-sm ${
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black mb-1 shadow-sm ${
                             isActive ? 'bg-white text-black' : opt.logoBg
                           }`}>
                             {opt.abbrev}
                           </div>
-                          <span className="text-[9.5px] font-bold tracking-tight leading-none truncate w-full px-0.5">{opt.title}</span>
+                          <span className="text-[9px] sm:text-[9.5px] font-bold tracking-tight leading-none truncate w-full px-0.5">{opt.title}</span>
                         </button>
                       );
                     })}
