@@ -8,7 +8,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search } from 'lucide-react';
+
+// @ts-ignore
+import moniepointPosImg from '../assets/images/moniepoint_pos_1784102666214.jpg';
+// @ts-ignore
+import opayPosImg from '../assets/images/opay_pos_1784102682058.jpg';
+// @ts-ignore
+import palmpayPosImg from '../assets/images/palmpay_pos_1784102696111.jpg';
 
 // Synthesize premium, zero-dependency audible alert triggers using browser's native Web Audio API
 export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
@@ -87,6 +94,32 @@ export const playStatusSound = (status: 'Success' | 'Pending' | 'Failed') => {
   }
 };
 
+export const BANK_OPTIONS = [
+  { id: 'Moniepoint', title: 'Moniepoint', abbrev: 'MPN', color: 'border-blue-100 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-sm', logoBg: 'bg-blue-600 text-white' },
+  { id: 'OPay', title: 'OPay', abbrev: 'OPY', color: 'border-emerald-100 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-sm', logoBg: 'bg-[#00B87A] text-white' },
+  { id: 'PalmPay', title: 'PalmPay', abbrev: 'PAL', color: 'border-orange-100 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-500 border-orange-500 text-white shadow-sm', logoBg: 'bg-orange-500 text-white' },
+  { id: 'Access Bank', title: 'Access Bank', abbrev: 'ACC', color: 'border-orange-100 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-600 border-orange-600 text-white shadow-sm', logoBg: 'bg-orange-600 text-white' },
+  { id: 'GTBank', title: 'GTBank', abbrev: 'GTB', color: 'border-amber-100 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-600 border-amber-600 text-white shadow-sm', logoBg: 'bg-amber-600 text-white' },
+  { id: 'Zenith Bank', title: 'Zenith Bank', abbrev: 'ZEN', color: 'border-red-100 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-sm', logoBg: 'bg-red-600 text-white' },
+  { id: 'UBA', title: 'UBA', abbrev: 'UBA', color: 'border-red-100 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-700 border-red-700 text-white shadow-sm', logoBg: 'bg-red-700 text-white' },
+  { id: 'First Bank', title: 'First Bank', abbrev: 'FBN', color: 'border-yellow-100 text-yellow-800 bg-white hover:bg-yellow-50', activeColor: 'bg-amber-700 border-amber-700 text-white shadow-sm', logoBg: 'bg-amber-700 text-white' },
+  { id: 'Union Bank', title: 'Union Bank', abbrev: 'UBN', color: 'border-sky-100 text-sky-800 bg-white hover:bg-sky-50', activeColor: 'bg-sky-500 border-sky-500 text-white shadow-sm', logoBg: 'bg-sky-500 text-white' },
+  { id: 'Fidelity Bank', title: 'Fidelity Bank', abbrev: 'FID', color: 'border-blue-100 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-800 border-blue-800 text-white shadow-sm', logoBg: 'bg-blue-800 text-white' },
+  { id: 'Sterling Bank', title: 'Sterling Bank', abbrev: 'STB', color: 'border-red-100 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-500 border-red-500 text-white shadow-sm', logoBg: 'bg-red-500 text-white' },
+  { id: 'Wema Bank', title: 'Wema Bank', abbrev: 'WEM', color: 'border-purple-100 text-purple-800 bg-white hover:bg-purple-50', activeColor: 'bg-purple-600 border-purple-600 text-white shadow-sm', logoBg: 'bg-purple-600 text-white' },
+  { id: 'Stanbic IBTC', title: 'Stanbic IBTC', abbrev: 'SIB', color: 'border-blue-100 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-700 border-blue-700 text-white shadow-sm', logoBg: 'bg-blue-700 text-white' },
+  { id: 'EcoBank', title: 'EcoBank', abbrev: 'ECO', color: 'border-teal-100 text-teal-800 bg-white hover:bg-teal-50', activeColor: 'bg-teal-600 border-teal-600 text-white shadow-sm', logoBg: 'bg-teal-600 text-white' },
+  { id: 'FCMB', title: 'FCMB', abbrev: 'FCM', color: 'border-fuchsia-100 text-fuchsia-800 bg-white hover:bg-fuchsia-50', activeColor: 'bg-fuchsia-700 border-fuchsia-700 text-white shadow-sm', logoBg: 'bg-fuchsia-700 text-white' },
+  { id: 'Kuda Bank', title: 'Kuda Bank', abbrev: 'KUD', color: 'border-emerald-100 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-950 border-emerald-950 text-white shadow-sm', logoBg: 'bg-emerald-950 text-white' },
+  { id: 'Keystone Bank', title: 'Keystone Bank', abbrev: 'KEY', color: 'border-blue-100 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-900 border-blue-900 text-white shadow-sm', logoBg: 'bg-blue-900 text-white' },
+  { id: 'Polaris Bank', title: 'Polaris Bank', abbrev: 'POL', color: 'border-indigo-100 text-indigo-800 bg-white hover:bg-indigo-50', activeColor: 'bg-indigo-900 border-indigo-900 text-white shadow-sm', logoBg: 'bg-indigo-900 text-white' },
+  { id: 'Providus Bank', title: 'Providus Bank', abbrev: 'PRV', color: 'border-yellow-100 text-yellow-800 bg-white hover:bg-yellow-50', activeColor: 'bg-yellow-600 border-yellow-600 text-white shadow-sm', logoBg: 'bg-yellow-600 text-white' },
+  { id: 'Jaiz Bank', title: 'Jaiz Bank', abbrev: 'JAI', color: 'border-green-100 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-700 border-green-700 text-white shadow-sm', logoBg: 'bg-green-700 text-white' },
+  { id: 'Taj Bank', title: 'Taj Bank', abbrev: 'TAJ', color: 'border-emerald-100 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-800 border-emerald-800 text-white shadow-sm', logoBg: 'bg-emerald-800 text-white' },
+  { id: 'Nomba', title: 'Nomba', abbrev: 'NOM', color: 'border-zinc-100 text-zinc-800 bg-white hover:bg-zinc-50', activeColor: 'bg-zinc-800 border-zinc-800 text-white shadow-sm', logoBg: 'bg-zinc-800 text-white' },
+  { id: 'Others', title: 'Others', abbrev: 'OTH', color: 'border-neutral-100 text-neutral-800 bg-white hover:bg-neutral-50', activeColor: 'bg-neutral-700 border-neutral-700 text-white shadow-sm', logoBg: 'bg-neutral-700 text-white' }
+];
+
 interface TransactionFormProps {
   currentUser: User;
   availableEmployees: User[];
@@ -121,6 +154,7 @@ export function TransactionForm({
   );
   const [subType, setSubType] = useState<'SameBank' | 'OtherBank'>('OtherBank');
   const [destinationBank, setDestinationBank] = useState<ProviderType>('OPay');
+  const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [amount, setAmount] = useState<number>(
     initialTransaction ? initialTransaction.amount : 0
   );
@@ -914,19 +948,37 @@ export function TransactionForm({
 
           {/* POS Host Provider Gateways */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-              POS Terminal Hardware Channel
-            </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex items-center justify-between mb-2.5">
+              <label className="block text-xs font-black uppercase tracking-widest text-neutral-500 font-mono flex items-center gap-1.5">
+                <Smartphone className="w-4 h-4 text-neutral-500 animate-pulse" />
+                <span>POS Terminal Hardware Channel</span>
+              </label>
+              <span className="text-[9.5px] font-black bg-neutral-100 text-neutral-500 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+                Touch to match your physical device
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
               {(['Moniepoint', 'OPay', 'PalmPay'] as const).map((pvd) => {
                 const isSelected = provider === pvd;
                 // Core branding colors matching true providers
                 const brandColors = {
-                  Moniepoint: 'border-blue-600 text-blue-700 bg-blue-50 font-black ring-1 ring-blue-600',
-                  OPay: 'border-[#00B87A] text-[#00B87A] bg-emerald-50 font-black ring-1 ring-[#00B87A]',
-                  PalmPay: 'border-orange-500 text-orange-600 bg-orange-50 font-black ring-1 ring-orange-500'
+                  Moniepoint: 'border-blue-500 text-blue-700 bg-blue-50/80 font-black ring-2 ring-blue-500/30 shadow-md scale-[1.04]',
+                  OPay: 'border-[#00B87A] text-[#00B87A] bg-emerald-50/80 font-black ring-2 ring-[#00B87A]/30 shadow-md scale-[1.04]',
+                  PalmPay: 'border-orange-500 text-orange-600 bg-orange-50/80 font-black ring-2 ring-orange-500/30 shadow-md scale-[1.04]'
                 };
                 
+                const posImages = {
+                  Moniepoint: moniepointPosImg,
+                  OPay: opayPosImg,
+                  PalmPay: palmpayPosImg
+                };
+
+                const subLabels = {
+                  Moniepoint: { text: '🔵 BLUE MACHINE', bg: 'bg-blue-100 text-blue-800' },
+                  OPay: { text: '🟢 GREEN MACHINE', bg: 'bg-emerald-100 text-emerald-800' },
+                  PalmPay: { text: '🟠 ORANGE MACHINE', bg: 'bg-orange-100 text-orange-800' }
+                };
+
                 return (
                   <button
                     key={pvd}
@@ -935,7 +987,7 @@ export function TransactionForm({
                       setProvider(pvd);
                       if (posTerminals && posTerminals.length > 0) {
                         const matchingTerminal = posTerminals.find(
-                          t => t.provider.toLowerCase() === pvd.toLowerCase()
+                           t => t.provider.toLowerCase() === pvd.toLowerCase()
                         );
                         if (matchingTerminal) {
                           setSelectedTerminalId(matchingTerminal.id);
@@ -944,77 +996,248 @@ export function TransactionForm({
                         }
                       }
                     }}
-                    className={`py-2 px-1 rounded-xl text-[11px] sm:text-sm font-extrabold border transition cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                    className={`group py-4 px-2 rounded-2xl text-[12px] sm:text-base font-extrabold border transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-2 select-none active:scale-95 ${
                       isSelected 
                         ? brandColors[pvd]
-                        : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'
+                        : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800 hover:border-neutral-300 shadow-sm'
                     }`}
                   >
-                    <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] text-white ${
-                      pvd === 'Moniepoint' ? 'bg-blue-600' : pvd === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
-                    }`}>
-                      {pvd[0]}
+                    {/* Tiny visual realistic preview */}
+                    <div className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white overflow-hidden border-2 ${
+                      isSelected 
+                        ? pvd === 'Moniepoint' ? 'border-blue-400 shadow-md' : pvd === 'OPay' ? 'border-emerald-400 shadow-md' : 'border-orange-400 shadow-md'
+                        : 'border-neutral-100 shadow-xs'
+                    } flex items-center justify-center p-1 group-hover:scale-105 transition-transform duration-200`}>
+                      <img 
+                        src={posImages[pvd]} 
+                        alt={`${pvd} Physical POS`} 
+                        className="w-full h-full object-contain rounded-lg"
+                        referrerPolicy="no-referrer"
+                      />
+                      {isSelected && (
+                        <div className={`absolute -top-1 -right-1 w-5.5 h-5.5 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white ${
+                          pvd === 'Moniepoint' ? 'bg-blue-600' : pvd === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
+                        }`}>
+                          <Check className="w-3.5 h-3.5 stroke-[4]" />
+                        </div>
+                      )}
                     </div>
-                    {pvd}
+                    <div className="text-center w-full min-w-0">
+                      <span className="block text-[13px] sm:text-[15px] font-black tracking-tight leading-none text-neutral-850">{pvd}</span>
+                      <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-md text-[8px] sm:text-[9.5px] font-black font-mono tracking-wider ${subLabels[pvd].bg}`}>
+                        {subLabels[pvd].text}
+                      </span>
+                    </div>
                   </button>
                 );
               })}
             </div>
+
+            {/* Visual Hardware Confirmation Card - Super accessible for non-educated operators */}
+            {provider && (provider === 'Moniepoint' || provider === 'OPay' || provider === 'PalmPay') && (
+              <div className={`mt-3.5 border rounded-2xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-150 shadow-sm ${
+                provider === 'Moniepoint' ? 'bg-blue-50/40 border-blue-200/60' :
+                provider === 'OPay' ? 'bg-emerald-50/40 border-emerald-200/60' :
+                'bg-orange-50/40 border-orange-200/60'
+              }`}>
+                <div className="relative w-20 h-20 bg-white rounded-2xl border-2 border-neutral-100 flex items-center justify-center p-1 shrink-0 shadow-md">
+                  <img 
+                    src={provider === 'Moniepoint' ? moniepointPosImg : provider === 'OPay' ? opayPosImg : palmpayPosImg} 
+                    alt={`${provider} Active Terminal`} 
+                    className="w-full h-full object-contain rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className={`absolute -bottom-2 -right-1.5 text-[9px] px-2 py-0.5 rounded-full font-black text-white shadow-md border border-white animate-pulse ${
+                    provider === 'Moniepoint' ? 'bg-blue-600' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
+                  }`}>
+                    ACTIVE
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className={`w-2 h-2 rounded-full animate-ping ${
+                      provider === 'Moniepoint' ? 'bg-blue-500' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
+                    }`} />
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-450 font-mono">
+                      MATCHING MACHINE COLOR
+                    </span>
+                  </div>
+                  <h4 className="text-sm sm:text-base font-black text-neutral-800 leading-tight flex items-center gap-1.5">
+                    {provider === 'Moniepoint' && <span className="text-blue-600 font-black">🔵 BLUE Moniepoint Machine</span>}
+                    {provider === 'OPay' && <span className="text-[#00B87A] font-black">🟢 GREEN OPay Machine</span>}
+                    {provider === 'PalmPay' && <span className="text-orange-600 font-black">🟠 ORANGE PalmPay Machine</span>}
+                  </h4>
+                  <p className="text-[11px] sm:text-xs font-bold text-neutral-500 leading-relaxed mt-1">
+                    {provider === 'Moniepoint' && '👉 Pick the BLUE POS machine from the table. Insert customer card and press OK.'}
+                    {provider === 'OPay' && '👉 Pick the GREEN POS machine from the table. Insert customer card and press OK.'}
+                    {provider === 'PalmPay' && '👉 Pick the ORANGE POS machine from the table. Insert customer card and press OK.'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Destination Network selection block */}
           <div className="mt-6 mb-2">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                {type === 'Withdrawal' && 'Card Issuer Bank'}
-                {type === 'Transfer' && 'Destination Bank'}
-                {type === 'Deposit' && 'Money Receive Wallet Destination'}
-                {type === 'Airtime' && 'Telecommunication Network'}
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono flex items-center gap-1.5">
+                {type === 'Withdrawal' && (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>ATM Card Issuer Bank</span>
+                  </>
+                )}
+                {type === 'Transfer' && (
+                  <>
+                    <Landmark className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Destination Bank</span>
+                  </>
+                )}
+                {type === 'Deposit' && (
+                  <>
+                    <Wallet className="w-3.5 h-3.5 text-orange-500" />
+                    <span>Money Receive Wallet Destination</span>
+                  </>
+                )}
+                {type === 'Airtime' && (
+                  <>
+                    <Smartphone className="w-3.5 h-3.5 text-purple-500" />
+                    <span>Telecommunication Network</span>
+                  </>
+                )}
               </label>
+              {type !== 'Airtime' && (
+                <span className="text-[10px] font-mono text-neutral-400 font-bold">
+                  Selected: <span className="text-neutral-700 font-extrabold">{destinationBank || 'None'}</span>
+                </span>
+              )}
             </div>
 
-            <div className={`grid ${type === 'Airtime' ? 'grid-cols-4' : 'grid-cols-3'} gap-2 animate-in fade-in slide-in-from-top-2 duration-150`}>
-              {(type === 'Airtime' ? [
-                { id: 'MTN', title: 'MTN', color: 'border-amber-200 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-500 border-amber-500 text-white shadow-md' },
-                { id: 'Airtel', title: 'Airtel', color: 'border-red-200 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-md' },
-                { id: 'Glo', title: 'Glo', color: 'border-green-200 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-600 border-green-600 text-white shadow-md' },
-                { id: '9mobile', title: '9mobile', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-md' }
-              ] as const : [
-                { id: 'Moniepoint', title: 'Moniepoint', color: 'border-blue-200 text-blue-800 bg-white hover:bg-blue-50', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-md' },
-                { id: 'OPay', title: 'OPay', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-md' },
-                { id: 'PalmPay', title: 'PalmPay', color: 'border-orange-200 text-orange-800 bg-white hover:bg-orange-50', activeColor: 'bg-orange-500 border-orange-500 text-white shadow-md' }
-              ] as const).map((opt) => {
-                const isActive = destinationBank === opt.id;
+            {type === 'Airtime' ? (
+              <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
+                {([
+                  { id: 'MTN', title: 'MTN', color: 'border-amber-200 text-amber-800 bg-white hover:bg-amber-50', activeColor: 'bg-amber-500 border-amber-500 text-white shadow-md' },
+                  { id: 'Airtel', title: 'Airtel', color: 'border-red-200 text-red-800 bg-white hover:bg-red-50', activeColor: 'bg-red-600 border-red-600 text-white shadow-md' },
+                  { id: 'Glo', title: 'Glo', color: 'border-green-200 text-green-800 bg-white hover:bg-green-50', activeColor: 'bg-green-600 border-green-600 text-white shadow-md' },
+                  { id: '9mobile', title: '9mobile', color: 'border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50', activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-md' }
+                ] as const).map((opt) => {
+                  const isActive = destinationBank === opt.id;
 
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setDestinationBank(opt.id as any)}
-                    className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
-                      isActive 
-                        ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ${opt.id === 'Moniepoint' ? 'ring-blue-600' : opt.id === 'OPay' ? 'ring-[#00B87A]' : opt.id === 'PalmPay' ? 'ring-orange-500' : opt.id === 'MTN' ? 'ring-amber-500' : opt.id === 'Airtel' ? 'ring-red-600' : opt.id === 'Glo' ? 'ring-green-600' : 'ring-emerald-600'}` 
-                        : `${opt.color}`
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                        isActive ? 'bg-white text-black' : 
-                        opt.id === 'Moniepoint' ? 'bg-blue-600 text-white' : 
-                        opt.id === 'OPay' ? 'bg-[#00B87A] text-white' : 
-                        opt.id === 'PalmPay' ? 'bg-orange-500 text-white' :
-                        opt.id === 'MTN' ? 'bg-amber-500 text-white' :
-                        opt.id === 'Airtel' ? 'bg-red-600 text-white' :
-                        opt.id === 'Glo' ? 'bg-green-600 text-white' : 'bg-emerald-600 text-white'
-                      }`}>
-                        {opt.id[0]}
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setDestinationBank(opt.id as any)}
+                      className={`p-2 sm:p-3 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[70px] ${
+                        isActive 
+                          ? `${opt.activeColor} scale-[1.02] font-bold ring-2 ring-offset-1 ring-amber-500` 
+                          : `${opt.color}`
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
+                          isActive ? 'bg-white text-black' : 
+                          opt.id === 'MTN' ? 'bg-amber-500 text-white' :
+                          opt.id === 'Airtel' ? 'bg-red-600 text-white' :
+                          opt.id === 'Glo' ? 'bg-green-600 text-white' : 'bg-emerald-600 text-white'
+                        }`}>
+                          {opt.id[0]}
+                        </div>
+                        <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
                       </div>
-                      <span className="text-[11px] sm:text-sm font-extrabold tracking-tight leading-tight">{opt.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="bg-neutral-50 border border-neutral-200/60 rounded-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-150">
+                {/* Search query input block */}
+                <div className="relative mb-3 flex items-center bg-white rounded-xl px-3 py-2 border border-neutral-200 shadow-sm focus-within:ring-2 focus-within:ring-[#00B87A] focus-within:border-transparent transition-all">
+                  <Search className="w-4 h-4 text-neutral-400 mr-2 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search Bank/ATM Card (e.g. GTB, Zenith, Access, Kuda...)"
+                    value={bankSearchQuery}
+                    onChange={(e) => setBankSearchQuery(e.target.value)}
+                    className="w-full bg-transparent border-none text-xs font-bold text-neutral-700 placeholder-neutral-400 focus:outline-none"
+                  />
+                  {bankSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setBankSearchQuery('')}
+                      className="text-[10px] bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black px-2 py-0.5 rounded-lg cursor-pointer transition"
+                    >
+                      CLEAR
+                    </button>
+                  )}
+                </div>
+
+                {/* Popular Quick-Select Banks Section when no search */}
+                {!bankSearchQuery && (
+                  <div className="mb-2.5">
+                    <p className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-1.5">⚡ Popular Banks</p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {BANK_OPTIONS.slice(0, 8).map((opt) => {
+                        const isActive = destinationBank === opt.id;
+                        return (
+                          <button
+                            key={`pop-${opt.id}`}
+                            type="button"
+                            onClick={() => setDestinationBank(opt.id)}
+                            className={`p-1.5 rounded-xl border text-center transition-all duration-155 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] ${
+                              isActive
+                                ? `${opt.activeColor} scale-[1.03] font-black ring-2 ring-offset-1 ring-[#00B87A]`
+                                : `${opt.color} border-neutral-200/70`
+                            }`}
+                          >
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black mb-1 shadow-sm ${
+                              isActive ? 'bg-white text-black' : opt.logoBg
+                            }`}>
+                              {opt.abbrev}
+                            </div>
+                            <span className="text-[9px] font-black tracking-tight leading-none truncate w-full px-0.5">{opt.title}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+                )}
+
+                {/* Search Results / All Banks Section */}
+                <div>
+                  <p className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider mb-1.5">
+                    {bankSearchQuery ? `🔍 Search Results (${BANK_OPTIONS.filter(b => b.title.toLowerCase().includes(bankSearchQuery.toLowerCase())).length})` : '🏦 All Supported Banks'}
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-neutral-300">
+                    {BANK_OPTIONS.filter(b => 
+                      b.title.toLowerCase().includes(bankSearchQuery.toLowerCase()) || 
+                      b.abbrev.toLowerCase().includes(bankSearchQuery.toLowerCase())
+                    ).map((opt) => {
+                      const isActive = destinationBank === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setDestinationBank(opt.id)}
+                          className={`p-1.5 rounded-xl border text-center transition-all duration-150 cursor-pointer flex flex-col items-center justify-center select-none active:scale-[0.98] min-h-[56px] ${
+                            isActive
+                              ? `${opt.activeColor} scale-[1.03] font-black ring-2 ring-offset-1 ring-[#00B87A]`
+                              : `${opt.color} border-neutral-200/50`
+                          }`}
+                        >
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black mb-1 shadow-sm ${
+                            isActive ? 'bg-white text-black' : opt.logoBg
+                          }`}>
+                            {opt.abbrev}
+                          </div>
+                          <span className="text-[9.5px] font-bold tracking-tight leading-none truncate w-full px-0.5">{opt.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Amount and Pre-Set Quick Selectors */}

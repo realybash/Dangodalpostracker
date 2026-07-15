@@ -37,6 +37,38 @@ import {
   Mic
 } from 'lucide-react';
 
+const getBankBadgeStyle = (bankName: string): string => {
+  switch (bankName) {
+    case 'OPay': return 'bg-emerald-50 text-[#00B87A] border-emerald-200';
+    case 'Moniepoint': return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'PalmPay': return 'bg-orange-50 text-orange-700 border-orange-200';
+    case 'Access Bank': return 'bg-orange-50 text-orange-700 border-orange-200';
+    case 'GTBank': return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'Zenith Bank': return 'bg-red-50 text-red-700 border-red-200';
+    case 'UBA': return 'bg-red-50 text-red-800 border-red-200';
+    case 'First Bank': return 'bg-yellow-50 text-amber-800 border-yellow-200';
+    case 'Union Bank': return 'bg-sky-50 text-sky-700 border-sky-200';
+    case 'Fidelity Bank': return 'bg-blue-50 text-blue-900 border-blue-200';
+    case 'Sterling Bank': return 'bg-red-50 text-red-600 border-red-200';
+    case 'Wema Bank': return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'Stanbic IBTC': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+    case 'EcoBank': return 'bg-teal-50 text-teal-700 border-teal-200';
+    case 'FCMB': return 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200';
+    case 'Kuda Bank': return 'bg-emerald-50 text-emerald-950 border-emerald-200';
+    case 'Keystone Bank': return 'bg-blue-50 text-blue-900 border-blue-200';
+    case 'Polaris Bank': return 'bg-indigo-50 text-indigo-900 border-indigo-200';
+    case 'Providus Bank': return 'bg-yellow-50 text-yellow-800 border-yellow-200';
+    case 'Jaiz Bank': return 'bg-green-50 text-green-800 border-green-200';
+    case 'Taj Bank': return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+    case 'Nomba': return 'bg-zinc-50 text-zinc-800 border-zinc-200';
+    case 'MTN': return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'Airtel': return 'bg-red-50 text-red-700 border-red-200';
+    case 'Glo': return 'bg-green-50 text-green-700 border-green-200';
+    case '9mobile': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    default: return 'bg-neutral-50 text-neutral-700 border-neutral-200';
+  }
+};
+
 interface TransactionListProps {
   currentUser: User;
   transactions: Transaction[];
@@ -1325,21 +1357,7 @@ export const TransactionList = React.memo(({
                             {destBank && (
                               <>
                                 <span className="text-neutral-300 text-[10px]">➔</span>
-                                <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
-                                  destBank === 'OPay' 
-                                    ? 'bg-emerald-50 text-[#00B87A] border-emerald-200' 
-                                    : destBank === 'Moniepoint' 
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                    : destBank === 'PalmPay'
-                                    ? 'bg-orange-50 text-orange-700 border-orange-200'
-                                    : destBank === 'MTN'
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : destBank === 'Airtel'
-                                    ? 'bg-red-50 text-red-700 border-red-200'
-                                    : destBank === 'Glo'
-                                    ? 'bg-green-50 text-green-700 border-green-200'
-                                    : 'bg-emerald-50 text-emerald-705 border-emerald-200'
-                                }`}>
+                                <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${getBankBadgeStyle(destBank)}`}>
                                   {destBank}
                                 </span>
                               </>
@@ -1821,21 +1839,7 @@ export const TransactionList = React.memo(({
                         {destBank && (
                           <>
                             <span className="text-neutral-400 text-[10px]">➔</span>
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-black border ${
-                              destBank === 'OPay' 
-                                ? 'bg-emerald-50 text-[#00B87A] border-emerald-250' 
-                                : destBank === 'Moniepoint' 
-                                ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                : destBank === 'PalmPay'
-                                ? 'bg-orange-50 text-orange-700 border-orange-200'
-                                : destBank === 'MTN'
-                                ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                : destBank === 'Airtel'
-                                ? 'bg-red-50 text-red-700 border-red-200'
-                                : destBank === 'Glo'
-                                ? 'bg-green-50 text-green-700 border-green-200'
-                                : 'bg-emerald-50 text-emerald-705 border-emerald-200'
-                            }`}>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-black border ${getBankBadgeStyle(destBank)}`}>
                               {destBank}
                             </span>
                           </>
