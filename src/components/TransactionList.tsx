@@ -31,7 +31,10 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
-  Smartphone
+  Smartphone,
+  Play,
+  Pause,
+  Mic
 } from 'lucide-react';
 
 interface TransactionListProps {
@@ -82,6 +85,44 @@ export const TransactionList = React.memo(({
   
   // Calendar Filtering
   const [filterDate, setFilterDate] = useState(new Date());
+
+  // Audio playback state
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+    };
+  }, [currentAudio]);
+
+  const playAudioNote = (txId: string, base64Audio: string) => {
+    if (playingAudioId === txId && currentAudio) {
+      currentAudio.pause();
+      setPlayingAudioId(null);
+      setCurrentAudio(null);
+    } else {
+      if (currentAudio) {
+        currentAudio.pause();
+      }
+      const audio = new Audio(base64Audio);
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        setCurrentAudio(null);
+      };
+      audio.onerror = () => {
+        setPlayingAudioId(null);
+        setCurrentAudio(null);
+      };
+      audio.play().catch(err => {
+        console.error("Audio playback error:", err);
+      });
+      setPlayingAudioId(txId);
+      setCurrentAudio(audio);
+    }
+  };
 
   useEffect(() => {
     if (settlingTx) {
@@ -402,6 +443,13 @@ export const TransactionList = React.memo(({
     const totalWithdrawalAmt = withdrawalTxs.reduce((sum, t) => sum + t.amount, 0);
     const totalTransferAmt = transferTxs.reduce((sum, t) => sum + t.amount, 0);
 
+    const totalCount = filteredList.length;
+    const totalAmount = filteredList.reduce((sum, t) => sum + (t.amount || 0), 0);
+    const totalCustomerFees = filteredList.reduce((sum, t) => sum + (t.customerCharge || t.customerFee || 0), 0);
+    const totalProviderCharges = filteredList.reduce((sum, t) => sum + (t.providerCharge || t.terminalFee || 0), 0);
+    const totalCbnCharges = filteredList.reduce((sum, t) => sum + (t.cbnCharge || 0), 0);
+    const totalProfit = filteredList.reduce((sum, t) => sum + (t.profit || 0), 0);
+
     return {
       depositsCount: depositTxs.length,
       depositsAmount: totalDepositAmt,
@@ -409,8 +457,12 @@ export const TransactionList = React.memo(({
       withdrawalsAmount: totalWithdrawalAmt,
       transfersCount: transferTxs.length,
       transfersAmount: totalTransferAmt,
-      totalCount: filteredList.length,
-      totalAmount: filteredList.reduce((sum, t) => sum + t.amount, 0),
+      totalCount,
+      totalAmount,
+      totalCustomerFees,
+      totalProviderCharges,
+      totalCbnCharges,
+      totalProfit,
     };
   }, [filteredList]);
 
@@ -573,106 +625,94 @@ export const TransactionList = React.memo(({
       </div>
 
       {/* Dynamic Sized Transaction History Metrics Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-        {/* Metric 1: Cash Out */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+        {/* Metric 1: Number of Transactions */}
         <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
-            <ArrowDownLeft className="w-4 h-4 stroke-[2.8]" />
+          <div className="w-7 h-7 rounded-lg bg-neutral-100 text-neutral-600 flex items-center justify-center shrink-0 border border-neutral-200">
+            <Receipt className="w-4 h-4 stroke-[2.3]" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
-              Withdrawal Size
+              Transactions
             </span>
             <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
-              {metrics.withdrawalsCount} receipts
+              {metrics.totalCount} receipts
             </div>
-            <span className="text-[8.5px] font-mono text-neutral-500 font-bold block mt-0.5 leading-none">
-              {formatNaira(metrics.withdrawalsAmount)}
-            </span>
           </div>
         </div>
 
-        {/* Metric 2: Cash In */}
+        {/* Metric 2: Total Transaction Amount */}
         <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
-            <ArrowUpRight className="w-4 h-4 stroke-[2.8]" />
+            <Layers className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
-              Cash In Size
+              Total Amount
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
-              {metrics.depositsCount} receipts
+            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+              {formatNaira(metrics.totalAmount)}
             </div>
-            <span className="text-[8.5px] font-mono text-neutral-500 font-bold block mt-0.5 leading-none">
-              {formatNaira(metrics.depositsAmount)}
-            </span>
           </div>
         </div>
 
-        {/* Metric 3: Transfers */}
+        {/* Metric 3: Total Customer Fees */}
         <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
-            <ArrowRightLeft className="w-4 h-4 stroke-[2.3]" />
+            <DollarSign className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
-              Transfer Size
+              Customer Fees
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
-              {metrics.transfersCount} receipts
+            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+              {formatNaira(metrics.totalCustomerFees)}
             </div>
-            <span className="text-[8.5px] font-mono text-neutral-500 font-bold block mt-0.5 leading-none">
-              {formatNaira(metrics.transfersAmount)}
-            </span>
           </div>
         </div>
 
-        {/* Metric 4: Profit Summary */}
+        {/* Metric 4: Total Provider Charges */}
+        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 border border-orange-100">
+            <CreditCard className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+              Provider Charges
+            </span>
+            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+              {formatNaira(metrics.totalProviderCharges)}
+            </div>
+          </div>
+        </div>
+
+        {/* Metric 5: Total CBN Charges */}
+        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
+            <AlertTriangle className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+              CBN Charges
+            </span>
+            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+              {formatNaira(metrics.totalCbnCharges)}
+            </div>
+          </div>
+        </div>
+
+        {/* Metric 6: Total Profit */}
         <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-xl flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
             <DollarSign className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-emerald-600 uppercase tracking-wider block leading-none">
-              Exact Profit
+              Total Profit
             </span>
-            <div className="text-[11px] font-mono font-black text-emerald-900 mt-0.5 leading-none">
-              {formatNaira(filteredList.reduce((sum, t) => sum + t.profit, 0))}
+            <div className="text-[11px] font-mono font-black text-emerald-900 mt-0.5 leading-none truncate">
+              {formatNaira(metrics.totalProfit)}
             </div>
-          </div>
-        </div>
-
-        {/* Metric 4: Total Charges */}
-        <div className="bg-blue-50 border border-blue-200 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 border border-blue-200">
-            <CreditCard className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-blue-600 uppercase tracking-wider block leading-none">
-              Total Charges
-            </span>
-            <div className="text-[11px] font-mono font-black text-blue-900 mt-0.5 leading-none">
-              {formatNaira(filteredList.reduce((sum, t) => sum + (t.customerFee || 0), 0))}
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 5: Net Totals */}
-        <div className="bg-neutral-900 border border-neutral-800 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
-            <Layers className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-white/40 uppercase tracking-wider block leading-none">
-              Ledger Size
-            </span>
-            <div className="text-[11px] font-mono font-black text-white mt-0.5 leading-none">
-              {metrics.totalCount} total tx
-            </div>
-            <span className="text-[8.5px] font-mono text-[#00B87A] font-bold block mt-0.5 leading-none">
-              {formatNaira(metrics.totalAmount)}
-            </span>
           </div>
         </div>
       </div>
@@ -916,12 +956,11 @@ export const TransactionList = React.memo(({
             {[
               { id: 'TODAY', label: 'Today 📅' },
               { id: 'YESTERDAY', label: 'Yesterday 🕰️' },
-              { id: 'THREE_DAYS', label: 'Last 3 Days ⏳' },
               { id: 'SEVEN_DAYS', label: 'Last 7 Days 🗓️' },
-              { id: 'WEEK', label: 'Weekly 📆' },
-              { id: 'MONTH', label: 'Monthly 📊' },
-              { id: 'YEAR', label: 'Yearly 📈' },
-              { id: 'ALL', label: 'All Time 🌐' }
+              { id: 'WEEK', label: 'This Week 📆' },
+              { id: 'MONTH', label: 'This Month 📊' },
+              { id: 'YEAR', label: 'This Year 📈' },
+              { id: 'ALL', label: 'Lifetime 🌐' }
             ].map((preset) => {
               const isActive = dateFilter === preset.id;
               return (
@@ -1132,6 +1171,9 @@ export const TransactionList = React.memo(({
                   const providerIndex = providerTxs.indexOf(tx);
                   const providerSerialNumber = providerTxs.length - providerIndex;
                   const providerTxId = getProviderTransactionNumber(tx);
+                  const destBank = tx.destinationBank;
+                  const isSameBank = tx.subType === 'SameBank' || (tx.provider && destBank && tx.provider.toLowerCase() === destBank.toLowerCase());
+                  const hasBankDetail = tx.type === 'Withdrawal' || tx.type === 'Transfer' || tx.type === 'Deposit' || tx.type === 'Cash Out (Transfer)' || tx.type === 'Airtime';
    
                   // Setup colors and friendly status / label descriptions
                   const cardBorderColor = 
@@ -1270,15 +1312,75 @@ export const TransactionList = React.memo(({
                               {getFriendlyTypeLabel(tx.type)}
                             </span>
                             <span className="text-neutral-300 text-[10px]">•</span>
-                            <span className={`text-[8.5px] font-mono font-black px-1 py-0.1 rounded ${
+                            <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
                               tx.provider === 'OPay' 
-                                ? 'bg-emerald-50 text-[#00B87A] border border-emerald-100' 
+                                ? 'bg-emerald-50 text-[#00B87A] border-emerald-200' 
                                 : tx.provider === 'Moniepoint' 
-                                ? 'bg-blue-50 text-blue-700 border border-blue-100' 
-                                : 'bg-orange-50 text-orange-700 border border-orange-100'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                : 'bg-orange-50 text-orange-700 border-orange-200'
                             }`}>
                               {tx.provider}
                             </span>
+
+                            {destBank && (
+                              <>
+                                <span className="text-neutral-300 text-[10px]">➔</span>
+                                <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
+                                  destBank === 'OPay' 
+                                    ? 'bg-emerald-50 text-[#00B87A] border-emerald-200' 
+                                    : destBank === 'Moniepoint' 
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                    : destBank === 'PalmPay'
+                                    ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                    : destBank === 'MTN'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : destBank === 'Airtel'
+                                    ? 'bg-red-50 text-red-700 border-red-200'
+                                    : destBank === 'Glo'
+                                    ? 'bg-green-50 text-green-700 border-green-200'
+                                    : 'bg-emerald-50 text-emerald-705 border-emerald-200'
+                                }`}>
+                                  {destBank}
+                                </span>
+                              </>
+                            )}
+
+                            {hasBankDetail && (
+                              <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
+                                isSameBank
+                                  ? 'bg-emerald-100/80 text-emerald-800 border-emerald-250'
+                                  : 'bg-neutral-100/70 text-neutral-500 border-neutral-200'
+                              }`}>
+                                {isSameBank ? '🔄 Same Bank' : '🌐 Other Bank'}
+                              </span>
+                            )}
+
+                            {tx.audioNote && (
+                              <span 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playAudioNote(tx.id, tx.audioNote!);
+                                }}
+                                className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm flex items-center gap-1 transition-all cursor-pointer ${
+                                  playingAudioId === tx.id 
+                                    ? 'bg-[#00B87A] text-white border-emerald-600 animate-pulse' 
+                                    : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                                }`}
+                                title={playingAudioId === tx.id ? "Pause voice note" : "Play voice note"}
+                              >
+                                {playingAudioId === tx.id ? (
+                                  <>
+                                    <Pause className="w-2 h-2 fill-white stroke-[2.5]" />
+                                    <span>Playing</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mic className="w-2.5 h-2.5 text-amber-500 animate-pulse" />
+                                    <span>Play Voice</span>
+                                  </>
+                                )}
+                              </span>
+                            )}
                           </div>
                           
                           <div className={`${subTextSize} text-neutral-400 mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5`}>
@@ -1451,17 +1553,57 @@ export const TransactionList = React.memo(({
                           </div>
  
                           {/* Customer Details & Remarks */}
-                          {(tx.customerName || tx.customerPhone || tx.notes) && (
-                            <div className="border-t border-neutral-100 pt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-left">
-                              {(tx.customerName || tx.customerPhone) && (
-                                <span className="bg-amber-50 border border-amber-100/50 text-neutral-700 px-2 py-0.5 rounded-md font-bold">
-                                  👤 Cust: <strong className="text-neutral-900 font-black">{tx.customerName || 'Customer'}</strong> {tx.customerPhone && `(${tx.customerPhone})`}
-                                </span>
+                          {(tx.customerName || tx.customerPhone || tx.notes || tx.audioNote) && (
+                            <div className="border-t border-neutral-100 pt-2 flex flex-col gap-2 text-[11px] text-left">
+                              {(tx.customerName || tx.customerPhone || tx.notes) && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                  {(tx.customerName || tx.customerPhone) && (
+                                    <span className="bg-amber-50 border border-amber-100/50 text-neutral-700 px-2 py-0.5 rounded-md font-bold">
+                                      👤 Cust: <strong className="text-neutral-900 font-black">{tx.customerName || 'Customer'}</strong> {tx.customerPhone && `(${tx.customerPhone})`}
+                                    </span>
+                                  )}
+                                  {tx.notes && (
+                                    <span className="text-neutral-500 italic">
+                                      • "{tx.notes}"
+                                    </span>
+                                  )}
+                                </div>
                               )}
-                              {tx.notes && (
-                                <span className="text-neutral-500 italic">
-                                  • "{tx.notes}"
-                                </span>
+                              {tx.audioNote && (
+                                <div className="mt-0.5" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center gap-2.5 p-2 bg-emerald-50/75 border border-emerald-100/80 rounded-xl max-w-sm shadow-sm hover:bg-emerald-50 transition-all">
+                                    <button
+                                      type="button"
+                                      onClick={() => playAudioNote(tx.id, tx.audioNote!)}
+                                      className="w-8 h-8 rounded-full bg-[#00B87A] hover:bg-emerald-600 flex items-center justify-center text-white cursor-pointer shadow transition active:scale-95 shrink-0"
+                                      title={playingAudioId === tx.id ? "Pause voice note" : "Play voice note"}
+                                    >
+                                      {playingAudioId === tx.id ? (
+                                        <Pause className="w-3.5 h-3.5 fill-white stroke-[2.5]" />
+                                      ) : (
+                                        <Play className="w-3.5 h-3.5 fill-white stroke-[2.5] ml-0.5" />
+                                      )}
+                                    </button>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wide font-mono leading-none">Voice Record Note</span>
+                                        {playingAudioId === tx.id && (
+                                          <span className="flex items-center gap-0.5">
+                                            <span className="w-0.5 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                            <span className="w-0.5 h-3 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                            <span className="w-0.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[9.5px] text-emerald-600 mt-0.5 font-bold leading-none">
+                                        {playingAudioId === tx.id ? 'Playing broadcast...' : 'Play cashier audio record'}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 text-emerald-450 pr-1">
+                                      <Mic className={`w-3.5 h-3.5 ${playingAudioId === tx.id ? 'animate-pulse text-emerald-600' : ''}`} />
+                                    </div>
+                                  </div>
+                                </div>
                               )}
                             </div>
                           )}
@@ -1569,6 +1711,9 @@ export const TransactionList = React.memo(({
                 const providerIndex = providerTxs.indexOf(tx);
                 const providerSerialNumber = providerTxs.length - providerIndex;
                 const providerTxId = getProviderTransactionNumber(tx);
+                const destBank = tx.destinationBank;
+                const isSameBank = tx.subType === 'SameBank' || (tx.provider && destBank && tx.provider.toLowerCase() === destBank.toLowerCase());
+                const hasBankDetail = tx.type === 'Withdrawal' || tx.type === 'Transfer' || tx.type === 'Deposit' || tx.type === 'Cash Out (Transfer)' || tx.type === 'Airtime';
 
                 // Styling for provider serial badges
                 const providerBadgeStyle = 
@@ -1673,13 +1818,36 @@ export const TransactionList = React.memo(({
                           {tx.provider}
                         </span>
 
-                        {tx.subType && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-mono uppercase font-extrabold border hidden sm:inline ${
-                            tx.subType === 'SameBank'
+                        {destBank && (
+                          <>
+                            <span className="text-neutral-400 text-[10px]">➔</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-black border ${
+                              destBank === 'OPay' 
+                                ? 'bg-emerald-50 text-[#00B87A] border-emerald-250' 
+                                : destBank === 'Moniepoint' 
+                                ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                : destBank === 'PalmPay'
+                                ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                : destBank === 'MTN'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : destBank === 'Airtel'
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : destBank === 'Glo'
+                                ? 'bg-green-50 text-green-700 border-green-200'
+                                : 'bg-emerald-50 text-emerald-705 border-emerald-200'
+                            }`}>
+                              {destBank}
+                            </span>
+                          </>
+                        )}
+
+                        {hasBankDetail && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-mono uppercase font-extrabold border ${
+                            isSameBank
                               ? 'bg-emerald-100/75 text-emerald-800 border-emerald-250'
                               : 'bg-neutral-100/70 text-neutral-500 border-neutral-200'
                           }`}>
-                            {tx.subType === 'SameBank' ? '🔄 Same Bank' : '🌐 Interbank'}
+                            {isSameBank ? '🔄 Same Bank' : '🌐 Other Bank'}
                           </span>
                         )}
 
@@ -1731,7 +1899,7 @@ export const TransactionList = React.memo(({
                     </td>
 
                     {/* Customer Info & Notes */}
-                    <td className={`${rowPadding} max-w-[150px] truncate text-neutral-400 font-medium hidden md:table-cell`} title={`${tx.customerName ? 'Debtor: ' + tx.customerName + '\n' : ''}${tx.customerPhone ? 'Phone: ' + tx.customerPhone + '\n' : ''}${tx.notes || ''}`}>
+                    <td className={`${rowPadding} max-w-[150px] text-neutral-400 font-medium hidden md:table-cell`} title={`${tx.customerName ? 'Debtor: ' + tx.customerName + '\n' : ''}${tx.customerPhone ? 'Phone: ' + tx.customerPhone + '\n' : ''}${tx.notes || ''}`}>
                       {tx.customerName && (
                         <div className="text-[10px] text-amber-700 font-black mb-0.5 flex items-center gap-1 bg-amber-50 border border-amber-200/50 px-1.5 py-0.5 rounded-lg w-max shrink-0">
                           👤 {tx.customerName}
@@ -1740,9 +1908,39 @@ export const TransactionList = React.memo(({
                       {tx.customerPhone && (
                         <div className="text-[10px] text-neutral-600 font-bold mb-0.5">📞 {tx.customerPhone}</div>
                       )}
-                      <div className="truncate">
-                        {tx.notes || <span className="italic text-neutral-300">No notes</span>}
-                      </div>
+                      {tx.notes && (
+                        <div className="truncate text-xs font-bold text-neutral-500 mb-1">
+                          "{tx.notes}"
+                        </div>
+                      )}
+                      {!tx.customerName && !tx.customerPhone && !tx.notes && !tx.audioNote && (
+                        <span className="italic text-neutral-300">No notes</span>
+                      )}
+                      {tx.audioNote && (
+                        <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => playAudioNote(tx.id, tx.audioNote!)}
+                            className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-mono font-black border transition-all cursor-pointer shadow-sm ${
+                              playingAudioId === tx.id
+                                ? 'bg-[#00B87A] text-white border-emerald-600 animate-pulse'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {playingAudioId === tx.id ? (
+                              <>
+                                <Pause className="w-2.5 h-2.5 fill-white stroke-[2.5]" />
+                                <span>Playing</span>
+                              </>
+                            ) : (
+                              <>
+                                <Mic className="w-2.5 h-2.5 text-[#00B87A] animate-pulse" />
+                                <span>Play Voice</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </td>
 
                     {/* Action controls */}

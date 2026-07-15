@@ -119,7 +119,7 @@ export function TransactionForm({
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Transfer'>(
     initialTransaction ? (initialTransaction.paymentMethod || 'Card') : 'Card'
   );
-  const [subType, setSubType] = useState<'OtherBank'>('OtherBank');
+  const [subType, setSubType] = useState<'SameBank' | 'OtherBank'>('OtherBank');
   const [destinationBank, setDestinationBank] = useState<ProviderType>('OPay');
   const [amount, setAmount] = useState<number>(
     initialTransaction ? initialTransaction.amount : 0
@@ -178,6 +178,18 @@ export function TransactionForm({
   });
 
   const [withdrawScenario, setWithdrawScenario] = useState<'CashHandout' | 'CardSwipe'>('CashHandout');
+
+  useEffect(() => {
+    if (type === 'Withdrawal' || type === 'Transfer' || type === 'Deposit' || type === 'Airtime') {
+      if (provider.toLowerCase() === destinationBank.toLowerCase()) {
+        setSubType('SameBank');
+      } else {
+        setSubType('OtherBank');
+      }
+    } else {
+      setSubType('OtherBank');
+    }
+  }, [provider, destinationBank, type]);
 
   useEffect(() => {
     if (type === 'Withdrawal') {
@@ -440,7 +452,7 @@ export function TransactionForm({
       profit: actualProfit, 
       feeMethod: (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Transfer' : ((type === 'Withdrawal' && withdrawChargeMode === 'CardAddOn') ? 'CardDebit' : 'Cash'),
       paymentMethod,
-      destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime') ? destinationBank : undefined,
+      destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime' || type === 'Withdrawal') ? destinationBank : undefined,
       totalCustomerCharged,
       timestamp: customTimestamp,
       notes: finalNotes.trim() || undefined,

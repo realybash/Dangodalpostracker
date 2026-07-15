@@ -902,14 +902,14 @@ export default function App() {
     let unsubscribeCashier = () => {};
 
     if (isManager) {
-      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId), orderBy('timestamp', 'desc')), (snap) => {
         const txs = snap.docs.map(d => d.data() as Transaction);
         ownerTxsRef.current = txs;
         updateCombinedTxs();
         import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
     } else {
-      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId), orderBy('timestamp', 'desc')), (snap) => {
         const txs = snap.docs.map(d => d.data() as Transaction);
         cashierTxsRef.current = txs;
         updateCombinedTxs();
