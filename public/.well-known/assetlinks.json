@@ -1,0 +1,1 @@
+[{      "relation": ["delegate_permission/common.handle_all_urls"],      "target": {        "namespace": "android_app",        "package_name": "app.vercel.dangodalpostracker.twa",        "sha256_cert_fingerprints": ["C9:98:81:49:0C:DE:D2:3E:69:4A:94:EE:89:78:A2:1D:44:6C:66:AB:86:30:B0:DF:46:AA:24:9A:D7:45:B8:36"]      }    }]
