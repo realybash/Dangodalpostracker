@@ -188,7 +188,7 @@ export function TransactionForm({
     initialTransaction ? initialTransaction.type : (initialType || settings?.defaultType || 'Withdrawal')
   );
   const [provider, setProvider] = useState<ProviderType>(
-    initialTransaction ? initialTransaction.provider : (settings?.defaultProvider || 'OPay')
+    initialTransaction ? initialTransaction.provider : ''
   );
   const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Transfer'>(
     initialTransaction ? (initialTransaction.paymentMethod || 'Card') : 'Card'
@@ -719,6 +719,15 @@ export function TransactionForm({
   };
 
   const handleAddToBasket = () => {
+    if (posTerminals && posTerminals.length > 0 && !selectedTerminalId) {
+      alert('⚠️ CRITICAL HARDWARE LOCK: Please select the specific physical POS terminal you used for this transaction.');
+      const el = document.getElementById('terminal-selection-container');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
+
     if (amount <= 0) {
       alert('Transaction amount must be greater than zero');
       return;
@@ -762,6 +771,15 @@ export function TransactionForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (posTerminals && posTerminals.length > 0 && !selectedTerminalId) {
+      alert('⚠️ CRITICAL HARDWARE LOCK: Please select the specific physical POS terminal you used for this transaction.');
+      const el = document.getElementById('terminal-selection-container');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
 
     if (amount <= 0) {
       alert('Transaction amount must be greater than zero');
@@ -1261,9 +1279,9 @@ export function TransactionForm({
             </span>
           </div>
 
-          {/* Active POS Sync: OPay provider rate and settlement rules are locked for this transaction. */}
-          {selectedTerminalId && (
-            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200 shadow-sm mb-4">
+          {/* Active POS Sync Banner or Hardware Warning */}
+          {selectedTerminalId ? (
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200 shadow-sm mb-2">
               <div className="p-2 bg-[#00B87A] text-white rounded-full">
                 <ShieldCheck className="w-5 h-5" />
               </div>
@@ -1276,34 +1294,146 @@ export function TransactionForm({
                 </p>
               </div>
             </div>
-          )}
+          ) : null}
           
-          {/* Linked POS Terminals Selection */}
+          {/* Linked POS Terminals Selection Card Grid */}
           {posTerminals && posTerminals.length > 0 && (
-            <div className="bg-neutral-50 border border-neutral-100 p-4 rounded-2xl space-y-2">
-              <label htmlFor="terminal-select" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 font-mono flex items-center gap-1">
-                📟 Link a Different Terminal
-              </label>
-              <select
-                id="terminal-select"
-                value={selectedTerminalId}
-                onChange={(e) => {
-                  const termId = e.target.value;
-                  setSelectedTerminalId(termId);
-                  const selectedTerm = posTerminals.find(t => t.id === termId);
-                  if (selectedTerm) {
-                    setProvider(selectedTerm.provider as any);
+            <div 
+              id="terminal-selection-container" 
+              className={`p-4 rounded-3xl space-y-3.5 transition-all duration-300 shadow-sm border ${
+                !selectedTerminalId 
+                  ? 'border-amber-300 bg-amber-50/15 ring-2 ring-amber-500/5 shadow-amber-50' 
+                  : 'bg-neutral-50/50 border-neutral-200'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <label className={`block text-[10.5px] font-black uppercase tracking-widest font-mono flex items-center gap-1.5 ${
+                  !selectedTerminalId ? 'text-amber-800 animate-pulse' : 'text-neutral-500'
+                }`}>
+                  📟 Link Physical POS Device <span className="text-[7.5px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 animate-pulse">REQUIRED</span>
+                </label>
+                <span className={`text-[7.5px] font-black px-2 py-0.5 rounded-full font-mono uppercase tracking-widest leading-none ${
+                  !selectedTerminalId ? 'bg-amber-100 text-amber-800' : 'bg-[#00B87A]/10 text-[#00B87A]'
+                }`}>
+                  {!selectedTerminalId ? 'Awaiting Selection' : 'Locked & Synced'}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {(() => {
+                  // Filter terminals based on selected provider if any, to prevent cashier from choosing the wrong machine brand!
+                  const filteredTerminals = provider 
+                    ? posTerminals.filter(t => t.provider.toLowerCase() === provider.toLowerCase())
+                    : posTerminals;
+
+                  if (filteredTerminals.length === 0) {
+                    return (
+                      <div className="col-span-full text-center p-3 bg-amber-50/40 border border-dashed border-amber-200 rounded-xl text-[10px] font-bold text-amber-700">
+                        No registered physical terminals found for the selected brand ({provider}). Please select another brand or contact your administrator.
+                      </div>
+                    );
                   }
-                }}
-                className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-xs font-bold font-sans focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] text-neutral-800 cursor-pointer"
-              >
-                <option value="">-- Switch Active Terminal --</option>
-                {posTerminals.map((term) => (
-                  <option key={term.id} value={term.id}>
-                    💳 {term.name} ── {term.provider} ── Operator: {term.cashierName || 'N/A'} ── Account: {term.posAccountNo || 'N/A'} ── SN: {term.serialNumber || 'N/A'}
-                  </option>
-                ))}
-              </select>
+
+                  return filteredTerminals.map((term) => {
+                    const isSelected = selectedTerminalId === term.id;
+                    
+                    const getBrandTheme = (pvd: string) => {
+                      const lower = pvd.toLowerCase();
+                      if (lower === 'moniepoint') return {
+                        border: isSelected ? 'border-blue-600 ring-2 ring-blue-500/10 shadow-md scale-[1.01]' : 'border-neutral-200 hover:border-blue-300 hover:bg-blue-50/10',
+                        bg: isSelected ? 'bg-blue-50/40' : 'bg-white',
+                        badge: 'bg-blue-600 text-white',
+                        dot: 'bg-blue-500',
+                        textColor: 'text-blue-900',
+                        glow: 'shadow-blue-50/30'
+                      };
+                      if (lower === 'opay') return {
+                        border: isSelected ? 'border-[#00B87A] ring-2 ring-[#00B87A]/10 shadow-md scale-[1.01]' : 'border-neutral-200 hover:border-emerald-300 hover:bg-emerald-50/10',
+                        bg: isSelected ? 'bg-emerald-50/30' : 'bg-white',
+                        badge: 'bg-[#00B87A] text-white',
+                        dot: 'bg-[#00B87A]',
+                        textColor: 'text-emerald-900',
+                        glow: 'shadow-emerald-50/30'
+                      };
+                      if (lower === 'palmpay') return {
+                        border: isSelected ? 'border-orange-500 ring-2 ring-orange-500/10 shadow-md scale-[1.01]' : 'border-neutral-200 hover:border-orange-300 hover:bg-orange-50/10',
+                        bg: isSelected ? 'bg-orange-50/30' : 'bg-white',
+                        badge: 'bg-orange-500 text-white',
+                        dot: 'bg-orange-500',
+                        textColor: 'text-orange-900',
+                        glow: 'shadow-orange-50/30'
+                      };
+                      return {
+                        border: isSelected ? 'border-purple-600 ring-2 ring-purple-500/10 shadow-md scale-[1.01]' : 'border-neutral-200 hover:border-purple-300 hover:bg-purple-50/10',
+                        bg: isSelected ? 'bg-purple-50/30' : 'bg-white',
+                        badge: 'bg-purple-600 text-white',
+                        dot: 'bg-purple-500',
+                        textColor: 'text-purple-900',
+                        glow: 'shadow-purple-50/30'
+                      };
+                    };
+                    
+                    const theme = getBrandTheme(term.provider);
+                    
+                    return (
+                      <button
+                        key={term.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTerminalId(term.id);
+                          setProvider(term.provider as any);
+                          // Synthesize a tactile chime on selection
+                          try {
+                            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                            const osc = audioCtx.createOscillator();
+                            const gain = audioCtx.createGain();
+                            osc.connect(gain);
+                            gain.connect(audioCtx.destination);
+                            osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+                            gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+                            osc.start();
+                            osc.stop(audioCtx.currentTime + 0.08);
+                          } catch (e) {}
+                        }}
+                        className={`text-left p-2.5 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-2.5 select-none active:scale-[0.98] ${theme.border} ${theme.bg} ${theme.glow}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[7.5px] font-black px-1 py-0.5 rounded uppercase tracking-wider font-mono ${theme.badge}`}>
+                                {term.provider}
+                              </span>
+                              <span className="text-[8px] font-mono font-bold text-neutral-400 uppercase tracking-widest truncate">
+                                S/N: {term.serialNumber || 'N/A'}
+                              </span>
+                            </div>
+                            <h4 className={`text-[11.5px] font-black tracking-tight mt-0.5 truncate ${theme.textColor}`}>
+                              {term.name}
+                            </h4>
+                          </div>
+                          
+                          {/* Tactile radio indicator */}
+                          <div className={`w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 transition-all shrink-0 ${
+                            isSelected ? 'bg-[#00B87A] border-[#00B87A] text-white' : 'border-neutral-200 text-transparent bg-neutral-50/50'
+                          }`}>
+                            <Check className="w-2.5 h-2.5 stroke-[4.5]" />
+                          </div>
+                        </div>
+                        
+                        <div className="border-t border-neutral-100 pt-1.5 flex items-center justify-between text-[8px] text-neutral-400 font-bold font-mono">
+                          <span className="truncate max-w-[70%]">
+                            ACCT: <span className="text-neutral-600">{term.posAccountNo || 'N/A'}</span>
+                          </span>
+                          <span className="flex items-center gap-1 shrink-0">
+                            <span className={`w-1 h-1 rounded-full ${isSelected ? 'animate-ping' : ''} ${theme.dot}`} />
+                            {isSelected ? 'ACTIVE' : 'TAP TO LINK'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
             </div>
           )}
 
@@ -1357,25 +1487,17 @@ export function TransactionForm({
                     type="button"
                     onClick={() => {
                       setProvider(pvd);
-                      if (posTerminals && posTerminals.length > 0) {
-                        const matchingTerminal = posTerminals.find(
-                           t => t.provider.toLowerCase() === pvd.toLowerCase()
-                        );
-                        if (matchingTerminal) {
-                           setSelectedTerminalId(matchingTerminal.id);
-                        } else {
-                           setSelectedTerminalId('');
-                        }
-                      }
+                      // Reset selected terminal to force explicit visual confirmation of physical machine below
+                      setSelectedTerminalId('');
                     }}
-                    className={`group py-4 px-2.5 rounded-3xl text-[12px] sm:text-base font-extrabold border transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-2.5 select-none active:scale-95 ${
+                    className={`group py-2.5 px-2 rounded-2xl text-[11px] sm:text-sm font-extrabold border transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-2 select-none active:scale-95 ${
                       isSelected 
                         ? brandColors[pvd]
                         : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-850 hover:border-neutral-300 shadow-sm'
                     }`}
                   >
                     {/* Visual realistic preview */}
-                    <div className={`relative w-18 h-18 sm:w-22 sm:h-22 rounded-2xl bg-white overflow-hidden border ${
+                    <div className={`relative w-12 h-12 sm:w-16 sm:h-16 rounded-xl bg-white overflow-hidden border ${
                       isSelected 
                         ? pvd === 'Moniepoint' ? 'border-blue-300 shadow-md ring-2 ring-blue-100' : pvd === 'OPay' ? 'border-emerald-300 shadow-md ring-2 ring-emerald-100' : 'border-orange-300 shadow-md ring-2 ring-orange-100'
                         : 'border-neutral-100 shadow-xs'
@@ -1384,25 +1506,25 @@ export function TransactionForm({
                         <img 
                           src={posImages[pvd]} 
                           alt={`${pvd} Physical POS`} 
-                          className="w-full h-full object-contain rounded-lg"
+                          className="w-full h-full object-contain rounded-md"
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <div className="text-[10px] text-neutral-400 font-bold text-center">
+                        <div className="text-[9px] text-neutral-400 font-bold text-center">
                           {pvd}
                         </div>
                       )}
                       {isSelected && (
-                        <div className={`absolute -top-0.5 -right-0.5 w-6 h-6 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white ${
+                        <div className={`absolute -top-0.5 -right-0.5 w-4.5 h-4.5 rounded-full flex items-center justify-center text-white shadow-md border border-white ${
                           pvd === 'Moniepoint' ? 'bg-blue-600' : pvd === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
                         }`}>
-                          <Check className="w-3.5 h-3.5 stroke-[4]" />
+                          <Check className="w-2.5 h-2.5 stroke-[4.5]" />
                         </div>
                       )}
                     </div>
                     <div className="text-center w-full min-w-0">
-                      <span className="block text-[14px] sm:text-[15px] font-black tracking-tight leading-none text-neutral-850">{pvd}</span>
-                      <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-[8.5px] sm:text-[9.5px] font-black font-mono tracking-wider border ${subLabels[pvd].bg}`}>
+                      <span className="block text-[12px] sm:text-[13px] font-black tracking-tight leading-none text-neutral-850">{pvd}</span>
+                      <span className={`inline-block mt-1 px-1.5 py-0.5 rounded-md text-[7.5px] sm:text-[8px] font-black font-mono tracking-wider border ${subLabels[pvd].bg}`}>
                         {subLabels[pvd].text}
                       </span>
                     </div>
@@ -1419,24 +1541,24 @@ export function TransactionForm({
 
               if (!isSelectedBrandRegistered) {
                 return (
-                  <div className="mt-4 border border-amber-200/70 bg-amber-50/40 rounded-3xl p-5 flex items-start gap-4.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-xs">
-                    <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 shadow-sm border border-amber-200/60">
-                      <AlertTriangle className="w-5 h-5 stroke-[2.5]" />
+                  <div className="mt-3 border border-amber-200/70 bg-amber-50/40 rounded-2xl p-4 flex items-start gap-3.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-xs">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 shadow-sm border border-amber-200/60">
+                      <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 font-mono leading-none">
+                        <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-[8px] font-black uppercase tracking-widest text-amber-600 font-mono leading-none">
                           Manager Registration Needed
                         </span>
                       </div>
-                      <h4 className="text-xs sm:text-sm font-black text-amber-900 leading-none">
+                      <h4 className="text-xs font-black text-amber-900 leading-none">
                         🔒 Unregistered {provider} POS Hardware Channel
                       </h4>
-                      <p className="text-[10.5px] font-semibold text-neutral-600 leading-relaxed">
+                      <p className="text-[10px] font-semibold text-neutral-600 leading-relaxed">
                         No physical <strong className="text-neutral-800">{provider}</strong> terminal has been registered to your cashier account yet. Real-world machine assets and connection feeds are locked.
                       </p>
-                      <div className="inline-block mt-1 px-3 py-1.5 rounded-xl text-[10px] font-bold leading-normal bg-white/90 border border-amber-100 text-amber-850 shadow-2xs">
+                      <div className="inline-block mt-0.5 px-2 py-1 rounded-lg text-[9px] font-bold leading-normal bg-white/90 border border-amber-100 text-amber-850 shadow-2xs">
                         👉 Please ask your manager to register this POS brand under <strong className="font-extrabold text-[#00B87A] underline">"Registered POS Terminals"</strong>.
                       </div>
                     </div>
@@ -1445,19 +1567,19 @@ export function TransactionForm({
               }
 
               return (
-                <div className={`mt-4 border rounded-3xl p-4.5 flex items-center gap-4.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-sm ${
+                <div className={`mt-3 border rounded-2xl p-3 flex items-center gap-3.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-sm ${
                   provider === 'Moniepoint' ? 'bg-gradient-to-r from-blue-50/40 via-white to-blue-50/10 border-blue-200/60' :
                   provider === 'OPay' ? 'bg-gradient-to-r from-emerald-50/40 via-white to-emerald-50/10 border-emerald-200/60' :
                   'bg-gradient-to-r from-orange-50/40 via-white to-orange-50/10 border-orange-200/60'
                 }`}>
-                  <div className="relative w-22 h-22 bg-white rounded-2xl border border-neutral-100 flex items-center justify-center p-2.5 shrink-0 shadow-md ring-4 ring-neutral-50/60">
+                  <div className="relative w-14 h-14 bg-white rounded-xl border border-neutral-100 flex items-center justify-center p-1.5 shrink-0 shadow-md ring-2 ring-neutral-50/60">
                     <img 
                       src={provider === 'Moniepoint' ? moniepointPosImg : provider === 'OPay' ? opayPosImg : palmpayPosImg} 
                       alt={`${provider} Active Terminal`} 
-                      className="w-full h-full object-contain rounded-xl transform hover:scale-105 transition-transform duration-350"
+                      className="w-full h-full object-contain rounded-lg transform hover:scale-105 transition-transform duration-350"
                       referrerPolicy="no-referrer"
                     />
-                    <span className={`absolute -bottom-2 -right-1 text-[8px] px-2 py-0.5 rounded-full font-black text-white shadow-md border-2 border-white tracking-widest ${
+                    <span className={`absolute -bottom-1 -right-1 text-[7px] px-1.5 py-0.5 rounded-full font-black text-white shadow-md border border-white tracking-widest ${
                       provider === 'Moniepoint' ? 'bg-blue-600' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
                     }`}>
                       ONLINE
