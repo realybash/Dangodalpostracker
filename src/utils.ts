@@ -1,4 +1,5 @@
-import { Transaction, User, TransactionType, ProviderType, AppSettings, UserRole, ProviderChargeConfig, RegulatoryConfig, ChargeRule, PricingProfile, ChargeRange, PricingRule } from './types';
+import { Timestamp } from 'firebase/firestore';
+import { Transaction, User, TransactionType, ProviderType, AppSettings, UserRole, ProviderChargeConfig, RegulatoryConfig, ChargeRule, PricingProfile, ChargeRange, PricingRule, HistoryFilter } from './types';
 
 // REMOVED HARDCODED DEFAULTS (Strictly enforced Firestore-only rules)
 
@@ -132,12 +133,105 @@ export function formatNaira(amount: number | undefined | null): string {
 // Unique and random ID generator helper
 export function generateId(): string {
   return Math.random().toString(36).substring(2, 11).toUpperCase();
+}/**
+ * Derive stable business date YYYY-MM-DD from any timestamp
+ */
+export function getBusinessDate(timestamp?: string | number | Date | any): string {
+  let d = new Date();
+  if (timestamp) {
+    d = timestamp && (timestamp as any).toDate ? (timestamp as any).toDate() : new Date(timestamp);
+    if (isNaN(d.getTime())) {
+      d = new Date();
+    }
+  }
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+  } catch (e) {
+    // fallback
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Filter transactions by history filter (Memory-based)
+ */
+export function filterTransactionsByHistoryFilter(transactions: Transaction[], filter: HistoryFilter): Transaction[] {
+  if (!filter || filter.type === 'LIFETIME') return transactions;
+
+  const todayDate = new Date();
+  
+  const getPastBusinessDateStr = (daysAgo: number) => {
+     const d = new Date(todayDate);
+     d.setDate(d.getDate() - daysAgo);
+     return getBusinessDate(d);
+  };
+
+  const todayStr = getPastBusinessDateStr(0);
+
+  return transactions.filter((tx) => {
+    // Use stored stable businessDate, or derive it from historical timestamp if missing
+    const txDateStr = tx.businessDate || getBusinessDate(tx.createdAt || tx.timestamp);
+    
+    switch (filter.type) {
+      case 'DAY_1': // Today
+        return txDateStr === todayStr;
+      case 'DAY_2': { // Yesterday
+        return txDateStr === getPastBusinessDateStr(1);
+      }
+      case 'DAY_3': { // Last 3 Days (inclusive of today)
+        return txDateStr >= getPastBusinessDateStr(2) && txDateStr <= todayStr;
+      }
+      case 'DAY_4': { // Last 4 Days
+        return txDateStr >= getPastBusinessDateStr(3) && txDateStr <= todayStr;
+      }
+      case 'DAY_5': { // Last 5 Days
+        return txDateStr >= getPastBusinessDateStr(4) && txDateStr <= todayStr;
+      }
+      case 'DAY_6': { // Last 6 Days
+        return txDateStr >= getPastBusinessDateStr(5) && txDateStr <= todayStr;
+      }
+      case 'DAY_7': { // Last 7 Days
+        return txDateStr >= getPastBusinessDateStr(6) && txDateStr <= todayStr;
+      }
+      case 'THIS_WEEK': {
+        const d = new Date(todayDate);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        const startOfWeek = new Date(d.setDate(diff));
+        return txDateStr >= getBusinessDate(startOfWeek) && txDateStr <= todayStr;
+      }
+      case 'THIS_MONTH': {
+        const startOfMonth = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1);
+        return txDateStr >= getBusinessDate(startOfMonth) && txDateStr <= todayStr;
+      }
+      case 'THIS_YEAR': {
+        const startOfYear = new Date(todayDate.getFullYear(), 0, 1);
+        return txDateStr >= getBusinessDate(startOfYear) && txDateStr <= todayStr;
+      }
+      case 'CUSTOM': {
+        const startStr = filter.customStart ? getBusinessDate(filter.customStart) : null;
+        const endStr = filter.customEnd ? getBusinessDate(filter.customEnd) : null;
+        if (startStr && endStr) return txDateStr >= startStr && txDateStr <= endStr;
+        if (startStr) return txDateStr >= startStr;
+        if (endStr) return txDateStr <= endStr;
+        return true;
+      }
+      default:
+        return true;
+    }
+  });
 }
 
 // Date-matching helpers
-export function isSameDay(d1: Date | string | number, d2: Date | string | number): boolean {
-  const date1 = new Date(d1);
-  const date2 = new Date(d2);
+export function isSameDay(d1: any, d2: any): boolean {
+  const date1 = d1 && d1.toDate ? d1.toDate() : new Date(d1);
+  const date2 = d2 && d2.toDate ? d2.toDate() : new Date(d2);
   return (
     date1.getFullYear() === date2.getFullYear() &&
     date1.getMonth() === date2.getMonth() &&
@@ -145,14 +239,15 @@ export function isSameDay(d1: Date | string | number, d2: Date | string | number
   );
 }
 
-export function isSameWeek(d1: Date | string | number, d2: Date | string | number): boolean {
-  const date1 = new Date(d1);
-  const date2 = new Date(d2);
+export function isSameWeek(d1: any, d2: any): boolean {
+  const date1 = d1 && d1.toDate ? d1.toDate() : new Date(d1);
+  const date2 = d2 && d2.toDate ? d2.toDate() : new Date(d2);
   
   const getStartOfWeek = (d: Date) => {
     const temp = new Date(d);
+    temp.setHours(0, 0, 0, 0);
     const day = temp.getDay();
-    const diff = temp.getDate() - day;
+    const diff = temp.getDate() - day + (day === 0 ? -6 : 1); // Monday start
     return new Date(temp.setDate(diff));
   };
   
@@ -161,15 +256,15 @@ export function isSameWeek(d1: Date | string | number, d2: Date | string | numbe
   return isSameDay(s1, s2);
 }
 
-export function isSameMonth(d1: Date | string | number, d2: Date | string | number): boolean {
-  const date1 = new Date(d1);
-  const date2 = new Date(d2);
+export function isSameMonth(d1: any, d2: any): boolean {
+  const date1 = d1 && d1.toDate ? d1.toDate() : new Date(d1);
+  const date2 = d2 && d2.toDate ? d2.toDate() : new Date(d2);
   return date1.getFullYear() === date2.getFullYear() && date1.getMonth() === date2.getMonth();
 }
 
-export function isSameYear(d1: Date | string | number, d2: Date | string | number): boolean {
-  const date1 = new Date(d1);
-  const date2 = new Date(d2);
+export function isSameYear(d1: any, d2: any): boolean {
+  const date1 = d1 && d1.toDate ? d1.toDate() : new Date(d1);
+  const date2 = d2 && d2.toDate ? d2.toDate() : new Date(d2);
   return date1.getFullYear() === date2.getFullYear();
 }
 
@@ -269,13 +364,22 @@ export function getAuthPassword(pin: string): string {
   return `opay_${pin}_secure`;
 }
 
-// Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and logging the clean data
+// Safely prepares data for Firestore by removing undefined values, removing passwords/PINs, and converting date strings to Timestamps
 export const prepareFirestoreData = (data: any, collectionName?: string) => {
   const copy = { ...data };
   
   // Explicitly delete sensitive authentication fields so they are never stored in Firestore
   delete (copy as any).password;
   delete (copy as any).pin;
+
+  // Convert timestamp strings to Firestore Timestamps for efficient querying
+  if (copy.timestamp && typeof copy.timestamp === 'string') {
+    try {
+      copy.timestamp = Timestamp.fromDate(new Date(copy.timestamp));
+    } catch (e) {
+      console.warn(`[Firestore Write] Failed to convert timestamp for ${collectionName}:`, e);
+    }
+  }
   
   // Remove every undefined property before calling setDoc()
   const cleanData = Object.fromEntries(
@@ -348,8 +452,122 @@ export function getFriendlyTypeLabel(type: string): string {
   if (type === 'Cash Out (Transfer)') return 'Money Receive';
   if (type === 'Withdrawal') return 'Withdraw';
   if (type === 'Deposit') return 'Money Receive';
+  if (type === 'Money Received') return 'Money Receive';
   if (type === 'Transfer') return 'Bank Transfer';
   return type;
+}
+
+/**
+ * Analyze search query into tokens
+ */
+export function analyzeQuery(searchQuery: string) {
+  const trimmed = searchQuery.trim().toLowerCase();
+  if (!trimmed) {
+    return {
+      hasQuery: false,
+      tokens: [],
+      extractedProviders: [] as string[],
+      extractedTypes: [] as string[],
+      textKeywords: [] as string[]
+    };
+  }
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const extractedProviders: string[] = [];
+  const extractedTypes: string[] = [];
+  const textKeywords: string[] = [];
+
+  const providerOptions = ['opay', 'moniepoint', 'palmpay'];
+  const typeOptions = ['withdrawal', 'deposit', 'transfer'];
+
+  tokens.forEach((token) => {
+    const matchedProv = providerOptions.find(p => p === token || (token.length >= 3 && p.includes(token)));
+    if (matchedProv) {
+      extractedProviders.push(matchedProv);
+      return;
+    }
+
+    const matchedType = typeOptions.find(t => t === token || (token.length >= 4 && t.includes(token)));
+    if (matchedType) {
+      extractedTypes.push(matchedType);
+      return;
+    }
+
+    if (token === 'same' || token === 'samebank') {
+      textKeywords.push('samebank');
+      return;
+    }
+    if (token === 'inter' || token === 'interbank' || token === 'otherbank') {
+      textKeywords.push('otherbank');
+      return;
+    }
+    textKeywords.push(token);
+  });
+
+  return {
+    hasQuery: true,
+    tokens,
+    extractedProviders,
+    extractedTypes,
+    textKeywords
+  };
+}
+
+/**
+ * Apply advanced multi-criteria search filtering
+ */
+export function applyAdvancedFilter(
+  transactions: Transaction[],
+  searchQuery: string,
+  typeFilter: string = 'ALL',
+  providerFilter: string = 'ALL'
+): Transaction[] {
+  const analysis = analyzeQuery(searchQuery);
+  const { hasQuery, extractedProviders, extractedTypes, textKeywords } = analysis;
+
+  return transactions.filter((tx) => {
+    // A. Evaluate tokens
+    if (hasQuery) {
+      if (extractedProviders.length > 0) {
+        const txProvLower = tx.provider.toLowerCase();
+        const matchesAnyExtractedProd = extractedProviders.some((prov) => {
+          if (prov === 'others') return !['opay', 'moniepoint', 'palmpay'].includes(txProvLower);
+          return txProvLower === prov;
+        });
+        if (!matchesAnyExtractedProd) return false;
+      }
+
+      if (extractedTypes.length > 0) {
+        const txTypeLower = tx.type.toLowerCase();
+        const matchesAnyExtractedType = extractedTypes.some(type => txTypeLower === type);
+        if (!matchesAnyExtractedType) return false;
+      }
+
+      if (textKeywords.length > 0) {
+        const matchesAllTextKeywords = textKeywords.every((keyword) => {
+          if (keyword === 'samebank') return tx.subType === 'SameBank';
+          if (keyword === 'otherbank') return tx.subType === 'OtherBank';
+          
+          const providerTxId = getProviderTransactionNumber(tx);
+          return (
+            tx.notes?.toLowerCase().includes(keyword) || 
+            tx.customerPhone?.toLowerCase().includes(keyword) ||
+            tx.employeeName.toLowerCase().includes(keyword) ||
+            tx.id.toLowerCase().includes(keyword) ||
+            providerTxId.toLowerCase().includes(keyword) ||
+            tx.amount.toString().includes(keyword)
+          );
+        });
+        if (!matchesAllTextKeywords) return false;
+      }
+    }
+
+    // B. Dropdown filters
+    const matchesType = typeFilter === 'ALL' || tx.type === typeFilter;
+    const matchesProvider = providerFilter === 'ALL' || tx.provider === providerFilter;
+
+    return matchesType && matchesProvider;
+  });
 }
 
 // Aggregated metrics calculator for transactions across different timeframes
@@ -358,28 +576,21 @@ export function computeTxMetrics(
   timeframe: string,
   _terminalFeeRate: number = 0.5
 ) {
-  const now = new Date();
-  
-  const filtered = transactions.filter((tx) => {
-    if (tx.status === 'Failed') return false;
+  // Use filterTransactionsByHistoryFilter to ensure dashboard matches list logic
+  let hFilter: HistoryFilter = { type: 'LIFETIME' };
+  if (timeframe === 'Daily') hFilter = { type: 'DAY_1' };
+  else if (timeframe === 'Weekly') hFilter = { type: 'THIS_WEEK' };
+  else if (timeframe === 'Monthly') hFilter = { type: 'THIS_MONTH' };
+  else if (timeframe === 'Yearly') hFilter = { type: 'THIS_YEAR' };
 
-    const txDate = new Date(tx.timestamp);
-    if (timeframe === 'Daily') {
-      return isSameDay(txDate, now);
-    } else if (timeframe === 'Weekly') {
-      return isSameWeek(txDate, now);
-    } else if (timeframe === 'Monthly') {
-      return isSameMonth(txDate, now);
-    } else if (timeframe === 'Yearly') {
-      return isSameYear(txDate, now);
-    }
-    return true;
-  });
+  // Filter by timeframe and exclude Failed transactions from aggregates
+  const filtered = filterTransactionsByHistoryFilter(transactions, hFilter).filter(tx => tx.status !== 'Failed');
 
   let volume = 0;
   let terminalFees = 0;
   let cbnCharges = 0;
   let profit = 0;
+  let count_total = 0;
   let totalCustomerCharges = 0;
   let totalProviderCharges = 0;
   let totalVat = 0;
@@ -396,31 +607,44 @@ export function computeTxMetrics(
   };
 
   filtered.forEach((tx) => {
-    volume += tx.amount || 0;
-    terminalFees += tx.terminalFee || 0;
-    cbnCharges += tx.cbnCharge || 0;
+    const isChild = tx.mode === 'SplitChild';
+    
+    // Profit is cumulative (Parent profit - Child costs)
     if (tx.status === 'Success') {
       profit += tx.profit || 0;
     }
-    
-    totalCustomerCharges += tx.customerCharge || tx.customerFee || 0;
-    totalProviderCharges += tx.providerCharge || tx.terminalFee || 0;
-    totalVat += tx.vatAmount || 0;
-    totalCashback += tx.cashback || 0;
-    totalCommission += tx.commissionAmount || 0;
 
-    const tType = tx.type;
-    if (breakdowns[tType as keyof typeof breakdowns]) {
-      const b = breakdowns[tType as keyof typeof breakdowns];
-      b.count += 1;
-      if (tx.status === 'Success') {
-        b.profit += tx.profit || 0;
+    // Volume and Count should only reflect unique customer interactions (exclude child segments)
+    if (!isChild) {
+      volume += tx.amount || 0;
+      count_total += 1;
+      
+      totalCustomerCharges += tx.customerCharge || tx.customerFee || 0;
+      totalVat += tx.vatAmount || 0;
+      totalCashback += tx.cashback || 0;
+      totalCommission += tx.commissionAmount || 0;
+
+      const tType = tx.type;
+      if (breakdowns[tType as keyof typeof breakdowns]) {
+        const b = breakdowns[tType as keyof typeof breakdowns];
+        b.count += 1;
+        if (tx.status === 'Success') {
+          b.profit += tx.profit || 0;
+        }
+        b.volume += tx.amount || 0;
       }
-      b.volume += tx.amount || 0;
+    } else {
+      // For children, we only want to track their provider cost and subtract it from total profit
+      // Note: Child profit is already added above (it's negative -cost)
+      // We also track their breakdown in the parent usually, but for global metrics:
     }
+    
+    totalProviderCharges += tx.providerCharge || tx.terminalFee || 0;
+    terminalFees += tx.terminalFee || 0;
+    cbnCharges += tx.cbnCharge || 0;
   });
 
-  const count = filtered.length;
+  const count = count_total;
   const averageTxSize = count > 0 ? volume / count : 0;
   const averageProfit = count > 0 ? profit / count : 0;
 

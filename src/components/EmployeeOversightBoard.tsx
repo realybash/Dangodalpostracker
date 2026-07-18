@@ -329,13 +329,25 @@ export function EmployeeOversightBoard({
                   </div>
 
                   <div className="flex flex-col items-end gap-1">
-                    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md font-mono border ${
-                      isInactive 
-                        ? 'bg-neutral-100 text-neutral-500 border-neutral-200' 
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                    }`}>
-                      {isInactive ? 'Deactivated' : 'Active Duty'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {onEditEmployee && (
+                        <button
+                          type="button"
+                          onClick={() => onEditEmployee(item.employee)}
+                          className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition cursor-pointer"
+                          title="Edit Profile"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md font-mono border ${
+                        isInactive 
+                          ? 'bg-neutral-100 text-neutral-500 border-neutral-200' 
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                      }`}>
+                        {isInactive ? 'Deactivated' : 'Active Duty'}
+                      </span>
+                    </div>
                     <span className="text-[9px] text-neutral-400 font-mono font-bold">
                       {item.totalTxsAllTime} total slips
                     </span>

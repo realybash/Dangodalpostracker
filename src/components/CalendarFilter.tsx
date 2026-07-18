@@ -22,7 +22,7 @@ export const CalendarFilter: React.FC<CalendarFilterProps> = ({
         </label>
         <input 
           type="date"
-          value={selectedDate.toISOString().split('T')[0]}
+          value={selectedDate ? selectedDate.toISOString().split('T')[0] : ''}
           onChange={(e) => onDateChange(new Date(e.target.value))}
           className="text-xs p-1.5 rounded-lg border border-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         />

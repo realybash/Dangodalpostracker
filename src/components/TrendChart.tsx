@@ -57,7 +57,11 @@ export function TrendChart({ transactions, terminalFeeRate, chartStyle = 'line' 
 
     // Group profits based on active transaction timestamps
     transactions.forEach(tx => {
-      const txDate = new Date(tx.timestamp);
+      // Robust date parsing (Firestore Timestamp or ISO String)
+      const txDate = tx.timestamp && (tx.timestamp as any).toDate 
+        ? (tx.timestamp as any).toDate() 
+        : new Date(tx.timestamp);
+        
       const year = txDate.getFullYear();
       const month = String(txDate.getMonth() + 1).padStart(2, '0');
       const dateVal = String(txDate.getDate()).padStart(2, '0');

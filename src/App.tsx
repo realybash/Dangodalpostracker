@@ -4,9 +4,9 @@
  */
 
 import React, { useReducer, useEffect, useState, useMemo, useRef } from 'react';
-import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType } from './types';
+import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppSettings, Expense, PosTerminal, ProviderType, HistoryFilter } from './types';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
-import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocs, orderBy, limit, or } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocs, orderBy, limit, or, Timestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   getSeedTransactions, 
@@ -24,6 +24,8 @@ import {
   cleanPhoneForCompare,
   getAuthPassword,
   prepareFirestoreData,
+  filterTransactionsByHistoryFilter,
+  applyAdvancedFilter,
   getDefaultPricingProfiles,
   getCalculatedFinancials,
   REALISTIC_PROVIDER_CONFIGS,
@@ -36,6 +38,7 @@ import { ManagerAggregatedStats } from './components/ManagerAggregatedStats';
 import { ChargeMatrixSettings } from './components/ChargeMatrixSettings';
 import { RealizedGainHistory } from './components/RealizedGainHistory';
 import { TransactionForm } from './components/TransactionForm';
+import { TransactionSplitter } from './components/TransactionSplitter';
 import { AudioRecorder } from './components/AudioRecorder';
 import { CalendarFilter } from './components/CalendarFilter';
 import { TransactionList } from './components/TransactionList';
@@ -90,7 +93,7 @@ import {
   Lock,
   Unlock,
   Key,
-  ShieldAlert, AlertTriangle,
+  ShieldAlert, AlertTriangle, Zap,
   
   Calendar,
   FileText,
@@ -154,13 +157,15 @@ const DEFAULT_STATE: AppState = {
   },
   availableEmployees: EMPLOYEES,
   transactions: [],
+  historyTransactions: [],
   selectedEmployeeFilter: 'ALL',
   activeTimeframe: 'Daily',
   terminalFeeRate: 0.5,
   dailyTarget: 3000,
   expenses: [],
   posTerminals: [],
-  settings: DEFAULT_SETTINGS
+  settings: DEFAULT_SETTINGS,
+  historyFilter: { type: 'DAY_1' }
 };
 
 // Reducer implementation guaranteeing reactive immediate computation
@@ -192,9 +197,45 @@ function appReducer(state: AppState, action: AppAction): AppState {
       break;
     }
     case 'SET_TIMEFRAME': {
+      let hFilterType: any = 'LIFETIME';
+      if (action.payload === 'Daily') hFilterType = 'DAY_1';
+      else if (action.payload === 'Weekly') hFilterType = 'THIS_WEEK';
+      else if (action.payload === 'Monthly') hFilterType = 'THIS_MONTH';
+      else if (action.payload === 'Yearly') hFilterType = 'THIS_YEAR';
+
       nextState = {
         ...state,
-        activeTimeframe: action.payload
+        activeTimeframe: action.payload,
+        historyFilter: { ...state.historyFilter, type: hFilterType }
+      };
+      break;
+    }
+    case 'SET_HISTORY_FILTER': {
+      let aTimeframe = state.activeTimeframe;
+      const t = action.payload.type;
+      if (t === 'DAY_1') aTimeframe = 'Daily';
+      else if (t === 'DAY_2') aTimeframe = 'Yesterday' as any;
+      else if (t === 'DAY_3') aTimeframe = 'Last 3 Days' as any;
+      else if (t === 'DAY_4') aTimeframe = 'Last 4 Days' as any;
+      else if (t === 'DAY_5') aTimeframe = 'Last 5 Days' as any;
+      else if (t === 'DAY_6') aTimeframe = 'Last 6 Days' as any;
+      else if (t === 'DAY_7') aTimeframe = 'Last 7 Days' as any;
+      else if (t === 'THIS_WEEK') aTimeframe = 'Weekly';
+      else if (t === 'THIS_MONTH') aTimeframe = 'Monthly';
+      else if (t === 'THIS_YEAR') aTimeframe = 'Yearly';
+      else if (t === 'LIFETIME' || t === 'CUSTOM') aTimeframe = 'All-Time' as any;
+
+      nextState = {
+        ...state,
+        historyFilter: action.payload,
+        activeTimeframe: aTimeframe
+      };
+      break;
+    }
+    case 'SET_HISTORY_TRANSACTIONS': {
+      nextState = {
+        ...state,
+        historyTransactions: action.payload
       };
       break;
     }
@@ -216,28 +257,32 @@ function appReducer(state: AppState, action: AppAction): AppState {
       // Prepend so operations show right at the top
       nextState = {
         ...state,
-        transactions: [action.payload, ...state.transactions]
+        transactions: [action.payload, ...state.transactions],
+        historyTransactions: [action.payload, ...state.historyTransactions]
       };
       break;
     }
     case 'UPDATE_TRANSACTION': {
       nextState = {
         ...state,
-        transactions: state.transactions.map(t => t.id === action.payload.id ? action.payload : t)
+        transactions: state.transactions.map(t => t.id === action.payload.id ? action.payload : t),
+        historyTransactions: state.historyTransactions.map(t => t.id === action.payload.id ? action.payload : t)
       };
       break;
     }
     case 'DELETE_TRANSACTION': {
       nextState = {
         ...state,
-        transactions: state.transactions.filter(t => t.id !== action.payload)
+        transactions: state.transactions.filter(t => t.id !== action.payload),
+        historyTransactions: state.historyTransactions.filter(t => t.id !== action.payload)
       };
       break;
     }
     case 'BULK_DELETE_TRANSACTIONS': {
       nextState = {
         ...state,
-        transactions: state.transactions.filter(t => !action.payload.includes(t.id))
+        transactions: state.transactions.filter(t => !action.payload.includes(t.id)),
+        historyTransactions: state.historyTransactions.filter(t => !action.payload.includes(t.id))
       };
       break;
     }
@@ -246,6 +291,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
       nextState = {
         ...state,
         transactions: state.transactions.map((t) => {
+          const match = payload.find((u) => u.id === t.id);
+          return match ? match : t;
+        }),
+        historyTransactions: state.historyTransactions.map((t) => {
           const match = payload.find((u) => u.id === t.id);
           return match ? match : t;
         })
@@ -398,6 +447,7 @@ function initAppState(): AppState {
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, initAppState);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [logoutConfirmRole, setLogoutConfirmRole] = useState<'Manager' | 'Employee' | null>(null);
 
   // Manager Auth states
   const [cloudUser, setCloudUser] = useState<any>(null);
@@ -469,6 +519,7 @@ export default function App() {
         dailyTarget: state.dailyTarget,
         selectedEmployeeFilter: state.selectedEmployeeFilter,
         activeTimeframe: state.activeTimeframe,
+        historyFilter: state.historyFilter,
         currentUser: state.currentUser,
         settings: state.settings,
         impersonatedUserId: state.impersonatedUserId,
@@ -499,11 +550,15 @@ export default function App() {
 
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [preselectedFormType, setPreselectedFormType] = useState<TransactionType>('Withdrawal');
+  const [preselectedMode, setPreselectedMode] = useState<'Standard' | 'SplitSession'>('Standard');
   const [helpBannerOpen, setHelpBannerOpen] = useState(true);
   const [hideBalances, setHideBalances] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [providerFilter, setProviderFilter] = useState<string>('ALL');
   const [filterDate, setFilterDate] = useState(new Date());
   const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
+  const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isReconCalcOpen, setIsReconCalcOpen] = useState(false);
@@ -596,7 +651,26 @@ export default function App() {
   const [newExpenseNotes, setNewExpenseNotes] = useState('');
   const [newExpenseAudio, setNewExpenseAudio] = useState('');
   const [isAddingTerminal, setIsAddingTerminal] = useState(false);
+  const [editingTerminal, setEditingTerminal] = useState<PosTerminal | null>(null);
+
+  const startEditing = (term: PosTerminal) => {
+    setEditingTerminal(term);
+    setNewTerminalName(term.name);
+    setNewTerminalAccountNo(term.posAccountNo || '');
+    setNewTerminalCashierName(term.cashierName || '');
+    setNewTerminalEmployeeId(term.employeeId || '');
+    setNewTerminalArea(term.areaOfWorking || '');
+    setNewTerminalSN(term.serialNumber || '');
+    setNewTerminalSim(term.simCardNumber || '');
+    setNewTerminalNetwork(term.networkProvider || 'MTN');
+    setNewTerminalBattery(term.batteryLevel || 100);
+    setNewTerminalSignal(term.signalStrength || 5);
+    setNewTerminalProvider(term.provider as any);
+    setNewTerminalRate(term.terminalFeeRate);
+    setIsAddingTerminal(true);
+  };
   const [newTerminalName, setNewTerminalName] = useState('');
+  const [newTerminalEmployeeId, setNewTerminalEmployeeId] = useState('');
   const [newTerminalProvider, setNewTerminalProvider] = useState<ProviderType>('OPay');
   const [newTerminalAccountNo, setNewTerminalAccountNo] = useState('');
   const [newTerminalCashierName, setNewTerminalCashierName] = useState('');
@@ -617,7 +691,7 @@ export default function App() {
 
   useEffect(() => {
     if (carouselSettlingTx) {
-      const remaining = carouselSettlingTx.unpaidFeeAmount !== undefined 
+      const remaining = (carouselSettlingTx.unpaidFeeAmount !== undefined && carouselSettlingTx.unpaidFeeAmount > 0)
         ? carouselSettlingTx.unpaidFeeAmount 
         : (carouselSettlingTx.customerFee || 200);
       setCarouselSettleAmount(remaining.toString());
@@ -915,47 +989,61 @@ export default function App() {
 
   // Real-time Firestore sync subscriptions when syncOwnerId is active
   useEffect(() => {
-    if (appMode === 'offline') {
-      console.log('[Sync] App is in explicit Offline Mode. Skipping real-time Firestore subscriptions.');
-      return;
-    }
-
-    if (!syncOwnerId || !state.currentUser.id) {
-      return;
-    }
+    if (appMode === 'offline' || !syncOwnerId || !state.currentUser.id) return;
 
     const currentUserId = state.currentUser.id;
     const isManager = state.currentUser.role === 'Manager';
 
-    // Subscribe to transactions
-    const updateCombinedTxs = () => {
+    const buildTxQuery = (field: 'ownerId' | 'cashierId', value: string) => {
+      // Restore original: Load ALL permitted transactions for this user/owner to support "Lifetime" and memory filtering
+      return query(
+        collection(db, 'transactions'),
+        where(field, '==', value),
+        orderBy('timestamp', 'desc')
+      );
+    };
+
+    const mapSnapToTxs = (snap: any) => {
+      return snap.docs.map((d: any) => {
+        const data = d.data();
+        if (data.timestamp && typeof data.timestamp === 'object' && (data.timestamp as any).toDate) {
+          data.timestamp = (data.timestamp as any).toDate().toISOString();
+        }
+        return data as Transaction;
+      });
+    };
+
+    const ownerTxsRef = { current: [] as Transaction[] };
+    const cashierTxsRef = { current: [] as Transaction[] };
+
+    const updateStateTxs = () => {
       const combined = [...ownerTxsRef.current, ...cashierTxsRef.current];
       const unique = Array.from(new Map(combined.map(tx => [tx.id, tx])).values());
       unique.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      
+      // Update both slices with the same full dataset; filtering happens in useMemo
       dispatch({ type: 'SET_TRANSACTIONS', payload: unique });
+      dispatch({ type: 'SET_HISTORY_TRANSACTIONS', payload: unique });
     };
 
-    // Managers subscribe to ALL transactions they own
-    // Employees ONLY subscribe to transactions where they are the cashier
-    let unsubscribeOwner = () => {};
-    let unsubscribeCashier = () => {};
+    let unsubOwner = () => {};
+    let unsubCashier = () => {};
 
     if (isManager) {
-      unsubscribeOwner = onSnapshot(query(collection(db, 'transactions'), where('ownerId', '==', currentUserId), orderBy('timestamp', 'desc')), (snap) => {
-        const txs = snap.docs.map(d => d.data() as Transaction);
+      unsubOwner = onSnapshot(buildTxQuery('ownerId', currentUserId), (snap) => {
+        const txs = mapSnapToTxs(snap);
         ownerTxsRef.current = txs;
-        updateCombinedTxs();
+        updateStateTxs();
         import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
     } else {
-      unsubscribeCashier = onSnapshot(query(collection(db, 'transactions'), where('cashierId', '==', currentUserId), orderBy('timestamp', 'desc')), (snap) => {
-        const txs = snap.docs.map(d => d.data() as Transaction);
+      unsubCashier = onSnapshot(buildTxQuery('cashierId', currentUserId), (snap) => {
+        const txs = mapSnapToTxs(snap);
         cashierTxsRef.current = txs;
-        updateCombinedTxs();
+        updateStateTxs();
         import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
     }
-
 
     // Subscribe to Expenses
     const expensesQuery = isManager 
@@ -965,7 +1053,11 @@ export default function App() {
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
       const expList: Expense[] = [];
       snapshot.forEach((docSnap) => {
-        expList.push(docSnap.data() as Expense);
+        const data = docSnap.data() as any;
+        if (data.timestamp && typeof data.timestamp === 'object' && data.timestamp.toDate) {
+          data.timestamp = data.timestamp.toDate().toISOString();
+        }
+        expList.push(data as Expense);
       });
       expList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       
@@ -983,7 +1075,11 @@ export default function App() {
     const unsubscribeTerminals = onSnapshot(terminalsQuery, (snapshot) => {
       const termList: PosTerminal[] = [];
       snapshot.forEach((docSnap) => {
-        termList.push(docSnap.data() as PosTerminal);
+        const data = docSnap.data() as any;
+        if (data.timestamp && typeof data.timestamp === 'object' && data.timestamp.toDate) {
+          data.timestamp = data.timestamp.toDate().toISOString();
+        }
+        termList.push(data as PosTerminal);
       });
       termList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       
@@ -994,14 +1090,53 @@ export default function App() {
     });
 
     return () => {
-      unsubscribeOwner();
-      unsubscribeCashier();
+      unsubOwner();
+      unsubCashier();
       unsubscribeExpenses();
       unsubscribeTerminals();
     };
   }, [syncOwnerId, state.currentUser.id, state.currentUser.role, appMode]);
 
   // Firestore mutation wrappers
+  const handleUpdatePosTerminal = async (term: PosTerminal) => {
+    dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
+
+    const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
+    const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
+
+    try {
+      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
+      const current = await getCachedPosTerminals();
+      const updated = current.map((t: any) => t.id === term.id ? cleanData : t);
+      await saveCachedPosTerminals(updated);
+    } catch (dbErr) {
+      console.error('[DB] Failed to update POS terminal in main cache:', dbErr);
+    }
+
+    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+    const offline = mode === 'offline' || !isOnline;
+
+    if (offline) {
+      try {
+        const { savePendingPosTerminal } = await import('./lib/offlineDb');
+        await savePendingPosTerminal(cleanData);
+      } catch (err) {
+        console.error('[DB] Failed to save POS terminal update to pending queue:', err);
+      }
+      return;
+    }
+
+    try {
+      const { db } = await import('./lib/firebase');
+      const { setDoc, doc } = await import('firebase/firestore');
+      await setDoc(doc(db, 'pos_terminals', term.id), cleanData, { merge: true });
+    } catch (err) {
+      console.error('[DB] Failed to update POS terminal in Firestore:', err);
+      const { savePendingPosTerminal } = await import('./lib/offlineDb');
+      await savePendingPosTerminal(cleanData);
+    }
+  };
+
   const handleAddPosTerminal = async (term: PosTerminal) => {
     dispatch({ type: 'ADD_POS_TERMINAL', payload: term });
 
@@ -1042,51 +1177,6 @@ export default function App() {
           await savePendingPosTerminal(cleanData);
         } catch (queueErr) {
           console.error('[DB] Fallback save to pending POS terminal failed:', queueErr);
-        }
-      }
-    }
-  };
-
-  const handleUpdatePosTerminal = async (term: PosTerminal) => {
-    dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
-
-    const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
-    const cleanData = prepareFirestoreData(termWithOwner, 'pos_terminals');
-
-    // 1. Save directly to local IndexedDB main store first
-    try {
-      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
-      const current = await getCachedPosTerminals();
-      const updated = [...current.filter((t: any) => t.id !== term.id), cleanData];
-      await saveCachedPosTerminals(updated);
-    } catch (dbErr) {
-      console.error('[DB] Failed to update POS terminal in main cache:', dbErr);
-    }
-
-    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
-    const offline = mode === 'offline' || !isOnline;
-
-    if (offline) {
-      try {
-        const { savePendingPosTerminal } = await import('./lib/offlineDb');
-        await savePendingPosTerminal(cleanData);
-      } catch (err) {
-        console.error('[DB] Failed to save pending POS terminal update:', err);
-      }
-      return;
-    }
-
-    if (syncOwnerId) {
-      try {
-        await setDoc(doc(db, 'pos_terminals', term.id), cleanData);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `pos_terminals/${term.id}`);
-        // Fallback
-        try {
-          const { savePendingPosTerminal } = await import('./lib/offlineDb');
-          await savePendingPosTerminal(cleanData);
-        } catch (queueErr) {
-          console.error('[DB] Fallback save pending terminal update failed:', queueErr);
         }
       }
     }
@@ -1158,54 +1248,64 @@ export default function App() {
     }
   };
 
-  const handleAddTransaction = async (tx: Transaction) => {
-    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleAddTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
-    dispatch({ type: 'ADD_TRANSACTION', payload: tx });
+  const handleAddTransaction = async (txOrTxs: Transaction | Transaction[]) => {
+    const txList = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
     
-    const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
-    const txWithIds = { 
-        ...tx, 
-        ownerId: syncOwnerId || state.currentUser.ownerId || state.currentUser.id, 
-        cashierId 
-    };
-    const cleanData = prepareFirestoreData(txWithIds, 'transactions');
-
-    // 1. Save directly to local IndexedDB main cache first to avoid losing data across offline restarts
-    try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Saving transaction ID: "${tx.id}" to IndexedDB main cache...`);
-      const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
-      const current = await getCachedTransactions();
-      const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
-      await saveCachedTransactions(updated);
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" saved to IndexedDB main cache.`);
-    } catch (dbErr) {
-      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save transaction to main cache:', dbErr);
-    }
-
-    const mode = localStorage.getItem('POSTrack_Mode') || 'online';
-    const offline = mode === 'offline' || !isOnline;
-
-    if (offline) {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing to IndexedDB pending list.`);
-        const { savePendingTransaction } = await import('./lib/offlineDb');
-        await savePendingTransaction(cleanData);
-        return;
-    }
-
-    if (syncOwnerId) {
-      try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore write for transaction ID: "${tx.id}"...`);
-        await setDoc(doc(db, 'transactions', tx.id), cleanData);
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" written to Firestore successfully.`);
-      } catch (err) {
-        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore write failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
-        handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
-        // Fallback to offline storage if write fails
-        const { savePendingTransaction } = await import('./lib/offlineDb');
-        await savePendingTransaction(cleanData);
+    for (let tx of txList) {
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleAddTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
+      
+      const { getBusinessDate } = await import('./utils');
+      if (!tx.createdAt) {
+        tx = { ...tx, createdAt: new Date().toISOString() };
       }
-    } else {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore write for ID: "${tx.id}".`);
+      if (!tx.businessDate) {
+        tx = { ...tx, businessDate: getBusinessDate(tx.createdAt || tx.timestamp) };
+      }
+
+      dispatch({ type: 'ADD_TRANSACTION', payload: tx });
+      
+      const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
+      const txWithIds = { 
+          ...tx, 
+          ownerId: syncOwnerId || state.currentUser.ownerId || state.currentUser.id, 
+          cashierId 
+      };
+      const cleanData = prepareFirestoreData(txWithIds, 'transactions');
+
+      // 1. Save directly to local IndexedDB main cache first to avoid losing data across offline restarts
+      try {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Saving transaction ID: "${tx.id}" to IndexedDB main cache...`);
+        const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
+        const current = await getCachedTransactions();
+        const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
+        await saveCachedTransactions(updated);
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" saved to IndexedDB main cache.`);
+      } catch (dbErr) {
+        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save transaction to main cache:', dbErr);
+      }
+
+      const mode = localStorage.getItem('POSTrack_Mode') || 'online';
+      const offline = mode === 'offline' || !isOnline;
+
+      if (offline) {
+          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing to IndexedDB pending list.`);
+          const { savePendingTransaction } = await import('./lib/offlineDb');
+          await savePendingTransaction(cleanData);
+      } else if (syncOwnerId) {
+        try {
+          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore write for transaction ID: "${tx.id}"...`);
+          await setDoc(doc(db, 'transactions', tx.id), cleanData);
+          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" written to Firestore successfully.`);
+        } catch (err) {
+          console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore write failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
+          handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
+          // Fallback to offline storage if write fails
+          const { savePendingTransaction } = await import('./lib/offlineDb');
+          await savePendingTransaction(cleanData);
+        }
+      } else {
+        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore write for ID: "${tx.id}".`);
+      }
     }
   };
 
@@ -1260,10 +1360,23 @@ export default function App() {
     }
   };
 
+  const handleSplitSave = async (children: Transaction[], updatedParent: Transaction) => {
+    // 1. Update Parent
+    await handleUpdateTransaction(updatedParent);
+    
+    // 2. Add all children
+    for (const child of children) {
+      await handleAddTransaction(child);
+    }
+    
+    setSplittingTransaction(null);
+    showAppNotification(`Successfully split withdrawal into ${children.length} transfers.`, 'success');
+  };
+
   const handleQuickMarkAsPaid = async (tx: Transaction) => {
-    const remainingAmount = tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : (tx.customerFee || 0);
+    const remainingAmount = (tx.unpaidFeeAmount !== undefined && tx.unpaidFeeAmount > 0) ? tx.unpaidFeeAmount : (tx.customerFee || 200);
     if (confirm(`Are you sure you want to mark this debt of ₦${remainingAmount.toLocaleString()} for ${tx.customerName || 'Walk-in Customer'} as FULLY PAID?`)) {
-      const originalFee = tx.originalFeeAmount !== undefined ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : tx.customerFee);
+      const originalFee = (tx.originalFeeAmount !== undefined && tx.originalFeeAmount > 0) ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined && tx.unpaidFeeAmount > 0 ? tx.unpaidFeeAmount : tx.customerFee || 200);
       const prevPaid = tx.chargesPaidAmount || 0;
       const totalPaidSoFar = prevPaid + remainingAmount;
       
@@ -1322,14 +1435,22 @@ export default function App() {
 
   const handleDeleteTransaction = async (id: string) => {
     console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleDeleteTransaction initiated. ID: "${id}"`);
-    dispatch({ type: 'DELETE_TRANSACTION', payload: id });
+    
+    // Identify all linked child transactions that should be deleted with the parent
+    const linkedChildIds = state.transactions
+      .filter(t => t.parentTransactionId === id)
+      .map(t => t.id);
+    const allIdsToDelete = [id, ...linkedChildIds];
+
+    // Dispatch deletions to local state
+    allIdsToDelete.forEach(tid => dispatch({ type: 'DELETE_TRANSACTION', payload: tid }));
 
     // 1. Save directly to local IndexedDB main cache first
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing transaction ID: "${id}" from IndexedDB main cache...`);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing transactions: [${allIdsToDelete.join(', ')}] from IndexedDB...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
-      const updated = current.filter((t: any) => t.id !== id);
+      const updated = current.filter((t: any) => !allIdsToDelete.includes(t.id));
       await saveCachedTransactions(updated);
       console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${id}" removed from IndexedDB main cache.`);
     } catch (dbErr) {
@@ -1381,14 +1502,21 @@ export default function App() {
 
   const handleBulkDeleteTransactions = async (ids: string[]) => {
     console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleBulkDeleteTransactions initiated. Total count: ${ids.length}`);
-    dispatch({ type: 'BULK_DELETE_TRANSACTIONS', payload: ids });
+    
+    // Identify all linked child transactions that should be deleted with their parents
+    const linkedChildIds = state.transactions
+      .filter(t => t.parentTransactionId && ids.includes(t.parentTransactionId))
+      .map(t => t.id);
+    const allIdsToDelete = Array.from(new Set([...ids, ...linkedChildIds]));
+
+    dispatch({ type: 'BULK_DELETE_TRANSACTIONS', payload: allIdsToDelete });
 
     // 1. Update IndexedDB main cache first
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing ${ids.length} transactions from IndexedDB main cache...`);
+      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing ${allIdsToDelete.length} transactions from IndexedDB main cache...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
-      const updated = current.filter((t: any) => !ids.includes(t.id));
+      const updated = current.filter((t: any) => !allIdsToDelete.includes(t.id));
       await saveCachedTransactions(updated);
       console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk transactions removed from IndexedDB main cache.`);
     } catch (dbErr) {
@@ -1642,17 +1770,9 @@ export default function App() {
     }
   };
 
-  const [isLocked, setIsLocked] = useState(() => {
-    try {
-      const locked = localStorage.getItem('OPay_Terminal_Locked');
-      const isLockedVal = locked !== 'false';
-      console.log(`[OFFLINE AUTH TRACE] Initializing terminal lock status. LocalStorage OPay_Terminal_Locked: "${locked}" -> Resolved isLocked: ${isLockedVal}`);
-      return isLockedVal;
-    } catch (e) {
-      console.error('[OFFLINE AUTH TRACE] Error reading OPay_Terminal_Locked from localStorage:', e);
-      return true;
-    }
-  });
+  // Secure terminal locking on startup/refresh: always start with the login page open (locked)
+  // so cashiers and managers must enter their PIN to unlock the till.
+  const [isLocked, setIsLocked] = useState(true);
 
   const handleLoginSuccess = (user: User) => {
     const terminalMode = (localStorage.getItem('POSTrack_Mode') as 'online' | 'offline') || 'online';
@@ -2012,19 +2132,35 @@ export default function App() {
   // Compute metrics dynamically from visible transactions based on active permissions
   // Security Layer rule: Employees see ONLY their own txns. Managers see filtered employee or ALL.
   const authorizedTransactions = useMemo(() => {
-    const txs = state.transactions;
+    let txs = state.transactions;
     if (state.currentUser.role === 'Employee') {
-      return txs.filter(t => t.employeeId === state.currentUser.id);
+      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+    } else {
+      const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
+      if (targetUserId) {
+        txs = txs.filter(t => t.employeeId === targetUserId);
+      }
     }
-    
-    // Prioritize impersonation, then filter
-    const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
-    
-    if (!targetUserId) {
-      return txs;
-    }
-    return txs.filter(t => t.employeeId === targetUserId);
+    return txs;
   }, [state.transactions, state.currentUser, state.selectedEmployeeFilter, state.impersonatedUserId]);
+
+  const authorizedHistoryTransactions = useMemo(() => {
+    let txs = state.historyTransactions;
+    if (state.currentUser.role === 'Employee') {
+      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+    } else {
+      const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
+      if (targetUserId) {
+        txs = txs.filter(t => t.employeeId === targetUserId);
+      }
+    }
+    
+    // Apply Memory-based Date Filtering
+    const dateFiltered = filterTransactionsByHistoryFilter(txs, state.historyFilter);
+
+    // Apply Advanced Search and Category Filtering (Synced across app)
+    return applyAdvancedFilter(dateFiltered, searchQuery, typeFilter, providerFilter);
+  }, [state.historyTransactions, state.currentUser, state.selectedEmployeeFilter, state.impersonatedUserId, state.historyFilter, searchQuery, typeFilter, providerFilter]);
 
   // Determine active user (impersonated or real)
   const activeUser = useMemo(() => {
@@ -2065,13 +2201,12 @@ export default function App() {
     });
   }, [authorizedTransactions, searchQuery]);
 
-  // Compute Active Selection Metrics
+  // Compute Active Selection Metrics (Synchronized with History Filter)
   const activeMetrics = useMemo(() => {
-    const targetTxs = (state.currentUser.role === 'Manager' && !state.impersonatedUserId)
-      ? state.transactions
-      : authorizedTransactions;
-    return computeTxMetrics(targetTxs, state.activeTimeframe, state.terminalFeeRate);
-  }, [authorizedTransactions, state.transactions, state.activeTimeframe, state.terminalFeeRate, state.currentUser.role, state.impersonatedUserId]);
+    // Use the already filtered authorizedHistoryTransactions to ensure synchronization
+    // Pass 'Lifetime' to computeTxMetrics as date filtering was already applied in memory
+    return computeTxMetrics(authorizedHistoryTransactions, 'Lifetime', state.terminalFeeRate);
+  }, [authorizedHistoryTransactions, state.terminalFeeRate]);
 
   // Compute Timeframe Blocks metrics for Overview Matrix items
   const summaryOverviews = useMemo(() => {
@@ -2141,9 +2276,10 @@ export default function App() {
   };
 
   // Actions for circular menu
-  const openWithPreset = (type: TransactionType) => {
+  const openWithPreset = (type: TransactionType, mode: 'Standard' | 'SplitSession' = 'Standard') => {
     setIsAddModalOpen(true);
     setPreselectedFormType(type);
+    setPreselectedMode(mode);
   };
 
   const handleExportCSV = () => {
@@ -2626,16 +2762,7 @@ export default function App() {
                     <span className="text-[8px] text-neutral-400 font-mono font-bold">SESSION</span>
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (window.confirm('Are you sure you want to log out of your manager account?')) {
-                          try {
-                            await signOut(auth);
-                            window.location.reload();
-                          } catch (err) {
-                            console.error('Failed to sign out:', err);
-                          }
-                        }
-                      }}
+                      onClick={() => setLogoutConfirmRole('Manager')}
                       className="text-[9px] font-black uppercase text-rose-600 hover:text-rose-700 flex items-center gap-0.5 cursor-pointer"
                     >
                       <LogOut className="w-2.5 h-2.5 text-rose-500" /> Logout
@@ -2678,16 +2805,7 @@ export default function App() {
                 
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (window.confirm('Are you sure you want to log out of your manager account?')) {
-                      try {
-                        await signOut(auth);
-                        window.location.reload();
-                      } catch (err) {
-                        console.error('Failed to sign out:', err);
-                      }
-                    }
-                  }}
+                  onClick={() => setLogoutConfirmRole('Manager')}
                   className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 rounded-xl text-[11px] font-black transition cursor-pointer select-none active:scale-[0.98] border border-rose-200/40 uppercase tracking-wider"
                   title="Log out of Manager Account"
                 >
@@ -2719,8 +2837,16 @@ export default function App() {
                     </span>
                   </div>
                   
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-4">
+                    {activeUser.avatar ? (
+                      <img src={activeUser.avatar} alt={activeUser.name} className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500/30" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center text-xl font-black text-emerald-400 border-2 border-emerald-500/30">
+                        {activeUser.name.charAt(0)}
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
                       <span className="inline-flex items-center gap-1 text-[9px] font-mono font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400">
                         ⚡ Cashier Station
                       </span>
@@ -2728,13 +2854,24 @@ export default function App() {
                         <span className="w-1.5 h-1.5 rounded-full bg-[#00B87A] animate-ping" /> SECURE SESSION
                       </span>
                     </div>
-                    <h2 className="text-xl font-black text-white tracking-tight mt-1">
-                      {activeUser.name}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-black text-white tracking-tight mt-1">
+                        {activeUser.name}
+                      </h2>
+                      {/* Superuser edit permission */}
+                      <button
+                        onClick={() => setEditingEmployeeFromDashboard(activeUser)}
+                        className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/40 transition cursor-pointer"
+                        title="Edit Cashier Profile"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    </div>
                     <p className="text-xs text-neutral-400 mt-0.5 font-medium">
                       Operator ID: <span className="font-mono font-bold text-emerald-400">{activeUser.phone || 'N/A'}</span>
                     </p>
                   </div>
+                </div>
                 </div>
 
                 {/* AREA OF OPERATION DISPLAY CARD - EXTREMELY PROMINENT */}
@@ -2798,16 +2935,7 @@ export default function App() {
                       <span className="text-neutral-500 font-mono font-bold">SESSION</span>
                       <button
                         type="button"
-                        onClick={async () => {
-                          if (window.confirm('Are you sure you want to log out of your cashier account?')) {
-                            try {
-                              await signOut(auth);
-                              window.location.reload();
-                            } catch (err) {
-                              console.error('Failed to sign out:', err);
-                            }
-                          }
-                        }}
+                        onClick={() => setLogoutConfirmRole('Employee')}
                         className="font-black uppercase text-rose-400 hover:text-rose-300 flex items-center gap-0.5 cursor-pointer"
                       >
                         <LogOut className="w-2.5 h-2.5 text-rose-400" /> Logout
@@ -2842,17 +2970,8 @@ export default function App() {
                     
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (window.confirm('Are you sure you want to log out of your cashier account?')) {
-                          try {
-                            await signOut(auth);
-                            window.location.reload();
-                          } catch (err) {
-                            console.error('Failed to sign out:', err);
-                          }
-                        }
-                      }}
-                      className="text-[9.5px] font-black uppercase text-rose-400 hover:text-rose-300 hover:underline transition cursor-pointer flex items-center gap-1"
+                      onClick={() => setLogoutConfirmRole('Employee')}
+                      className="text-[9px] font-black uppercase text-rose-400 hover:text-rose-300 hover:underline transition cursor-pointer flex items-center gap-1"
                     >
                       <LogOut className="w-3 h-3 text-rose-400" />
                       <span>Log Out</span>
@@ -3248,6 +3367,18 @@ export default function App() {
               <span className="text-[11px] font-bold text-neutral-700 leading-tight">Withdraw</span>
             </button>
 
+            {/* Withdraw & Send */}
+            <button 
+              onClick={() => openWithPreset('Withdrawal', 'SplitSession')}
+              className="group flex flex-col items-center gap-1.5 cursor-pointer focus:outline-none"
+            >
+              <div className="w-12 h-12 rounded-full bg-pink-100 group-hover:bg-pink-200 transition-colors flex items-center justify-center text-pink-600 shadow-sm active:scale-90 duration-100 relative">
+                <ArrowDownToLine className="w-4 h-4 stroke-[2.5]" />
+                <ArrowRightLeft className="w-3 h-3 absolute -bottom-0.5 -right-0.5 bg-white rounded-full p-0.5 shadow-xs text-pink-600" />
+              </div>
+              <span className="text-[11px] font-bold text-neutral-700 leading-tight">Withdraw & Send</span>
+            </button>
+
             {/* Wallet Deposit */}
             <button 
               onClick={() => openWithPreset('Deposit')}
@@ -3398,82 +3529,86 @@ export default function App() {
         )}
 
         {/* Active Transaction Counters & Performance */}
-        <div className="bg-white border border-neutral-200 p-5 rounded-3xl shadow-xs space-y-4 mt-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-2.5">
-            <div>
-              <h4 className="text-sm font-extrabold text-neutral-800 tracking-tight flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-[#00B87A]/10 text-[#00B87A] text-xs">📈</span>
+        <div className="bg-white border border-neutral-200 p-5 rounded-3xl shadow-sm space-y-5 mt-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-100 pb-3.5">
+            <div className="space-y-1">
+              <h4 className="text-sm font-black text-neutral-800 tracking-tight flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-emerald-50 text-[#00B87A] shadow-xs">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                </span>
                 <span>Active Transaction Counters & Performance</span>
               </h4>
-              <p className="text-[11px] text-neutral-500 font-medium">
+              <p className="text-[11px] text-neutral-500 font-semibold leading-relaxed">
                 Live performance metrics for operators showing transaction counts and volumes across time ranges.
               </p>
             </div>
-            <div className="inline-flex items-center gap-1.5 self-start sm:self-center px-2.5 py-1 rounded-full bg-emerald-50 text-[10px] font-mono font-black uppercase tracking-wider text-[#00B87A] border border-emerald-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00B87A] animate-ping" />
+            <div className="inline-flex items-center gap-1.5 self-start sm:self-center px-3 py-1 rounded-full bg-emerald-50 text-[10px] font-mono font-black uppercase tracking-wider text-[#00B87A] border border-emerald-150 shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00B87A] animate-pulse" />
               Live Ledger Synced
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               {
                 label: "Today's Activity",
                 badge: 'Daily',
                 count: summaryOverviews.daily.count,
                 volume: summaryOverviews.daily.volume,
-                bgColor: 'bg-emerald-50/40 border-emerald-100/80',
-                textColor: 'text-emerald-700',
-                countColor: 'bg-emerald-105 text-emerald-800',
-                icon: '⚡'
+                bgColor: 'bg-gradient-to-br from-emerald-50/30 via-emerald-50/5 to-white hover:from-emerald-50/45 border-neutral-200 hover:border-emerald-300 border-l-4 border-l-emerald-500',
+                textColor: 'text-emerald-700 font-black',
+                countColor: 'bg-emerald-50/80 border-emerald-100 text-emerald-700',
+                icon: <Zap className="w-3 h-3 text-emerald-500 shrink-0" />
               },
               {
                 label: 'Weekly Summary',
                 badge: 'Weekly',
                 count: summaryOverviews.weekly.count,
                 volume: summaryOverviews.weekly.volume,
-                bgColor: 'bg-blue-50/40 border-blue-100/80',
-                textColor: 'text-blue-700',
-                countColor: 'bg-blue-100 text-blue-800',
-                icon: '📅'
+                bgColor: 'bg-gradient-to-br from-blue-50/30 via-blue-50/5 to-white hover:from-blue-50/45 border-neutral-200 hover:border-blue-300 border-l-4 border-l-blue-500',
+                textColor: 'text-blue-700 font-black',
+                countColor: 'bg-blue-50/80 border-blue-100 text-blue-700',
+                icon: <Calendar className="w-3 h-3 text-blue-500 shrink-0" />
               },
               {
                 label: 'Monthly Statement',
                 badge: 'Monthly',
                 count: summaryOverviews.monthly.count,
                 volume: summaryOverviews.monthly.volume,
-                bgColor: 'bg-indigo-50/40 border-indigo-100/80',
-                textColor: 'text-indigo-700',
-                countColor: 'bg-indigo-100 text-indigo-800',
-                icon: '📊'
+                bgColor: 'bg-gradient-to-br from-indigo-50/30 via-indigo-50/5 to-white hover:from-indigo-50/45 border-neutral-200 hover:border-indigo-300 border-l-4 border-l-indigo-500',
+                textColor: 'text-indigo-700 font-black',
+                countColor: 'bg-indigo-50/80 border-indigo-100 text-indigo-700',
+                icon: <TrendingUp className="w-3 h-3 text-indigo-500 shrink-0" />
               },
               {
                 label: 'Annual Statement',
                 badge: 'Yearly',
                 count: summaryOverviews.yearly.count,
                 volume: summaryOverviews.yearly.volume,
-                bgColor: 'bg-purple-50/40 border-purple-100/80',
-                textColor: 'text-purple-700',
-                countColor: 'bg-purple-100 text-purple-800',
-                icon: '🌟'
+                bgColor: 'bg-gradient-to-br from-purple-50/30 via-purple-50/5 to-white hover:from-purple-50/45 border-neutral-200 hover:border-purple-300 border-l-4 border-l-purple-500',
+                textColor: 'text-purple-700 font-black',
+                countColor: 'bg-purple-50/80 border-purple-100 text-purple-700',
+                icon: <Sparkles className="w-3 h-3 text-purple-500 shrink-0" />
               }
             ].map((period, i) => (
               <div 
                 key={i} 
-                className={`p-3.5 rounded-2xl border ${period.bgColor} transition-all hover:shadow-xs hover:scale-[1.01] duration-150 flex flex-col justify-between space-y-2`}
+                className={`p-4 rounded-2xl border ${period.bgColor} transition-all hover:scale-[1.02] duration-200 flex flex-col justify-between space-y-4 shadow-3xs`}
               >
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-extrabold text-neutral-400 uppercase tracking-wider font-mono">
+                <div className="flex justify-between items-start gap-1.5">
+                  <span className="text-[9.5px] font-black text-neutral-400 uppercase tracking-wider leading-none mt-1">
                     {period.label}
                   </span>
-                  <span className={`text-[10px] font-mono font-black px-2 py-0.5 rounded-full ${period.countColor} flex items-center gap-1`}>
-                    <span>{period.icon}</span>
+                  <span className={`text-[10px] font-mono font-black px-2 py-0.5 rounded-lg border flex items-center gap-1 shrink-0 ${period.countColor} shadow-3xs`}>
+                    {period.icon}
                     <span>{period.count} tx{period.count === 1 ? '' : 's'}</span>
                   </span>
                 </div>
-                <div className="space-y-0.5">
-                  <span className="text-[10px] text-neutral-500 block font-medium">Accumulated Volume</span>
-                  <span className={`text-base font-black font-mono block tracking-tight ${period.textColor}`}>
+                <div className="space-y-1">
+                  <span className="text-[9px] text-neutral-400 block font-bold uppercase tracking-wider leading-none">
+                    Accumulated Volume
+                  </span>
+                  <span className={`text-base sm:text-lg font-black font-mono block tracking-tight leading-none ${period.textColor}`}>
                     {displayNaira(period.volume)}
                   </span>
                 </div>
@@ -3887,7 +4022,7 @@ export default function App() {
                     return;
                   }
                   const term: PosTerminal = {
-                    id: 'term_' + Math.random().toString(36).substring(2, 9),
+                    id: editingTerminal ? editingTerminal.id : 'term_' + Math.random().toString(36).substring(2, 9),
                     name: newTerminalName.trim(),
                     provider: newTerminalProvider,
                     posAccountNo: newTerminalAccountNo.trim(),
@@ -3895,20 +4030,30 @@ export default function App() {
                     areaOfWorking: newTerminalArea.trim(),
                     terminalFeeRate: newTerminalRate,
                     serialNumber: newTerminalSN.trim(),
-                    ownerId: state.impersonatedUserId || (syncOwnerId || 'local_owner'),
-                    employeeId: state.currentUser.role === 'Employee' ? state.currentUser.id : undefined,
-                    addedBy: state.currentUser.name,
-                    status: 'Active',
-                    timestamp: new Date().toISOString(),
+                    ownerId: editingTerminal ? editingTerminal.ownerId : (state.impersonatedUserId || (syncOwnerId || 'local_owner')),
+                    employeeId: editingTerminal ? editingTerminal.employeeId : (state.currentUser.role === 'Employee' 
+                      ? state.currentUser.id 
+                      : (newTerminalEmployeeId && newTerminalEmployeeId !== 'custom' && newTerminalEmployeeId !== 'manager_self'
+                          ? newTerminalEmployeeId 
+                          : (newTerminalEmployeeId === 'manager_self' ? state.currentUser.id : undefined))),
+                    addedBy: editingTerminal ? editingTerminal.addedBy : state.currentUser.name,
+                    status: editingTerminal ? editingTerminal.status : 'Active',
+                    timestamp: editingTerminal ? editingTerminal.timestamp : new Date().toISOString(),
                     simCardNumber: newTerminalSim.trim(),
                     networkProvider: newTerminalNetwork as any,
                     batteryLevel: newTerminalBattery,
                     signalStrength: newTerminalSignal
                   };
-                  handleAddPosTerminal(term);
+                  if (editingTerminal) {
+                    handleUpdatePosTerminal(term);
+                    setEditingTerminal(null);
+                  } else {
+                    handleAddPosTerminal(term);
+                  }
                   setNewTerminalName('');
                   setNewTerminalAccountNo('');
                   setNewTerminalCashierName('');
+                  setNewTerminalEmployeeId('');
                   setNewTerminalArea('');
                   setNewTerminalSN('');
                   setNewTerminalSim('');
@@ -3954,16 +4099,56 @@ export default function App() {
 
                   <div>
                     <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-1.5 font-mono">
-                      Name of the Cashier *
+                      Assign to Cashier Account *
                     </label>
-                    <input
-                      type="text"
-                      value={newTerminalCashierName}
-                      onChange={(e) => setNewTerminalCashierName(e.target.value)}
-                      placeholder="e.g. Chinedu Okafor"
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
-                      required
-                    />
+                    {state.currentUser.role === 'Manager' ? (
+                      <div className="space-y-2">
+                        <select
+                          value={newTerminalEmployeeId}
+                          onChange={(e) => {
+                            const empId = e.target.value;
+                            setNewTerminalEmployeeId(empId);
+                            if (empId === 'manager_self') {
+                              setNewTerminalCashierName(state.currentUser.name);
+                            } else if (empId === 'custom') {
+                              setNewTerminalCashierName('');
+                            } else {
+                              const emp = state.availableEmployees.find(u => u.id === empId);
+                              setNewTerminalCashierName(emp ? emp.name : '');
+                            }
+                          }}
+                          className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A]"
+                          required
+                        >
+                          <option value="">-- Choose Cashier Account --</option>
+                          <option value="manager_self">Myself (Manager: {state.currentUser.name})</option>
+                          {state.availableEmployees.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              👤 {emp.name} ({emp.email || 'No email'})
+                            </option>
+                          ))}
+                          <option value="custom">✍️ Unlinked Cashier (Type custom name...)</option>
+                        </select>
+                        {(newTerminalEmployeeId === 'custom' || newTerminalEmployeeId === '') && (
+                          <input
+                            type="text"
+                            value={newTerminalCashierName}
+                            onChange={(e) => setNewTerminalCashierName(e.target.value)}
+                            placeholder="Type Name of the Cashier manually"
+                            className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-800 font-bold focus:outline-none focus:border-[#00B87A] animate-in fade-in duration-200"
+                            required
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value={newTerminalCashierName}
+                        disabled
+                        className="w-full bg-neutral-100 border border-neutral-200 rounded-xl px-3.5 py-2.5 text-xs text-neutral-500 font-bold cursor-not-allowed"
+                        required
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -4029,7 +4214,7 @@ export default function App() {
                 <div className="flex justify-end gap-2.5 pt-2">
                   <button
                     type="button"
-                    onClick={() => setIsAddingTerminal(false)}
+                    onClick={() => { setIsAddingTerminal(false); setEditingTerminal(null); }}
                     className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs font-bold text-neutral-600 transition"
                   >
                     Cancel
@@ -4082,6 +4267,14 @@ export default function App() {
                       <span className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold ${brandColors[currentBrand]}`}>
                         {term.provider} ({term.terminalFeeRate}%)
                       </span>
+                      {state.currentUser.role === 'Manager' && (
+                        <button
+                          onClick={() => startEditing(term)}
+                          className="text-[9px] bg-neutral-100 hover:bg-neutral-200 text-neutral-600 px-2 py-0.5 rounded font-bold"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 text-xs bg-neutral-50/70 p-3 rounded-2xl border border-neutral-100">
@@ -4457,7 +4650,11 @@ export default function App() {
             timeframe={state.activeTimeframe}
             dailyTarget={state.dailyTarget}
             onSetDailyTarget={(val) => dispatch({ type: 'SET_DAILY_TARGET', payload: val })}
-            onOpenAddModal={() => setIsAddModalOpen(true)}
+            onOpenAddModal={(mode) => {
+              if (mode) setPreselectedMode(mode);
+              else setPreselectedMode('Standard');
+              setIsAddModalOpen(true);
+            }}
             isManager={activeUser.role === 'Manager'}
             language={state.settings?.language || 'en'}
           />
@@ -4479,14 +4676,14 @@ export default function App() {
 
           {/* 11. OPAY PROVIDER BREAKDOWN CHART */}
           <ProviderBreakdown 
-            transactions={authorizedTransactions} 
+            transactions={authorizedHistoryTransactions} 
             terminalFeeRate={state.terminalFeeRate}
             settings={state.settings}
           />
 
           {/* 12. DYNAMIC TREND ANALYTICS */}
           <TrendChart 
-            transactions={authorizedTransactions}
+            transactions={authorizedHistoryTransactions}
             terminalFeeRate={state.terminalFeeRate}
             chartStyle={state.settings?.chartStyle}
           />
@@ -4498,15 +4695,24 @@ export default function App() {
         <div ref={historySectionRef}>
           <TransactionList
             currentUser={state.currentUser}
-            transactions={authorizedTransactions}
+            transactions={authorizedHistoryTransactions}
+            historyFilter={state.historyFilter}
+            onSetHistoryFilter={(f) => dispatch({ type: 'SET_HISTORY_FILTER', payload: f })}
             onDeleteTransaction={handleDeleteTransaction}
             onEditTransaction={setEditingTransaction}
             onViewReceipt={setSelectedReceiptTx}
             onUpdateTransaction={handleUpdateTransaction}
+            onSplitTransaction={setSplittingTransaction}
             onBulkDeleteTransactions={handleBulkDeleteTransactions}
             onBulkUpdateTransactions={handleBulkUpdateTransactions}
             settings={state.settings}
             onOpenSettings={() => setIsSettingsModalOpen(true)}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            typeFilter={typeFilter}
+            setTypeFilter={setTypeFilter}
+            providerFilter={providerFilter}
+            setProviderFilter={setProviderFilter}
           />
         </div>
         )}
@@ -4599,11 +4805,14 @@ export default function App() {
           availableEmployees={availableEmployees}
           terminalFeeRate={state.terminalFeeRate}
           initialType={preselectedFormType}
+          initialMode={preselectedMode}
           onSave={(tx) => {
             if (Array.isArray(tx)) {
               tx.forEach(t => handleAddTransaction(t));
+              showAppNotification(`Successfully recorded ${tx.length} transactions.`, 'success');
             } else {
               handleAddTransaction(tx);
+              showAppNotification(`Transaction recorded successfully.`, 'success');
             }
             setIsAddModalOpen(false);
           }}
@@ -4622,14 +4831,26 @@ export default function App() {
           onSave={(tx) => {
             if (Array.isArray(tx)) {
               tx.forEach(t => handleUpdateTransaction(t));
+              showAppNotification(`Successfully updated ${tx.length} transactions.`, 'success');
             } else {
               handleUpdateTransaction(tx as Transaction);
+              showAppNotification(`Transaction updated successfully.`, 'success');
             }
             setEditingTransaction(null);
           }}
           onClose={() => setEditingTransaction(null)}
           settings={state.settings}
           posTerminals={state.posTerminals}
+        />
+      )}
+
+      {splittingTransaction && (
+        <TransactionSplitter
+          parentTransaction={splittingTransaction}
+          currentUser={state.currentUser}
+          settings={state.settings}
+          onClose={() => setSplittingTransaction(null)}
+          onSave={handleSplitSave}
         />
       )}
 
@@ -4698,6 +4919,55 @@ export default function App() {
           }}
           onClose={() => setEditingEmployeeFromDashboard(null)}
         />
+      )}
+
+      {/* 16.5. SECURE STATE-BASED LOGOUT CONFIRMATION MODAL (Bypasses iframe alert blocks) */}
+      {logoutConfirmRole && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-neutral-200 p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3.5 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl shrink-0">
+                <LogOut className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-neutral-900 tracking-tight">Confirm Log Out</h3>
+                <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-rose-500 mt-0.5">Secure Session Termination</p>
+              </div>
+            </div>
+            
+            <p className="text-xs text-neutral-500 font-semibold leading-relaxed">
+              Are you sure you want to log out of your <strong className="text-neutral-800 font-bold">{logoutConfirmRole === 'Manager' ? 'Manager Control Center' : 'Cashier Station'}</strong>? You will need to enter your passcode or PIN to access this terminal again.
+            </p>
+            
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setLogoutConfirmRole(null)}
+                className="w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black text-xs uppercase tracking-widest py-3 rounded-2xl transition active:scale-[0.98] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setLogoutConfirmRole(null);
+                    // Explicitly flag terminal as locked in localStorage
+                    localStorage.setItem('OPay_Terminal_Locked', 'true');
+                    setIsLocked(true);
+                    await signOut(auth);
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Failed to sign out:', err);
+                  }
+                }}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-widest py-3 rounded-2xl shadow-md shadow-rose-600/10 transition active:scale-[0.98] cursor-pointer"
+              >
+                Yes, Log Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 17. HIGH-FIDELITY DIGITAL E-RECEIPT MODAL (Tailored for OPay, Moniepoint, PalmPay) */}
@@ -4874,6 +5144,38 @@ export default function App() {
                     </div>
                   )}
 
+                  {(selectedReceiptTx.customerName || selectedReceiptTx.customerAccountNumber || selectedReceiptTx.customerPhone) && (
+                    <div className="border-t border-dashed border-neutral-200 pt-2.5 space-y-2">
+                      <div className="text-[9px] text-neutral-400 font-black tracking-widest uppercase">
+                        Customer Details
+                      </div>
+                      {selectedReceiptTx.customerName && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-neutral-400 text-[10px] uppercase font-bold tracking-wider">Acct Name</span>
+                          <span className="text-neutral-800 font-extrabold text-right uppercase">
+                            {selectedReceiptTx.customerName}
+                          </span>
+                        </div>
+                      )}
+                      {selectedReceiptTx.customerAccountNumber && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-neutral-400 text-[10px] uppercase font-bold tracking-wider">Acct Number</span>
+                          <span className="text-neutral-800 font-extrabold font-mono text-right select-all">
+                            {selectedReceiptTx.customerAccountNumber}
+                          </span>
+                        </div>
+                      )}
+                      {selectedReceiptTx.customerPhone && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-neutral-400 text-[10px] uppercase font-bold tracking-wider">Phone No</span>
+                          <span className="text-neutral-800 font-extrabold font-mono text-right select-all">
+                            {selectedReceiptTx.customerPhone}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="border-t border-neutral-200 pt-3 flex justify-between items-center text-sm">
                     <span className="text-neutral-500 font-sans font-bold">Transaction Amount</span>
                     <span className="font-extrabold text-neutral-900 font-mono text-base">
@@ -5023,9 +5325,9 @@ export default function App() {
 
             {/* Settlement Calculations & Presets */}
             {(() => {
-              const totalTarget = carouselSettlingTx.originalFeeAmount !== undefined 
+              const totalTarget = (carouselSettlingTx.originalFeeAmount !== undefined && carouselSettlingTx.originalFeeAmount > 0)
                 ? carouselSettlingTx.originalFeeAmount 
-                : (carouselSettlingTx.customerFee || 200);
+                : (carouselSettlingTx.unpaidFeeAmount || carouselSettlingTx.customerFee || 200);
               const prevPaid = carouselSettlingTx.chargesPaidAmount || 0;
               const remainingUnpaid = Math.max(0, totalTarget - prevPaid);
               
@@ -5036,18 +5338,18 @@ export default function App() {
               return (
                 <div className="space-y-4">
                   {/* Financial Grid */}
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
-                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Total Debt</span>
-                      <span className="font-black text-neutral-800 font-mono">{formatNaira(totalTarget)}</span>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                      <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Total Debt</span>
+                      <span className="text-sm font-black text-neutral-800 font-mono">{formatNaira(totalTarget)}</span>
                     </div>
-                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
-                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Paid Prior</span>
-                      <span className="font-black text-emerald-600 font-mono">{formatNaira(prevPaid)}</span>
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                      <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Paid Prior</span>
+                      <span className="text-sm font-black text-emerald-600 font-mono">{formatNaira(prevPaid)}</span>
                     </div>
-                    <div className="bg-neutral-50 border border-neutral-200/50 p-2 rounded-xl">
-                      <span className="text-[8px] text-neutral-400 font-mono uppercase font-bold block">Current Bal</span>
-                      <span className="font-black text-red-600 font-mono">{formatNaira(remainingUnpaid)}</span>
+                    <div className="bg-neutral-50 border border-neutral-200/50 p-2.5 rounded-xl shadow-inner">
+                      <span className="text-[9px] text-neutral-400 font-mono uppercase font-bold block">Current Bal</span>
+                      <span className="text-sm font-black text-red-600 font-mono">{formatNaira(remainingUnpaid)}</span>
                     </div>
                   </div>
 
@@ -5077,7 +5379,7 @@ export default function App() {
                       <input
                         id="carousel-settle-amount"
                         type="number"
-                        value={carouselSettleAmount}
+                        value={carouselSettleAmount === '0' ? '' : carouselSettleAmount}
                         onChange={(e) => setCarouselSettleAmount(e.target.value)}
                         className="w-full bg-white border-2 border-emerald-500 focus:border-emerald-600 rounded-xl pl-7 pr-3 py-2 text-neutral-850 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-emerald-500/10"
                         placeholder="Enter amount paid now"
@@ -5177,9 +5479,9 @@ export default function App() {
                     <button
                       type="button"
                       onClick={async () => {
-                        const originalFee = carouselSettlingTx.originalFeeAmount !== undefined 
+                        const originalFee = (carouselSettlingTx.originalFeeAmount !== undefined && carouselSettlingTx.originalFeeAmount > 0)
                           ? carouselSettlingTx.originalFeeAmount 
-                          : (carouselSettlingTx.customerFee || 200);
+                          : (carouselSettlingTx.unpaidFeeAmount || carouselSettlingTx.customerFee || 200);
                         
                         const totalPaid = prevPaid + currentPayment;
                         const remaining = Math.max(0, originalFee - totalPaid);

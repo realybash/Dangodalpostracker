@@ -616,7 +616,7 @@ export function TransactionExplorer({
                   <td class="profit-green">₦${(tx.profit || 0).toLocaleString()}</td>
                   <td>
                     <span class="status-badge badge-${(tx.status || 'Success').toLowerCase() === 'pending' ? 'pending' : (tx.status || 'Success').toLowerCase() === 'failed' ? 'failed' : 'success'}">
-                      ${tx.status || 'Success'}
+                      ${(tx.status || 'Success') === 'Failed' ? 'Decline' : (tx.status || 'Success')}
                     </span>
                   </td>
                   <td>${tx.employeeName || 'System'}</td>

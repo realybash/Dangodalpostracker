@@ -29,7 +29,8 @@ import {
   Trash2,
   ListFilter,
   PieChart,
-  Building2
+  Building2,
+  History
 } from 'lucide-react';
 
 const getProviderStyle = (provider: string) => {
@@ -102,7 +103,7 @@ export function UnpaidChargesLedger({
   const [settleFeeMethod, setSettleFeeMethod] = useState<'Cash' | 'CardDebit'>('Cash');
 
   // New Grouped/Gathered Debtors view state
-  const [viewMode, setViewMode] = useState<'grouped' | 'individual'>('grouped');
+  const [viewMode, setViewMode] = useState<'grouped' | 'individual' | 'history'>('grouped');
   const [editingCustomerName, setEditingCustomerName] = useState<string | null>(null);
   const [portfolioTxs, setPortfolioTxs] = useState<Transaction[]>([]);
   const [showAddTxForm, setShowAddTxForm] = useState(false);
@@ -125,10 +126,10 @@ export function UnpaidChargesLedger({
 
   useEffect(() => {
     if (settlingTx) {
-      const orig = settlingTx.originalFeeAmount !== undefined ? settlingTx.originalFeeAmount : (settlingTx.customerFee || 200);
-      const remaining = settlingTx.unpaidFeeAmount !== undefined ? settlingTx.unpaidFeeAmount : orig;
+      const orig = (settlingTx.originalFeeAmount !== undefined && settlingTx.originalFeeAmount > 0) ? settlingTx.originalFeeAmount : (settlingTx.unpaidFeeAmount || settlingTx.customerFee || 200);
+      const remaining = (settlingTx.unpaidFeeAmount !== undefined && settlingTx.unpaidFeeAmount > 0) ? settlingTx.unpaidFeeAmount : orig;
       setSettleFeeInput(orig.toString());
-      setSettleAmountPaid(remaining.toString());
+      setSettleAmountPaid(remaining > 0 ? remaining.toString() : '');
       setSettleFeeMethod(settlingTx.feeMethod || 'Cash');
       
       const tzOffset = new Date().getTimezoneOffset() * 60000;
@@ -267,6 +268,81 @@ export function UnpaidChargesLedger({
       .sort((a, b) => b.total - a.total);
   }, [unpaidTransactions, stats.totalDebt]);
 
+  // Aggregate all historical debt payments across all transactions in the system
+  const allDebtPayments = useMemo(() => {
+    const list: Array<{
+      txId: string;
+      txAmount: number;
+      txType: string;
+      txProvider: string;
+      customerName: string;
+      customerPhone?: string;
+      paymentId: string;
+      date: string;
+      amount: number;
+      collectorName: string;
+      note: string;
+    }> = [];
+
+    transactions.forEach((tx) => {
+      if (tx.chargePayments && tx.chargePayments.length > 0) {
+        tx.chargePayments.forEach((pay) => {
+          list.push({
+            txId: tx.id,
+            txAmount: tx.amount,
+            txType: tx.type,
+            txProvider: tx.provider || 'Others',
+            customerName: tx.customerName || 'Walk-in Client',
+            customerPhone: tx.customerPhone,
+            paymentId: pay.id,
+            date: pay.date,
+            amount: pay.amount,
+            collectorName: pay.collectorName,
+            note: pay.note
+          });
+        });
+      }
+    });
+
+    // Sort by date descending (newest payment first)
+    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions]);
+
+  // Compute stats for debt payment history
+  const historyStats = useMemo(() => {
+    const totalRecovered = allDebtPayments.reduce((sum, p) => sum + p.amount, 0);
+    const count = allDebtPayments.length;
+    const avgRecovery = count > 0 ? totalRecovered / count : 0;
+    
+    // Unique customers who paid
+    const uniquePayees = new Set(allDebtPayments.map(p => p.customerName.toLowerCase().trim()));
+    
+    return {
+      totalRecovered,
+      count,
+      avgRecovery,
+      uniquePayeesCount: uniquePayees.size
+    };
+  }, [allDebtPayments]);
+
+  // Filter history by search query
+  const filteredHistory = useMemo(() => {
+    let list = allDebtPayments;
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        pay => 
+          pay.customerName.toLowerCase().includes(q) ||
+          (pay.customerPhone && pay.customerPhone.includes(q)) ||
+          pay.collectorName.toLowerCase().includes(q) ||
+          pay.note.toLowerCase().includes(q) ||
+          pay.txType.toLowerCase().includes(q) ||
+          pay.txProvider.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [allDebtPayments, searchQuery]);
+
   // Search and timeperiod filter
   const filteredUnpaid = useMemo(() => {
     let list = unpaidTransactions;
@@ -347,9 +423,9 @@ export function UnpaidChargesLedger({
 
   // Quick Settle - Mark as Fully Paid directly with one click (great for managers)
   const handleQuickMarkAsPaid = (tx: Transaction) => {
-    const remainingAmount = tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : (tx.customerFee || 0);
+    const remainingAmount = (tx.unpaidFeeAmount !== undefined && tx.unpaidFeeAmount > 0) ? tx.unpaidFeeAmount : (tx.customerFee || 200);
     if (confirm(`Are you sure you want to mark this debt of ₦${remainingAmount.toLocaleString()} for ${tx.customerName || 'Walk-in Customer'} as FULLY PAID?`)) {
-      const originalFee = tx.originalFeeAmount !== undefined ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined ? tx.unpaidFeeAmount : tx.customerFee);
+      const originalFee = (tx.originalFeeAmount !== undefined && tx.originalFeeAmount > 0) ? tx.originalFeeAmount : (tx.unpaidFeeAmount !== undefined && tx.unpaidFeeAmount > 0 ? tx.unpaidFeeAmount : tx.customerFee || 200);
       const prevPaid = tx.chargesPaidAmount || 0;
       const totalPaidSoFar = prevPaid + remainingAmount;
       
@@ -863,7 +939,7 @@ export function UnpaidChargesLedger({
       )}
 
       {/* Search and Filters */}
-      {stats.debtorCount > 0 && (
+      {(stats.debtorCount > 0 || allDebtPayments.length > 0) && (
         <div className="space-y-4">
           <div className="flex bg-neutral-100 p-1 rounded-xl">
             <button
@@ -890,14 +966,26 @@ export function UnpaidChargesLedger({
               <ListFilter className="w-4 h-4 text-neutral-500" />
               <span>Individual Debts ({filteredUnpaid.length})</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('history')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                viewMode === 'history'
+                  ? 'bg-white text-neutral-850 shadow-sm font-black'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <History className="w-4 h-4 text-emerald-600" />
+              <span>Debts History ({allDebtPayments.length})</span>
+            </button>
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-neutral-500 font-medium">
             <span>
               Showing <strong className="font-extrabold text-neutral-800 font-mono">
-                {viewMode === 'grouped' ? groupedAccounts.length : filteredUnpaid.length}
-              </strong> {viewMode === 'grouped' ? 'gathered customer account' : 'transaction'}{viewMode === 'grouped' ? (groupedAccounts.length === 1 ? '' : 's') : (filteredUnpaid.length === 1 ? '' : 's')}{' '}
-              {timePeriod !== 'all' ? (
+                {viewMode === 'grouped' ? groupedAccounts.length : (viewMode === 'individual' ? filteredUnpaid.length : filteredHistory.length)}
+              </strong> {viewMode === 'grouped' ? 'gathered customer account' : (viewMode === 'individual' ? 'transaction' : 'settlement payment log')}{viewMode === 'grouped' ? (groupedAccounts.length === 1 ? '' : 's') : (viewMode === 'individual' ? (filteredUnpaid.length === 1 ? '' : 's') : (filteredHistory.length === 1 ? '' : 's'))}{' '}
+              {viewMode !== 'history' && timePeriod !== 'all' ? (
                 <span>for the <strong className="text-amber-600 capitalize">{timePeriod}</strong> period</span>
               ) : (
                 'in total'
@@ -912,7 +1000,13 @@ export function UnpaidChargesLedger({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-neutral-50 border border-neutral-200 focus:border-amber-500 hover:border-neutral-300 focus:outline-none rounded-xl pl-9 pr-3 py-2.5 text-xs text-neutral-850 font-bold transition-all"
-              placeholder={viewMode === 'grouped' ? "Search folders by Customer Name or Phone..." : "Search outstanding debts by Customer Name, Phone, or Employee..."}
+              placeholder={
+                viewMode === 'grouped'
+                  ? "Search folders by Customer Name or Phone..."
+                  : viewMode === 'individual'
+                  ? "Search outstanding debts by Customer Name, Phone, or Employee..."
+                  : "Search payment logs by customer, collector, note, type..."
+              }
             />
             {searchQuery && (
               <button
@@ -925,7 +1019,7 @@ export function UnpaidChargesLedger({
             )}
           </div>
 
-          {viewMode === 'grouped' ? (
+          {viewMode === 'grouped' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
               {groupedAccounts.map((account) => {
                 const types = Array.from(new Set(account.transactions.map(t => t.type)));
@@ -990,7 +1084,9 @@ export function UnpaidChargesLedger({
                 </div>
               )}
             </div>
-          ) : (
+          )}
+
+          {viewMode === 'individual' && (
             /* Unpaid Debt List Rows */
             <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
               {filteredUnpaid.map((tx) => {
@@ -1116,6 +1212,113 @@ export function UnpaidChargesLedger({
                   No unpaid charges match your search query.
                 </div>
               )}
+            </div>
+          )}
+
+          {/* New viewMode === 'history' tab section */}
+          {viewMode === 'history' && (
+            <div className="space-y-4">
+              {/* History Stats Bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 bg-emerald-50/40 border border-emerald-200/50 rounded-2xl">
+                  <span className="text-[9px] text-neutral-400 font-mono font-bold uppercase tracking-wider block">
+                    Total Recovered
+                  </span>
+                  <span className="text-base font-black text-emerald-600 font-mono leading-none block mt-1.5 font-mono">
+                    {formatNaira(historyStats.totalRecovered)}
+                  </span>
+                </div>
+                <div className="p-3.5 bg-neutral-50 border border-neutral-200/50 rounded-2xl">
+                  <span className="text-[9px] text-neutral-400 font-mono font-bold uppercase tracking-wider block">
+                    Settlements Count
+                  </span>
+                  <span className="text-base font-black text-neutral-850 font-mono leading-none block mt-1.5 font-mono">
+                    {historyStats.count} {historyStats.count === 1 ? 'Record' : 'Records'}
+                  </span>
+                </div>
+                <div className="p-3.5 bg-neutral-50 border border-neutral-200/50 rounded-2xl">
+                  <span className="text-[9px] text-neutral-400 font-mono font-bold uppercase tracking-wider block">
+                    Avg Settlement Size
+                  </span>
+                  <span className="text-base font-black text-neutral-850 font-mono leading-none block mt-1.5 font-mono">
+                    {formatNaira(historyStats.avgRecovery)}
+                  </span>
+                </div>
+                <div className="p-3.5 bg-neutral-50 border border-neutral-200/50 rounded-2xl">
+                  <span className="text-[9px] text-neutral-400 font-mono font-bold uppercase tracking-wider block">
+                    Unique Payees
+                  </span>
+                  <span className="text-base font-black text-neutral-850 font-mono leading-none block mt-1.5 font-mono">
+                    {historyStats.uniquePayeesCount} {historyStats.uniquePayeesCount === 1 ? 'Customer' : 'Customers'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Payments History List */}
+              <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
+                {filteredHistory.map((item, index) => {
+                  const pStyles = getProviderStyle(item.txProvider);
+                  const payDate = new Date(item.date).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  });
+
+                  return (
+                    <div
+                      key={item.paymentId || index}
+                      id={`debt-history-item-${item.paymentId}`}
+                      className="p-3.5 bg-white border border-neutral-200/80 hover:border-neutral-300 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition hover:shadow-sm"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-xs text-neutral-850">
+                            {item.customerName}
+                          </span>
+                          {item.customerPhone && (
+                            <span className="text-[10px] text-neutral-400 font-mono font-bold">
+                              📞 {item.customerPhone}
+                            </span>
+                          )}
+                          <span className={`text-[8.5px] font-mono font-black uppercase px-2 py-0.5 rounded-full border ${pStyles.badge}`}>
+                            {item.txProvider} {item.txType}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-mono">
+                          <span>Paid: <strong className="text-emerald-600 font-black font-mono">{formatNaira(item.amount)}</strong></span>
+                          <span>•</span>
+                          <span>Collector: <strong className="text-neutral-700 font-bold">{item.collectorName}</strong></span>
+                          <span>•</span>
+                          <span>{payDate}</span>
+                        </div>
+                        {item.note && (
+                          <div className="text-[10px] text-neutral-500 italic flex items-start gap-1 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-100 max-w-full">
+                            <span>📝</span>
+                            <span className="truncate">{item.note}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="shrink-0 flex sm:flex-col items-end gap-1 text-right w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-neutral-100 justify-between">
+                        <div className="text-[10px] text-neutral-400 font-mono">
+                          Tx Principal
+                        </div>
+                        <div className="font-mono font-extrabold text-neutral-800 text-xs font-mono">
+                          {formatNaira(item.txAmount)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredHistory.length === 0 && (
+                  <div className="text-center py-10 text-xs text-neutral-400 font-bold bg-neutral-50 border border-dashed rounded-2xl">
+                    No matching payment logs found in debt history.
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1263,7 +1466,7 @@ export function UnpaidChargesLedger({
                           <input
                             id="settle-amount-paid-input"
                             type="number"
-                            value={settleAmountPaid}
+                            value={settleAmountPaid === '0' ? '' : settleAmountPaid}
                             onChange={(e) => {
                               const val = e.target.value;
                               setSettleAmountPaid(val);
@@ -1364,21 +1567,7 @@ export function UnpaidChargesLedger({
                 );
               })()}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Custom Payment Date */}
-                <div className="space-y-1.5">
-                  <label htmlFor="settle-payment-date" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                    📅 Date & Time Paid (Exactly)
-                  </label>
-                  <input
-                    id="settle-payment-date"
-                    type="datetime-local"
-                    value={settlePaymentDate}
-                    onChange={(e) => setSettlePaymentDate(e.target.value)}
-                    className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2 text-neutral-850 font-mono text-xs font-medium focus:outline-none"
-                  />
-                </div>
-
+              <div className="grid grid-cols-1 gap-3.5">
                 {/* Custom Payment Notes */}
                 <div className="space-y-1.5">
                   <label htmlFor="settle-payment-note" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
@@ -1471,7 +1660,7 @@ export function UnpaidChargesLedger({
                   const adjustedTotalTarget = parseFloat(settleFeeInput) || 0;
                   const currentPayment = parseFloat(settleAmountPaid) || 0;
                   
-                  const originalFee = settlingTx.originalFeeAmount !== undefined ? settlingTx.originalFeeAmount : (settlingTx.unpaidFeeAmount !== undefined ? settlingTx.unpaidFeeAmount : settlingTx.customerFee);
+                  const originalFee = (settlingTx.originalFeeAmount !== undefined && settlingTx.originalFeeAmount > 0) ? settlingTx.originalFeeAmount : (settlingTx.unpaidFeeAmount !== undefined && settlingTx.unpaidFeeAmount > 0 ? settlingTx.unpaidFeeAmount : settlingTx.customerFee || 200);
                   const prevPaid = settlingTx.chargesPaidAmount || 0;
                   const totalPaidSoFar = prevPaid + currentPayment;
                   

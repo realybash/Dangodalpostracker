@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
 import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
-import { X, Sparkles, Check, Info, Mic, MicOff, Plus, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search, Globe, Wifi } from 'lucide-react';
+import { X, Sparkles, Check, Info, Mic, MicOff, Plus, PlusCircle, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search, Globe, Wifi, Banknote, Building2, UserCircle, Download, ArrowUpRight, Cpu, Zap, Receipt } from 'lucide-react';
 
 // @ts-ignore
 import moniepointPosImg from '../assets/images/moniepoint_pos_1784102666214.jpg';
@@ -166,6 +166,7 @@ interface TransactionFormProps {
   onSave: (newTx: Transaction | Transaction[]) => void;
   onClose: () => void;
   initialType?: TransactionType;
+  initialMode?: 'Standard' | 'SplitSession';
   initialTransaction?: Transaction;
   settings?: AppSettings;
   posTerminals?: PosTerminal[];
@@ -178,6 +179,7 @@ export function TransactionForm({
   onSave,
   onClose,
   initialType,
+  initialMode = 'Standard',
   initialTransaction,
   settings,
   posTerminals
@@ -275,11 +277,20 @@ export function TransactionForm({
     }
   }, [withdrawChargeMode, type]);
 
-  const [mode, setMode] = useState<'Standard' | 'SplitWithdrawal'>(
-    initialTransaction?.mode || 'Standard'
+  const [mode, setMode] = useState<'Standard' | 'SplitSession'>(
+    initialTransaction?.mode === 'SplitSession' ? 'SplitSession' : initialMode
+  );
+  const [sourceType, setSourceType] = useState<TransactionType>(
+    initialTransaction?.sourceType || 'Withdrawal'
+  );
+  const [distributionType, setDistributionType] = useState<TransactionType>(
+    initialTransaction?.distributionType || 'Transfer'
+  );
+  const [distributionProvider, setDistributionProvider] = useState<ProviderType>(
+    initialTransaction?.distributionProvider || settings?.defaultProvider || 'OPay'
   );
   const [subTransfers, setSubTransfers] = useState<SubTransfer[]>(
-    initialTransaction?.subTransfers || []
+    initialTransaction?.subTransfers || (initialMode === 'SplitSession' ? [{ recipientName: '', accountNumber: '', amount: 0 }] : [])
   );
   const [remainingBalance, setRemainingBalance] = useState<number>(
     initialTransaction?.remainingBalance || 0
@@ -289,6 +300,9 @@ export function TransactionForm({
   );
   const [customerName, setCustomerName] = useState<string>(
     initialTransaction ? (initialTransaction.customerName || '') : ''
+  );
+  const [customerAccountNumber, setCustomerAccountNumber] = useState<string>(
+    initialTransaction ? (initialTransaction.customerAccountNumber || '') : ''
   );
   const [isFeeWaived, setIsFeeWaived] = useState<boolean>(
     initialTransaction ? initialTransaction.customerFee === 0 : false
@@ -385,14 +399,70 @@ export function TransactionForm({
       : ''
   );
 
+  // Derived values for Withdrawal Calculations (Memoized for efficiency)
+  const withdrawalDetails = useMemo(() => {
+    const rawAmt = amount;
+    const fee = customerFee;
+    
+    let baseCash = rawAmt;
+    let cardSwipe = rawAmt;
+    let cashHandout = rawAmt;
+    let separateCashFee = 0;
+    
+    if (type === 'Withdrawal' || type === 'Money Received' || (type === 'Transfer' && mode === 'SplitSession')) {
+      if (type === 'Withdrawal') {
+        if (withdrawScenario === 'CashHandout') {
+          baseCash = rawAmt;
+          if (withdrawChargeMode === 'CardAddOn') {
+            cardSwipe = rawAmt + fee;
+            cashHandout = rawAmt;
+          } else if (withdrawChargeMode === 'SeparateCash') {
+            cardSwipe = rawAmt;
+            cashHandout = rawAmt;
+            separateCashFee = fee;
+          } else { // DeductFromCash
+            cardSwipe = rawAmt;
+            cashHandout = Math.max(0, rawAmt - fee);
+          }
+        } else { // CardSwipe
+          cardSwipe = rawAmt;
+          if (withdrawChargeMode === 'CardAddOn') {
+            baseCash = Math.max(0, rawAmt - fee);
+            cashHandout = baseCash;
+          } else if (withdrawChargeMode === 'SeparateCash') {
+            baseCash = rawAmt;
+            cashHandout = rawAmt;
+            separateCashFee = fee;
+          } else { // DeductFromCash
+            baseCash = rawAmt;
+            cashHandout = Math.max(0, rawAmt - fee);
+          }
+        }
+      } else {
+        // For Money Received or Transfer Inflows in Split Mode
+        // We assume 'SeparateCash' or 'DeductFromCash' logic applies to service fee
+        cardSwipe = 0; // Not a card transaction
+        if (withdrawChargeMode === 'SeparateCash') {
+          cashHandout = rawAmt;
+          separateCashFee = fee;
+        } else {
+          cashHandout = Math.max(0, rawAmt - fee);
+        }
+      }
+    }
+    
+    return { baseCash, cardSwipe, cashHandout, separateCashFee };
+  }, [amount, customerFee, type, withdrawScenario, withdrawChargeMode]);
+
   useEffect(() => {
-    if (mode === 'SplitWithdrawal') {
+    if (mode === 'SplitSession') {
       const totalSubAmount = subTransfers.reduce((sum, st) => sum + st.amount, 0);
-      setRemainingBalance(amount - totalSubAmount - customerFee);
+      // Remaining balance is derived from the actual physical cash available after the withdrawal
+      setRemainingBalance(withdrawalDetails.cashHandout - totalSubAmount);
     } else {
       setRemainingBalance(0);
     }
-  }, [amount, subTransfers, mode, customerFee]);
+  }, [withdrawalDetails.cashHandout, subTransfers, mode]);
 
   // Sync destination bank to provider if network is locked (Prevents Cashier Fraud/Mismatch)
   useEffect(() => {
@@ -469,7 +539,7 @@ export function TransactionForm({
     const activeTerminal = posTerminals?.find(t => t.id === selectedTerminalId);
     
     // Use derived values from the dynamic Withdrawal Calculator
-    const { baseCash, cardSwipe, cashHandout } = getWithdrawalDetails();
+    const { baseCash, cardSwipe, cashHandout } = withdrawalDetails;
 
     const actualAmount = type === 'Withdrawal' ? cardSwipe : amount;
 
@@ -531,14 +601,18 @@ export function TransactionForm({
       timestamp: customTimestamp,
       notes: finalNotes.trim() || undefined,
       customerPhone: customerPhone.trim() || undefined,
+      customerName: customerName.trim() || undefined,
+      customerAccountNumber: customerAccountNumber.trim() || undefined,
       status: finalStatus,
       mode,
+      sourceType,
+      distributionType,
+      distributionProvider,
       subTransfers,
       remainingBalance,
       chargesStatus,
-      customerName: (chargesStatus === 'Unpaid' || chargesStatus === 'PartiallyPaid') ? customerName.trim() : undefined,
       unpaidFeeAmount,
-      originalFeeAmount: initialTransaction?.originalFeeAmount !== undefined ? initialTransaction.originalFeeAmount : (chargesStatus === 'Unpaid' ? actualCustomerFee : undefined),
+      originalFeeAmount: initialTransaction?.originalFeeAmount !== undefined ? initialTransaction.originalFeeAmount : (chargesStatus === 'Unpaid' ? customerFee : undefined),
       chargesPaidAmount: initialTransaction?.chargesPaidAmount !== undefined ? initialTransaction.chargesPaidAmount : (chargesStatus === 'Unpaid' ? 0 : undefined),
       chargePayments: initialTransaction?.chargePayments !== undefined ? initialTransaction.chargePayments : (chargesStatus === 'Unpaid' ? [] : undefined),
       terminalId: selectedTerminalId || undefined,
@@ -567,11 +641,65 @@ export function TransactionForm({
   const executeFinalSave = (finalStatus: 'Success' | 'Failed') => {
     const savedTx = getTransactionObject(finalStatus);
     
-    if (basket.length > 0) {
-      onSave([...basket, savedTx]);
-    } else {
-      onSave(savedTx);
-    }
+    // Helper to expand a transaction if it's a split session
+    const expandTx = (tx: Transaction): Transaction[] => {
+      if (tx.mode === 'SplitSession' && tx.subTransfers && tx.subTransfers.length > 0) {
+        const baseTime = new Date(tx.timestamp).getTime();
+        
+        const children: Transaction[] = tx.subTransfers
+          .filter(st => st.amount > 0)
+          .map((st, index) => {
+            // Give children later timestamps than the parent (T + 1s, T + 2s, etc.)
+            // In a newest-first (descending) list, this ensures the Children appear ABOVE the parent.
+            const childTimestamp = new Date(baseTime + (index + 1) * 1000).toISOString();
+            
+            // Calculate realistic cost for this child from provider rules
+            const childType = st.type || tx.distributionType || 'Transfer';
+            const childProvider = st.provider || tx.distributionProvider || tx.provider;
+            const childFinancials = getCalculatedFinancials(st.amount, childType, childProvider as ProviderType, settings);
+            const segmentCost = childFinancials.providerCharge || 0;
+            
+            return {
+              id: generateId(),
+              employeeId: tx.employeeId,
+              employeeName: tx.employeeName,
+              type: childType,
+              provider: childProvider,
+              amount: st.amount,
+              customerFee: 0,
+              terminalFee: segmentCost,
+              profit: -segmentCost, // Explicitly subtract cost from net daily profit
+              timestamp: childTimestamp,
+              notes: `Linked Distribution from session: ${tx.id}`,
+              customerPhone: tx.customerPhone,
+              status: tx.status,
+              parentTransactionId: tx.id,
+              destinationBank: childType === 'Transfer' ? 'Bank Transfer' : childType,
+              customerName: st.recipientName,
+              referenceNumber: st.accountNumber,
+              createdBy: currentUser.id,
+              branchName: tx.branchName,
+              mode: 'SplitChild',
+              // Add sequence for UI display
+              splitSegmentIndex: index + 1
+            };
+          });
+        
+        const updatedParent = { ...tx, isSplitParent: true };
+        // We return children first, parent last. 
+        // Since handleAddTransaction prepends them one by one, the last one (Parent) ends up at index 0 (TOP).
+        return [...children, updatedParent];
+      }
+      return [tx];
+    };
+
+    // Flatten both the current transaction and everything in the basket
+    const allFinalTransactions: Transaction[] = [
+      ...basket.flatMap(tx => expandTx(tx)),
+      ...expandTx(savedTx)
+    ];
+
+    onSave(allFinalTransactions.length === 1 ? allFinalTransactions[0] : allFinalTransactions);
 
     if (!settings || settings.soundEnabled) {
       playStatusSound(finalStatus);
@@ -610,6 +738,7 @@ export function TransactionForm({
     setNotes('');
     setCustomerPhone('');
     setCustomerName('');
+    setCustomerAccountNumber('');
     setIsFeeWaived(false);
     setSubTransfers([]);
     setMode('Standard');
@@ -644,6 +773,20 @@ export function TransactionForm({
       return;
     }
 
+    if (mode === 'SplitSession') {
+      const totalSent = subTransfers.reduce((sum, st) => sum + st.amount, 0);
+      if (totalSent > withdrawalDetails.cashHandout) {
+        alert(`Distribution error: Total sent (${formatNaira(totalSent)}) exceeds available cash from withdrawal (${formatNaira(withdrawalDetails.cashHandout)}).`);
+        return;
+      }
+      
+      const hasEmpty = subTransfers.some(st => !st.recipientName || !st.accountNumber || st.amount <= 0);
+      if (hasEmpty) {
+        alert('Please complete all recipient details and ensure amounts are valid.');
+        return;
+      }
+    }
+
     // Direct offline submission fallback
     executeFinalSave(status);
   };
@@ -651,56 +794,27 @@ export function TransactionForm({
   const activeTerminal = posTerminals?.find(t => t.id === selectedTerminalId);
   const activeFeeRate = (activeTerminal?.terminalFeeRate !== undefined) ? (activeTerminal.terminalFeeRate as any) : terminalFeeRate;
   
-  // Derived values for Withdrawal Calculations
-  const getWithdrawalDetails = () => {
-    const rawAmt = amount;
-    const fee = customerFee;
-    
-    let baseCash = rawAmt;
-    let cardSwipe = rawAmt;
-    let cashHandout = rawAmt;
-    let separateCashFee = 0;
-    
-    if (type === 'Withdrawal') {
-      if (withdrawScenario === 'CashHandout') {
-        baseCash = rawAmt;
-        if (withdrawChargeMode === 'CardAddOn') {
-          cardSwipe = rawAmt + fee;
-          cashHandout = rawAmt;
-        } else if (withdrawChargeMode === 'SeparateCash') {
-          cardSwipe = rawAmt;
-          cashHandout = rawAmt;
-          separateCashFee = fee;
-        } else { // DeductFromCash
-          cardSwipe = rawAmt;
-          cashHandout = Math.max(0, rawAmt - fee);
-        }
-      } else { // CardSwipe
-        cardSwipe = rawAmt;
-        if (withdrawChargeMode === 'CardAddOn') {
-          baseCash = Math.max(0, rawAmt - fee);
-          cashHandout = baseCash;
-        } else if (withdrawChargeMode === 'SeparateCash') {
-          baseCash = rawAmt;
-          cashHandout = rawAmt;
-          separateCashFee = fee;
-        } else { // DeductFromCash
-          baseCash = rawAmt;
-          cashHandout = Math.max(0, rawAmt - fee);
-        }
+  // Update type based on mode and sourceType
+  useEffect(() => {
+    if (mode === 'SplitSession') {
+      if (type !== sourceType) {
+        setType(sourceType);
       }
     }
-    
-    return { baseCash, cardSwipe, cashHandout, separateCashFee };
-  };
+  }, [mode, sourceType, type]);
 
-  const { baseCash, cardSwipe, cashHandout, separateCashFee } = getWithdrawalDetails();
+  const { baseCash, cardSwipe, cashHandout, separateCashFee } = withdrawalDetails;
 
   const liveAmountForTerminalFee = type === 'Withdrawal' ? cardSwipe : amount;
   const effectiveTypeLive = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
   
   // UNIFIED CALCULATION SERVICE CALL
   const liveFinancials = getCalculatedFinancials(liveAmountForTerminalFee, effectiveTypeLive, provider, settings, destinationBank);
+  
+  const isFormValid = liveFinancials.isConfigured && 
+    (mode === 'SplitSession' 
+      ? (subTransfers.length > 0 && subTransfers.every(st => st.recipientName && st.accountNumber && st.amount > 0) && remainingBalance >= 0)
+      : true);
   
   const liveTerminalFee = liveFinancials.providerCharge;
   const liveCbnCharge = liveFinancials.cbnCharge;
@@ -711,23 +825,33 @@ export function TransactionForm({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-neutral-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-neutral-200 rounded-3xl w-full max-w-lg shadow-2xl overflow-y-auto max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Header toolbar banner */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-neutral-100 bg-neutral-50/50">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-emerald-50 text-[#00B87A] rounded-full">
-              <Sparkles className="w-5 h-5 stroke-[2]" />
+        {/* Header Action Bar - Lovable and Professional */}
+        <div className="flex items-center justify-between px-6 py-6 border-b-2 border-[#00B87A]/5 bg-gradient-to-r from-emerald-50/30 to-white">
+          <div className="flex items-center gap-3.5">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-xl rotate-3 transition-transform hover:rotate-0 ${mode === 'SplitSession' ? 'bg-emerald-600 text-white shadow-emerald-200' : 'bg-white text-[#00B87A] border-2 border-emerald-50 shadow-emerald-50'}`}>
+              {mode === 'SplitSession' ? <ArrowRightLeft className="w-6 h-6" /> : <Sparkles className="w-6 h-6" />}
             </div>
             <div>
-              <h3 className="text-base font-extrabold text-neutral-800 tracking-tight">
-                {initialTransaction ? 'Edit POS Receipt' : 'Record POS Receipt'}
-              </h3>
-              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">Using Realistic 2024/2025 {provider} market rates</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-black text-neutral-900 tracking-tighter leading-none">
+                  {initialTransaction ? 'Edit Receipt 📝' : (mode === 'SplitSession' ? 'Multi-Task Payout ⚡' : 'New Sale Receipt 🧾')}
+                </h3>
+                {mode === 'SplitSession' && (
+                  <span className="bg-emerald-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow-md">
+                    SPLIT MODE
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-neutral-400 mt-1 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+                Nigeria Market Rates • 2024
+              </p>
             </div>
           </div>
           <button 
             type="button"
             onClick={onClose}
-            className="text-neutral-400 hover:text-neutral-700 p-1.5 rounded-xl hover:bg-neutral-100 transition cursor-pointer"
+            className="w-10 h-10 flex items-center justify-center rounded-2xl bg-neutral-50 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 transition-all active:scale-90 border border-neutral-100"
           >
             <X className="w-5 h-5" />
           </button>
@@ -736,6 +860,25 @@ export function TransactionForm({
         {/* Modal Main Form Grid */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           
+          {mode === 'SplitSession' && (
+            <div className="flex items-center gap-3 bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100 shadow-sm">
+              <div className="w-6 h-6 rounded-full bg-[#00B87A] text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-sm">1</div>
+              <div className="flex-1">
+                <span className="block text-[11px] font-black uppercase tracking-widest text-[#00B87A] font-mono">
+                  {sourceType === 'Withdrawal' ? 'Withdrawal Setup' : 'Cash Intake Setup'}
+                </span>
+                <span className="block text-[10px] text-emerald-600/80 font-semibold">
+                  {sourceType === 'Withdrawal' 
+                    ? 'Enter the total amount to be withdrawn from POS/Card.' 
+                    : 'Enter the total cash amount received from customer.'}
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#00B87A]"></div>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-200"></div>
+              </div>
+            </div>
+          )}
           {/* Active Ticket Basket */}
           {basket.length > 0 && (
             <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4.5 space-y-3.5 animate-in slide-in-from-top duration-200">
@@ -867,37 +1010,213 @@ export function TransactionForm({
           )}
           
           {/* Operation Mode Selection (Standard or Split) */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-              Transaction Mode
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['Standard', 'SplitWithdrawal'] as const).map((m) => {
+          <div className="space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-450 font-mono">
+                Transaction Mode
+              </label>
+              <span className="text-[9px] font-mono text-neutral-400 font-bold uppercase tracking-wider">
+                Select Flow Option
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 p-1.5 bg-neutral-100/60 rounded-2xl border border-neutral-200/40">
+              {(['Standard', 'SplitSession'] as const).map((m) => {
                 const isSelected = mode === m;
                 return (
                   <button
                     key={m}
                     type="button"
                     onClick={() => setMode(m)}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                    className={`py-3 px-1 rounded-xl text-xs font-black transition-all duration-200 cursor-pointer text-center flex items-center justify-center gap-2 select-none active:scale-[0.98] ${
                       isSelected 
-                        ? 'bg-emerald-50/60 border-[#00B87A] text-[#00B87A] font-black' 
-                        : 'bg-neutral-50 border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-300'
+                        ? 'bg-white text-neutral-850 shadow-md border border-neutral-200/50 font-black' 
+                        : 'text-neutral-400 hover:text-neutral-700 hover:bg-neutral-50/50 border border-transparent font-bold'
                     }`}
                   >
-                    {m === 'Standard' ? 'Standard Transaction' : 'Split Withdrawal'}
+                    {m === 'Standard' ? (
+                      <>
+                        <Check className={`w-3.5 h-3.5 stroke-[3] ${isSelected ? 'text-[#00B87A]' : 'text-neutral-450'}`} />
+                        <span>Standard Transaction</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRightLeft className={`w-3.5 h-3.5 stroke-[2.5] ${isSelected ? 'text-indigo-600' : 'text-neutral-450'}`} />
+                        <span>Split Transaction</span>
+                      </>
+                    )}
                   </button>
                 );
               })}
             </div>
+
+            {mode === 'SplitSession' && (
+              <div className="mt-6 space-y-6 animate-in fade-in zoom-in-95 duration-500">
+                {/* Large Title Header for Split Mode */}
+                <div className="flex flex-col items-center justify-center py-6 px-4 bg-gradient-to-br from-emerald-50 via-white to-blue-50 rounded-[2.5rem] border border-neutral-100 shadow-sm relative overflow-hidden group">
+                   <div className="absolute top-0 right-0 p-8 opacity-5">
+                      <Sparkles className="w-32 h-32 text-emerald-900 rotate-12" />
+                   </div>
+                   <Zap className="w-10 h-10 text-emerald-600 mb-3 animate-pulse" />
+                   <h2 className="text-xl font-black text-neutral-800 tracking-tight text-center uppercase">Unified Split Session</h2>
+                   <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-[0.2em] text-center mt-1">Multi-Task Transaction Intelligence</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Inflow Selection - FULL WIDTH ON MOBILE */}
+                  <div className="space-y-4 p-6 bg-white border border-neutral-100 rounded-[2rem] shadow-md relative overflow-hidden group hover:border-emerald-200 transition-all">
+                    <div className="absolute -top-4 -right-4 p-4 opacity-[0.03] group-hover:scale-110 transition-transform duration-700">
+                      <Download className="w-40 h-40 text-emerald-900" />
+                    </div>
+                    <label className="block text-[11px] font-black uppercase tracking-widest text-emerald-700 font-mono flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-[10px] shadow-lg shadow-emerald-200">1</div>
+                      Primary Inflow Task
+                    </label>
+                    <div className="grid grid-cols-1 gap-3">
+                      {(['Withdrawal', 'Transfer', 'Money Received'] as const).map((s) => {
+                        const Icon = s === 'Withdrawal' ? CreditCard : s === 'Transfer' ? Landmark : Banknote;
+                        const isSelected = sourceType === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setSourceType(s)}
+                            className={`flex items-center gap-5 p-4 rounded-[1.5rem] border transition-all ${
+                              isSelected 
+                                ? 'bg-emerald-600 border-emerald-600 text-white shadow-xl scale-[1.02] ring-4 ring-emerald-50' 
+                                : 'bg-neutral-50/50 border-neutral-100 text-neutral-500 hover:bg-white hover:border-emerald-200 hover:shadow-md'
+                            }`}
+                          >
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isSelected ? 'bg-white/20 rotate-6' : 'bg-white shadow-sm'}`}>
+                              <Icon className={`w-6 h-6 ${isSelected ? 'text-white' : 'text-emerald-500'}`} />
+                            </div>
+                            <div className="flex flex-col items-start">
+                              <span className="text-[11px] font-black uppercase tracking-tight leading-none mb-1">
+                                {s === 'Withdrawal' ? 'POS/Card' : s === 'Money Received' ? 'Cash Intake' : 'Bank Transfer In'}
+                              </span>
+                              <span className={`text-[9px] font-bold ${isSelected ? 'text-emerald-100' : 'text-neutral-400'}`}>
+                                {s === 'Withdrawal' ? 'Digital Card Payment' : s === 'Money Received' ? 'Paper Money Entry' : 'Digital Fund Arrival'}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Outflow Selection */}
+                  <div className="space-y-4 p-6 bg-white border border-neutral-100 rounded-[2rem] shadow-md relative overflow-hidden group hover:border-blue-200 transition-all">
+                    <div className="absolute -top-4 -right-4 p-4 opacity-[0.03] group-hover:scale-110 transition-transform duration-700">
+                      <ArrowUpRight className="w-40 h-40 text-blue-900" />
+                    </div>
+                    <label className="block text-[11px] font-black uppercase tracking-widest text-blue-700 font-mono flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-xl bg-blue-600 text-white flex items-center justify-center text-[10px] shadow-lg shadow-blue-200">2</div>
+                      Distribution Tasks
+                    </label>
+                    <div className="grid grid-cols-1 gap-3">
+                      {(['Transfer', 'Airtime', 'Data'] as const).map((d) => {
+                        const Icon = d === 'Transfer' ? Landmark : d === 'Airtime' ? Smartphone : Globe;
+                        const isSelected = distributionType === d;
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setDistributionType(d)}
+                            className={`flex items-center gap-5 p-4 rounded-[1.5rem] border transition-all ${
+                              isSelected 
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-xl scale-[1.02] ring-4 ring-blue-50' 
+                                : 'bg-neutral-50/50 border-neutral-100 text-neutral-500 hover:bg-white hover:border-blue-200 hover:shadow-md'
+                            }`}
+                          >
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isSelected ? 'bg-white/20 rotate-6' : 'bg-white shadow-sm'}`}>
+                              <Icon className={`w-6 h-6 ${isSelected ? 'text-white' : 'text-blue-500'}`} />
+                            </div>
+                            <div className="flex flex-col items-start">
+                              <span className="text-[11px] font-black uppercase tracking-tight leading-none mb-1">
+                                {d === 'Transfer' ? 'Bank Sent' : `Buy ${d}`}
+                              </span>
+                              <span className={`text-[9px] font-bold ${isSelected ? 'text-blue-100' : 'text-neutral-400'}`}>
+                                {d === 'Transfer' ? 'Multiple Payouts' : `Top-up Digital ${d}`}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hardware Selector - Ultra-Wide Icon Ribbon */}
+                <div className="p-8 bg-amber-50/40 border border-amber-100 rounded-[2.5rem] space-y-6 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase tracking-widest text-amber-700 font-mono flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-xl bg-amber-600 text-white flex items-center justify-center text-[10px] shadow-lg shadow-amber-200">3</div>
+                      Payout Device Terminal
+                    </label>
+                    <div className="px-3 py-1 bg-white/80 rounded-full border border-amber-100 text-[8px] font-black text-amber-600 uppercase tracking-widest">
+                      Hardware Select
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    {(['OPay', 'Moniepoint', 'PalmPay'] as const).map((p) => {
+                      const isSelected = distributionProvider === p;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setDistributionProvider(p)}
+                          className={`group relative py-8 px-4 rounded-[2rem] border transition-all flex flex-col items-center gap-3 shadow-sm ${
+                            isSelected 
+                              ? 'bg-amber-600 border-amber-600 text-white ring-8 ring-amber-50 shadow-xl' 
+                              : 'bg-white border-neutral-100 text-neutral-400 hover:border-amber-300 hover:text-neutral-600 hover:shadow-md'
+                          }`}
+                        >
+                          <div className={`w-16 h-16 rounded-[1.5rem] transition-all flex items-center justify-center ${isSelected ? 'bg-white/20 rotate-12' : 'bg-amber-50 group-hover:bg-amber-100'}`}>
+                            <Cpu className={`w-8 h-8 ${isSelected ? 'text-white' : 'text-amber-600'}`} />
+                          </div>
+                          <span className="text-[11px] font-black uppercase tracking-widest leading-none">{p}</span>
+                          {isSelected && (
+                            <div className="absolute -top-2 -right-2 w-7 h-7 bg-white text-amber-600 rounded-full flex items-center justify-center border-4 border-amber-600 shadow-lg">
+                              <Check className="w-4 h-4 stroke-[4]" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Intelligent Professional Summary Ribbon */}
+                <div className="bg-neutral-900 text-white p-6 rounded-[2rem] shadow-2xl flex items-center gap-6 border border-neutral-800 animate-in slide-in-from-bottom-4 duration-700">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 via-blue-500 to-amber-400 flex items-center justify-center shadow-lg shrink-0">
+                    <Zap className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 mb-1.5 font-mono">
+                      Unified Workflow Intelligence
+                    </p>
+                    <p className="text-sm font-bold leading-snug tracking-tight">
+                      Capturing <span className="text-emerald-400 px-1 bg-emerald-400/10 rounded">{sourceType}</span> via <span className="text-emerald-400">{provider}</span> 
+                      <span className="text-neutral-600 px-3">➔</span> 
+                      Distributing as <span className="text-blue-400 px-1 bg-blue-400/10 rounded">{distributionType}</span> through <span className="text-amber-400">{distributionProvider}</span>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Active Category Display - Highly friendly and accessible for all operators */}
-          <div className="bg-neutral-50/60 border border-neutral-200/50 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
-            <div className="flex items-center gap-3.5">
-              <div className={`p-3 rounded-2xl text-white shadow-md ${
+          <div className={`border rounded-3xl p-4.5 flex items-center justify-between gap-4 shadow-sm transition-all duration-300 ${
+            type === 'Withdrawal' ? 'bg-blue-50/50 border-blue-100' :
+            type === 'Deposit' || type === 'Money Received' ? 'bg-emerald-50/50 border-emerald-100' :
+            type === 'Transfer' ? 'bg-indigo-50/50 border-indigo-100' :
+            type === 'Airtime' ? 'bg-purple-50/50 border-purple-100' :
+            'bg-violet-50/50 border-violet-100'
+          }`}>
+            <div className="flex items-center gap-4">
+              <div className={`p-3 rounded-2xl text-white shadow-lg shadow-current/20 transition-all ${
                 type === 'Withdrawal' ? 'bg-blue-600' :
-                type === 'Deposit' ? 'bg-emerald-600' :
+                type === 'Deposit' || type === 'Money Received' ? 'bg-emerald-600' :
                 type === 'Transfer' ? 'bg-indigo-600' :
                 type === 'Airtime' ? 'bg-purple-600' :
                 'bg-violet-600'
@@ -908,14 +1227,21 @@ export function TransactionForm({
                 {type === 'Airtime' && <Smartphone className="w-5.5 h-5.5 stroke-[2]" />}
                 {type === 'Data' && <Globe className="w-5.5 h-5.5 stroke-[2]" />}
               </div>
-              <div>
-                <span className="block text-[9.5px] font-black uppercase tracking-widest text-neutral-450 font-mono mb-0.5">
-                  ACTIVE OPERATION MODE
+              <div className="space-y-0.5">
+                <span className={`block text-[9.5px] font-black uppercase tracking-widest font-mono ${
+                  type === 'Withdrawal' ? 'text-blue-600 font-bold' :
+                  type === 'Deposit' || type === 'Money Received' ? 'text-emerald-600 font-bold' :
+                  type === 'Transfer' ? 'text-indigo-600 font-bold' :
+                  type === 'Airtime' ? 'text-purple-600 font-bold' :
+                  'text-violet-600'
+                }`}>
+                  Active Operation Mode
                 </span>
-                <h4 className="text-sm sm:text-base font-black text-neutral-800 leading-tight">
-                  {type === 'Withdrawal' && '📥 Cash Withdrawal Mode'}
+                <h4 className="text-sm sm:text-base font-black text-neutral-850 leading-tight">
+                  {type === 'Withdrawal' && (mode === 'SplitSession' ? '📥 Unified POS Withdrawal' : '📥 Cash Withdrawal Mode')}
+                  {type === 'Money Received' && '📥 Cash Paper Intake Mode'}
                   {type === 'Deposit' && '📤 Money Receive Mode'}
-                  {type === 'Transfer' && '💸 Bank Transfer Mode'}
+                  {type === 'Transfer' && (mode === 'SplitSession' ? '📥 Bank Transfer Inflow Mode' : '💸 Bank Transfer Mode')}
                   {type === 'Airtime' && '📱 Airtime Sale Mode'}
                   {type === 'Data' && '🌐 Data Bundle Sale Mode'}
                 </h4>
@@ -923,12 +1249,12 @@ export function TransactionForm({
             </div>
             
             {/* Active Status Pill */}
-            <span className={`text-[10px] font-black px-3 py-1 rounded-full font-mono uppercase tracking-wider flex items-center gap-1.5 ${
-              type === 'Withdrawal' ? 'bg-blue-100 text-blue-800' :
-              type === 'Deposit' ? 'bg-emerald-100 text-emerald-800' :
-              type === 'Transfer' ? 'bg-indigo-100 text-indigo-800' :
-              type === 'Airtime' ? 'bg-purple-100 text-purple-800' :
-              'bg-violet-100 text-violet-800'
+            <span className={`text-[10px] font-black px-3 py-1.5 rounded-full font-mono uppercase tracking-wider flex items-center gap-1.5 shadow-xs border ${
+              type === 'Withdrawal' ? 'bg-blue-100 text-blue-800 border-blue-200/40' :
+              type === 'Deposit' || type === 'Money Received' ? 'bg-emerald-100 text-emerald-800 border-emerald-200/40' :
+              type === 'Transfer' ? 'bg-indigo-100 text-indigo-800 border-indigo-200/40' :
+              type === 'Airtime' ? 'bg-purple-100 text-purple-800 border-purple-200/40' :
+              'bg-violet-100 text-violet-800 border-violet-200/40'
             }`}>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
               Selected
@@ -983,35 +1309,46 @@ export function TransactionForm({
 
           {/* POS Host Provider Gateways */}
           <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <label className="block text-xs font-black uppercase tracking-widest text-neutral-500 font-mono flex items-center gap-1.5">
-                <Smartphone className="w-4 h-4 text-neutral-500 animate-pulse" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-3">
+              <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-500 font-mono flex items-center gap-1.5">
+                <Cpu className="w-4 h-4 text-neutral-500 animate-pulse" />
                 <span>POS Terminal Hardware Channel</span>
               </label>
-              <span className="text-[9.5px] font-black bg-neutral-100 text-neutral-500 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+              <span className="text-[9px] font-black bg-neutral-100 text-neutral-600 px-2.5 py-1 rounded-full font-mono uppercase tracking-widest leading-none shrink-0 self-start sm:self-auto">
                 Touch to match your physical device
               </span>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              {(['Moniepoint', 'OPay', 'PalmPay'] as const).map((pvd) => {
+              {(['Moniepoint', 'OPay', 'PalmPay', 'Kuda', 'Nomba', 'Others'] as const).filter(pvd => {
+                const isBrandRegistered = posTerminals && posTerminals.some(
+                  t => t.provider.toLowerCase() === pvd.toLowerCase()
+                );
+                return isBrandRegistered;
+              }).map((pvd) => {
                 const isSelected = provider === pvd;
-                // Core branding colors matching true providers
-                const brandColors = {
-                  Moniepoint: 'border-blue-500 text-blue-700 bg-blue-50/80 font-black ring-2 ring-blue-500/30 shadow-md scale-[1.04]',
-                  OPay: 'border-[#00B87A] text-[#00B87A] bg-emerald-50/80 font-black ring-2 ring-[#00B87A]/30 shadow-md scale-[1.04]',
-                  PalmPay: 'border-orange-500 text-orange-600 bg-orange-50/80 font-black ring-2 ring-orange-500/30 shadow-md scale-[1.04]'
+                // Core branding styles with elegant depth and custom gradient highlights
+                const brandColors: Record<string, string> = {
+                  Moniepoint: 'border-blue-500 bg-gradient-to-b from-blue-50/40 to-white text-blue-700 ring-4 ring-blue-500/10 shadow-lg scale-[1.03]',
+                  OPay: 'border-[#00B87A] bg-gradient-to-b from-emerald-50/40 to-white text-emerald-700 ring-4 ring-[#00B87A]/10 shadow-lg scale-[1.03]',
+                  PalmPay: 'border-orange-500 bg-gradient-to-b from-orange-50/40 to-white text-orange-700 ring-4 ring-orange-500/10 shadow-lg scale-[1.03]',
+                  Kuda: 'border-purple-500 bg-gradient-to-b from-purple-50/40 to-white text-purple-700 ring-4 ring-purple-500/10 shadow-lg scale-[1.03]',
+                  Nomba: 'border-yellow-500 bg-gradient-to-b from-yellow-50/40 to-white text-yellow-700 ring-4 ring-yellow-500/10 shadow-lg scale-[1.03]',
+                  Others: 'border-neutral-500 bg-gradient-to-b from-neutral-50/40 to-white text-neutral-700 ring-4 ring-neutral-500/10 shadow-lg scale-[1.03]'
                 };
                 
-                const posImages = {
+                const posImages: Record<string, any> = {
                   Moniepoint: moniepointPosImg,
                   OPay: opayPosImg,
                   PalmPay: palmpayPosImg
                 };
 
-                const subLabels = {
-                  Moniepoint: { text: '🔵 BLUE MACHINE', bg: 'bg-blue-100 text-blue-800' },
-                  OPay: { text: '🟢 GREEN MACHINE', bg: 'bg-emerald-100 text-emerald-800' },
-                  PalmPay: { text: '🟠 ORANGE MACHINE', bg: 'bg-orange-100 text-orange-800' }
+                const subLabels: Record<string, { text: string; bg: string }> = {
+                  Moniepoint: { text: '🔵 BLUE MACHINE', bg: 'bg-blue-50 text-blue-800 border-blue-100' },
+                  OPay: { text: '🟢 GREEN MACHINE', bg: 'bg-emerald-50 text-emerald-800 border-emerald-100' },
+                  PalmPay: { text: '🟠 ORANGE MACHINE', bg: 'bg-orange-50 text-orange-800 border-orange-100' },
+                  Kuda: { text: '🟣 PURPLE MACHINE', bg: 'bg-purple-50 text-purple-800 border-purple-100' },
+                  Nomba: { text: '🟡 YELLOW MACHINE', bg: 'bg-yellow-50 text-yellow-800 border-yellow-100' },
+                  Others: { text: '⚪ OTHER MACHINE', bg: 'bg-neutral-50 text-neutral-800 border-neutral-100' }
                 };
 
                 return (
@@ -1025,32 +1362,38 @@ export function TransactionForm({
                            t => t.provider.toLowerCase() === pvd.toLowerCase()
                         );
                         if (matchingTerminal) {
-                          setSelectedTerminalId(matchingTerminal.id);
+                           setSelectedTerminalId(matchingTerminal.id);
                         } else {
-                          setSelectedTerminalId('');
+                           setSelectedTerminalId('');
                         }
                       }
                     }}
-                    className={`group py-4 px-2 rounded-2xl text-[12px] sm:text-base font-extrabold border transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-2 select-none active:scale-95 ${
+                    className={`group py-4 px-2.5 rounded-3xl text-[12px] sm:text-base font-extrabold border transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-2.5 select-none active:scale-95 ${
                       isSelected 
                         ? brandColors[pvd]
-                        : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800 hover:border-neutral-300 shadow-sm'
+                        : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-850 hover:border-neutral-300 shadow-sm'
                     }`}
                   >
-                    {/* Tiny visual realistic preview */}
-                    <div className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white overflow-hidden border-2 ${
+                    {/* Visual realistic preview */}
+                    <div className={`relative w-18 h-18 sm:w-22 sm:h-22 rounded-2xl bg-white overflow-hidden border ${
                       isSelected 
-                        ? pvd === 'Moniepoint' ? 'border-blue-400 shadow-md' : pvd === 'OPay' ? 'border-emerald-400 shadow-md' : 'border-orange-400 shadow-md'
+                        ? pvd === 'Moniepoint' ? 'border-blue-300 shadow-md ring-2 ring-blue-100' : pvd === 'OPay' ? 'border-emerald-300 shadow-md ring-2 ring-emerald-100' : 'border-orange-300 shadow-md ring-2 ring-orange-100'
                         : 'border-neutral-100 shadow-xs'
-                    } flex items-center justify-center p-1 group-hover:scale-105 transition-transform duration-200`}>
-                      <img 
-                        src={posImages[pvd]} 
-                        alt={`${pvd} Physical POS`} 
-                        className="w-full h-full object-contain rounded-lg"
-                        referrerPolicy="no-referrer"
-                      />
+                    } flex items-center justify-center p-1.5 group-hover:scale-105 transition-transform duration-200`}>
+                      {posImages[pvd] ? (
+                        <img 
+                          src={posImages[pvd]} 
+                          alt={`${pvd} Physical POS`} 
+                          className="w-full h-full object-contain rounded-lg"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="text-[10px] text-neutral-400 font-bold text-center">
+                          {pvd}
+                        </div>
+                      )}
                       {isSelected && (
-                        <div className={`absolute -top-1 -right-1 w-5.5 h-5.5 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white ${
+                        <div className={`absolute -top-0.5 -right-0.5 w-6 h-6 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white ${
                           pvd === 'Moniepoint' ? 'bg-blue-600' : pvd === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
                         }`}>
                           <Check className="w-3.5 h-3.5 stroke-[4]" />
@@ -1058,8 +1401,8 @@ export function TransactionForm({
                       )}
                     </div>
                     <div className="text-center w-full min-w-0">
-                      <span className="block text-[13px] sm:text-[15px] font-black tracking-tight leading-none text-neutral-850">{pvd}</span>
-                      <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-md text-[8px] sm:text-[9.5px] font-black font-mono tracking-wider ${subLabels[pvd].bg}`}>
+                      <span className="block text-[14px] sm:text-[15px] font-black tracking-tight leading-none text-neutral-850">{pvd}</span>
+                      <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-[8.5px] sm:text-[9.5px] font-black font-mono tracking-wider border ${subLabels[pvd].bg}`}>
                         {subLabels[pvd].text}
                       </span>
                     </div>
@@ -1069,90 +1412,113 @@ export function TransactionForm({
             </div>
 
             {/* Visual Hardware Confirmation Card - Super accessible for non-educated operators */}
-            {provider && (provider === 'Moniepoint' || provider === 'OPay' || provider === 'PalmPay') && (
-              <div className={`mt-3.5 border rounded-2xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-150 shadow-sm ${
-                provider === 'Moniepoint' ? 'bg-blue-50/40 border-blue-200/60' :
-                provider === 'OPay' ? 'bg-emerald-50/40 border-emerald-200/60' :
-                'bg-orange-50/40 border-orange-200/60'
-              }`}>
-                <div className="relative w-20 h-20 bg-white rounded-2xl border-2 border-neutral-100 flex items-center justify-center p-1 shrink-0 shadow-md">
-                  <img 
-                    src={provider === 'Moniepoint' ? moniepointPosImg : provider === 'OPay' ? opayPosImg : palmpayPosImg} 
-                    alt={`${provider} Active Terminal`} 
-                    className="w-full h-full object-contain rounded-xl"
-                    referrerPolicy="no-referrer"
-                  />
-                  <span className={`absolute -bottom-2 -right-1.5 text-[9px] px-2 py-0.5 rounded-full font-black text-white shadow-md border border-white animate-pulse ${
-                    provider === 'Moniepoint' ? 'bg-blue-600' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
-                  }`}>
-                    ACTIVE
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className={`w-2 h-2 rounded-full animate-ping ${
-                      provider === 'Moniepoint' ? 'bg-blue-500' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
-                    }`} />
-                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-neutral-450 font-mono">
-                      MATCHING MACHINE COLOR
+            {provider && (provider === 'Moniepoint' || provider === 'OPay' || provider === 'PalmPay') && (() => {
+              const isSelectedBrandRegistered = posTerminals && posTerminals.some(
+                t => t.provider.toLowerCase() === provider.toLowerCase()
+              );
+
+              if (!isSelectedBrandRegistered) {
+                return (
+                  <div className="mt-4 border border-amber-200/70 bg-amber-50/40 rounded-3xl p-5 flex items-start gap-4.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-xs">
+                    <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 shadow-sm border border-amber-200/60">
+                      <AlertTriangle className="w-5 h-5 stroke-[2.5]" />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 font-mono leading-none">
+                          Manager Registration Needed
+                        </span>
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-black text-amber-900 leading-none">
+                        🔒 Unregistered {provider} POS Hardware Channel
+                      </h4>
+                      <p className="text-[10.5px] font-semibold text-neutral-600 leading-relaxed">
+                        No physical <strong className="text-neutral-800">{provider}</strong> terminal has been registered to your cashier account yet. Real-world machine assets and connection feeds are locked.
+                      </p>
+                      <div className="inline-block mt-1 px-3 py-1.5 rounded-xl text-[10px] font-bold leading-normal bg-white/90 border border-amber-100 text-amber-850 shadow-2xs">
+                        👉 Please ask your manager to register this POS brand under <strong className="font-extrabold text-[#00B87A] underline">"Registered POS Terminals"</strong>.
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className={`mt-4 border rounded-3xl p-4.5 flex items-center gap-4.5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-sm ${
+                  provider === 'Moniepoint' ? 'bg-gradient-to-r from-blue-50/40 via-white to-blue-50/10 border-blue-200/60' :
+                  provider === 'OPay' ? 'bg-gradient-to-r from-emerald-50/40 via-white to-emerald-50/10 border-emerald-200/60' :
+                  'bg-gradient-to-r from-orange-50/40 via-white to-orange-50/10 border-orange-200/60'
+                }`}>
+                  <div className="relative w-22 h-22 bg-white rounded-2xl border border-neutral-100 flex items-center justify-center p-2.5 shrink-0 shadow-md ring-4 ring-neutral-50/60">
+                    <img 
+                      src={provider === 'Moniepoint' ? moniepointPosImg : provider === 'OPay' ? opayPosImg : palmpayPosImg} 
+                      alt={`${provider} Active Terminal`} 
+                      className="w-full h-full object-contain rounded-xl transform hover:scale-105 transition-transform duration-350"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className={`absolute -bottom-2 -right-1 text-[8px] px-2 py-0.5 rounded-full font-black text-white shadow-md border-2 border-white tracking-widest ${
+                      provider === 'Moniepoint' ? 'bg-blue-600' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
+                    }`}>
+                      ONLINE
                     </span>
                   </div>
-                  <h4 className="text-sm sm:text-base font-black text-neutral-800 leading-tight flex items-center gap-1.5">
-                    {provider === 'Moniepoint' && <span className="text-blue-600 font-black">🔵 BLUE Moniepoint Machine</span>}
-                    {provider === 'OPay' && <span className="text-[#00B87A] font-black">🟢 GREEN OPay Machine</span>}
-                    {provider === 'PalmPay' && <span className="text-orange-600 font-black">🟠 ORANGE PalmPay Machine</span>}
-                  </h4>
-                  <p className="text-[11px] sm:text-xs font-bold text-neutral-500 leading-relaxed mt-1">
-                    {provider === 'Moniepoint' && '👉 Pick the BLUE POS machine from the table. Insert customer card and press OK.'}
-                    {provider === 'OPay' && '👉 Pick the GREEN POS machine from the table. Insert customer card and press OK.'}
-                    {provider === 'PalmPay' && '👉 Pick the ORANGE POS machine from the table. Insert customer card and press OK.'}
-                  </p>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full animate-pulse ${
+                        provider === 'Moniepoint' ? 'bg-blue-500' : provider === 'OPay' ? 'bg-[#00B87A]' : 'bg-orange-500'
+                      }`} />
+                      <span className="text-[9.5px] font-black uppercase tracking-widest text-neutral-450 font-mono leading-none">
+                        Active Device Channel
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-black text-neutral-850 leading-none">
+                      {provider === 'Moniepoint' && '🔵 Moniepoint Smart POS'}
+                      {provider === 'OPay' && '🟢 OPay Smart POS'}
+                      {provider === 'PalmPay' && '🟠 PalmPay Smart POS'}
+                    </h4>
+                    
+                    {/* Giant visual cue for limited literacy operators */}
+                    <div className={`inline-block px-3 py-1.5 rounded-xl text-[11px] sm:text-[11.5px] font-black leading-relaxed border ${
+                      provider === 'Moniepoint' ? 'bg-blue-50/80 text-blue-900 border-blue-100' :
+                      provider === 'OPay' ? 'bg-emerald-50/80 text-[#00B87A] border-emerald-100' :
+                      'bg-orange-50/80 text-orange-900 border-orange-100'
+                    }`}>
+                      {provider === 'Moniepoint' && '👉 Pick the BLUE machine from the table. Insert customer card and press OK.'}
+                      {provider === 'OPay' && '👉 Pick the GREEN machine from the table. Insert customer card and press OK.'}
+                      {provider === 'PalmPay' && '👉 Pick the ORANGE machine from the table. Insert customer card and press OK.'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
-          {/* Destination Network selection block */}
-          <div className="mt-6 mb-2">
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono flex items-center gap-1.5">
-                {type === 'Withdrawal' && (
-                  <>
-                    <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>ATM Card Issuer Bank</span>
-                  </>
-                )}
-                {type === 'Transfer' && (
-                  <>
-                    <Landmark className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Destination Bank</span>
-                  </>
-                )}
-                {type === 'Deposit' && (
-                  <>
-                    <Wallet className="w-3.5 h-3.5 text-orange-500" />
-                    <span>Money Receive Wallet Destination</span>
-                  </>
-                )}
-                {type === 'Airtime' && (
-                  <>
-                    <Smartphone className="w-3.5 h-3.5 text-purple-500" />
-                    <span>Telecommunication Network</span>
-                  </>
-                )}
-                {type === 'Data' && (
-                  <>
-                    <Globe className="w-3.5 h-3.5 text-violet-500" />
-                    <span>Data Network Operator</span>
-                  </>
-                )}
-              </label>
-              {type !== 'Airtime' && type !== 'Data' && (
-                <span className="text-[10px] font-mono text-neutral-400 font-bold">
-                  Selected: <span className="text-neutral-700 font-extrabold">{destinationBank || 'None'}</span>
-                </span>
-              )}
+          <div className="space-y-4">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-400 font-mono flex items-center gap-2">
+              <span>What is the Customer Doing? 🚀</span>
+              <div className="h-px flex-1 bg-neutral-100" />
+            </label>
+            <div className="grid grid-cols-3 gap-2.5">
+              {(['Withdrawal', 'Deposit', 'Transfer', 'Airtime', 'Data'] as TransactionType[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setType(t)}
+                  className={`py-3.5 rounded-[20px] border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 active:scale-95 ${
+                    type === t
+                      ? 'bg-white border-[#00B87A] text-[#00B87A] shadow-xl shadow-emerald-50 ring-4 ring-emerald-50 scale-[1.02] font-black'
+                      : 'bg-neutral-50/50 border-neutral-100 text-neutral-400 hover:border-neutral-200 hover:text-neutral-600 font-bold'
+                  }`}
+                >
+                  <span className="text-xl">
+                    {t === 'Withdrawal' ? '🏧' : t === 'Deposit' ? '📥' : t === 'Transfer' ? '💸' : t === 'Airtime' ? '📱' : '🌐'}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-tighter leading-none">{t}</span>
+                </button>
+              ))}
             </div>
+          </div>
 
             {type === 'Airtime' || type === 'Data' ? (
               <div className="space-y-4">
@@ -1289,16 +1655,18 @@ export function TransactionForm({
                 </div>
               </div>
             )}
-          </div>
 
-          {/* Amount and Pre-Set Quick Selectors */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="amount-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-                Amount (₦)
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">₦</span>
+          {/* Input Money Amount 💰 */}
+          <div className="bg-gradient-to-br from-emerald-50 to-white border-2 border-emerald-100 rounded-[32px] p-6 shadow-xl shadow-emerald-50/50 space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label htmlFor="amount-input" className="text-[11px] font-black uppercase tracking-widest text-emerald-800 font-mono flex items-center gap-2">
+                  <span>Type the Amount 💰</span>
+                </label>
+              </div>
+              
+              <div className="relative group">
+                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl font-black text-emerald-300 font-mono group-focus-within:text-[#00B87A] transition-colors">₦</span>
                 <input
                   id="amount-input"
                   type="text"
@@ -1310,89 +1678,73 @@ export function TransactionForm({
                       setAmountInput(formatNumber(val));
                     }
                   }}
-                  className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-8 pr-3 py-2.5 text-neutral-800 font-mono text-sm focus:outline-none focus:border-[#00B87A] font-bold"
+                  className="w-full bg-white border-2 border-emerald-100 hover:border-emerald-200 focus:border-[#00B87A] rounded-[24px] pl-12 pr-6 py-5 text-neutral-900 font-mono text-3xl focus:outline-none font-black placeholder:text-neutral-100 transition-all shadow-inner"
                   placeholder="0.00"
                   required
                 />
               </div>
-
-              {/* Quick Select Buttons Removed - Manual entry only */}
             </div>
 
-            {/* Customer Fee Input & Auto Guide */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                  Agent Customer Fee Option
+            {/* Service Fee 💎 */}
+            <div className="pt-6 border-t-2 border-dashed border-emerald-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-black uppercase tracking-widest text-emerald-800 font-mono flex items-center gap-2">
+                  <span>Transaction Fee 💎</span>
                 </label>
-                <span className="text-[9px] bg-neutral-100 text-neutral-600 font-mono font-bold px-1.5 py-0.5 rounded">
-                  {isFeeWaived ? 'Waived (₦0)' : 'Standard'}
-                </span>
-              </div>
-
-              {/* Toggle Selector for Fee Status */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFeeWaived(false);
-                    applyRecommendedFee();
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-extrabold border transition cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 ${
-                    !isFeeWaived
-                      ? 'bg-[#00B87A] border-[#00B87A] text-white font-black'
-                      : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-800'
-                  }`}
-                >
-                  <span>💳 Apply Charge</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFeeWaived(true);
-                    setFeeInput('0');
-                    setCustomerFee(0);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-extrabold border transition cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 ${
-                    isFeeWaived
-                      ? 'bg-amber-600 border-amber-600 text-white font-black'
-                      : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-800'
-                  }`}
-                >
-                  <span>🎉 Waive Charge (₦0)</span>
-                </button>
+                
+                <div className="flex bg-neutral-100/80 p-1.5 rounded-[20px] shadow-inner gap-1 w-full max-w-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFeeWaived(false);
+                      applyRecommendedFee();
+                    }}
+                    className={`flex-1 py-2.5 px-3 rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                      !isFeeWaived ? 'bg-white text-[#00B87A] shadow-[0_4px_12px_rgba(0,184,122,0.15)] ring-1 ring-emerald-100' : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200/50'
+                    }`}
+                  >
+                    <span className="text-sm sm:text-base">💳</span> Apply Charge
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFeeWaived(true);
+                      setFeeInput('0');
+                      setCustomerFee(0);
+                    }}
+                    className={`flex-1 py-2.5 px-3 rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                      isFeeWaived ? 'bg-white text-rose-500 shadow-[0_4px_12px_rgba(244,63,94,0.15)] ring-1 ring-rose-100' : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200/50'
+                    }`}
+                  >
+                    <span className="text-sm sm:text-base">🎉</span> Waive (₦0)
+                  </button>
+                </div>
               </div>
 
               {!isFeeWaived ? (
-                <div className="space-y-2 animate-in slide-in-from-top-1 duration-150">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-neutral-400 font-bold uppercase font-mono">Custom Fee Amount (₦)</span>
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">₦</span>
-                    <input
-                      id="fee-input"
-                      type="text"
-                      inputMode="decimal"
-                      value={feeInput}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/,/g, '');
-                        if (/^\d*\.?\d*$/.test(val)) {
-                          setFeeInput(formatNumber(val));
-                        }
-                      }}
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-8 pr-3 py-2.5 text-neutral-800 font-mono text-sm focus:outline-none focus:border-[#00B87A] font-bold"
-                      placeholder="Enter Fee Amount"
-                      required
-                    />
-                    <p className="text-[10px] text-neutral-400 mt-1.5 leading-tight font-medium font-mono">
-                      💡 Cashier Manual Entry: Type exact customer charge. No automatic or hidden fees are added.
-                    </p>
-                  </div>
+                <div className="relative group animate-in fade-in slide-in-from-top-2 duration-200">
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-amber-300 font-mono group-focus-within:text-amber-500 transition-colors">₦</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={feeInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/,/g, '');
+                      if (/^\d*\.?\d*$/.test(val)) {
+                        setFeeInput(formatNumber(val));
+                      }
+                    }}
+                    className="w-full bg-white border-2 border-amber-100 hover:border-amber-200 focus:border-amber-500 rounded-[24px] pl-12 pr-6 py-4 text-amber-900 font-mono text-2xl focus:outline-none font-black placeholder:text-neutral-100 transition-all shadow-inner"
+                    placeholder="0.00"
+                  />
                 </div>
               ) : (
-                <div className="bg-amber-50 border border-amber-200/50 p-3 rounded-xl text-[11px] text-amber-800 leading-normal font-semibold animate-in fade-in duration-150">
-                  🎁 <strong>Customer Fee Waived (Free of Charge).</strong> This transaction will be processed without any extra manager commissions charged to the client.
+                <div className="p-4 bg-rose-50/50 border border-dashed border-rose-200 rounded-[20px] flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <span className="text-xl">🎉</span>
+                  <div className="flex-1">
+                    <p className="text-[10px] uppercase font-black tracking-widest text-rose-600 font-mono">Charges Waived (₦0)</p>
+                    <p className="text-[10px] text-neutral-500 font-semibold leading-relaxed">This transaction fee is fully waived. The customer will not be charged any service commission fee.</p>
+                  </div>
                 </div>
               )}
             </div>
@@ -1400,161 +1752,215 @@ export function TransactionForm({
 
           {/* Fee Billing Method Selector Option - Custom OPay Settlement Guide */}
           {type === 'Withdrawal' ? (
-            <div className="bg-[#00B87A]/5 border border-neutral-200 rounded-2xl p-4.5 space-y-4 shadow-xs">
+            <div className="bg-gradient-to-b from-emerald-50/10 via-white to-white border-2 border-emerald-100 rounded-[32px] p-5 sm:p-6 space-y-5 shadow-lg shadow-emerald-50/20">
               
               {/* Scenario Toggle Block */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 font-mono">
-                  💡 Cashier Scenario (How is withdrawal specified?)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-emerald-50 text-[#00B87A] text-xs shadow-2xs font-bold">💡</span>
+                  <label className="block text-xs font-black uppercase tracking-wider text-neutral-600 font-sans">
+                    Cashier Scenario (How is withdrawal specified?)
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     key="scenario-handout"
                     type="button"
                     onClick={() => setWithdrawScenario('CashHandout')}
-                    className={`py-2 px-1.5 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex flex-col items-center justify-center gap-1 leading-normal ${
+                    className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 leading-normal active:scale-[0.98] duration-150 ${
                       withdrawScenario === 'CashHandout'
-                        ? 'bg-[#00B87A] border-[#00B87A] text-white shadow-md font-black'
-                        : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-800'
+                        ? 'bg-[#00B87A] border-[#00B87A] text-white shadow-md shadow-emerald-100 font-black'
+                        : 'bg-white border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-200'
                     }`}
                   >
-                    <span className="text-sm">💵 Cash Handout</span>
-                    <span className="text-[9px] font-mono opacity-90">"Customer wants ₦{amount.toLocaleString()} Cash"</span>
+                    <span className="text-sm font-extrabold">💵 Cash Handout</span>
+                    <span className={`text-[10px] font-mono leading-none ${withdrawScenario === 'CashHandout' ? 'text-emerald-100 font-bold' : 'text-neutral-400 font-medium'}`}>
+                      "Customer wants ₦{amount.toLocaleString()} Cash"
+                    </span>
                   </button>
                   <button
                     key="scenario-swipe"
                     type="button"
                     onClick={() => setWithdrawScenario('CardSwipe')}
-                    className={`py-2 px-1.5 rounded-xl text-xs font-bold border transition cursor-pointer text-center flex flex-col items-center justify-center gap-1 leading-normal ${
+                    className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-1.5 leading-normal active:scale-[0.98] duration-150 ${
                       withdrawScenario === 'CardSwipe'
-                        ? 'bg-blue-600 border-blue-600 text-white shadow-md font-black'
-                        : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-800'
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-100 font-black'
+                        : 'bg-white border-neutral-100 text-neutral-500 hover:text-neutral-800 hover:border-neutral-200'
                     }`}
                   >
-                    <span className="text-sm">💳 Card Swipe</span>
-                    <span className="text-[9px] font-mono opacity-90">"Debit ₦{amount.toLocaleString()} from Card"</span>
+                    <span className="text-sm font-extrabold">💳 Card Swipe</span>
+                    <span className={`text-[10px] font-mono leading-none ${withdrawScenario === 'CardSwipe' ? 'text-blue-100 font-bold' : 'text-neutral-400 font-medium'}`}>
+                      "Debit ₦{amount.toLocaleString()} from Card"
+                    </span>
                   </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 border-b border-neutral-100 pb-2 pt-1">
-                <span className="text-base">📟</span>
-                <div>
-                  <h4 className="text-xs font-black text-neutral-800 uppercase tracking-wider font-mono">
-                    {provider} POS Charges Settlement Calculator
+              {/* POS Charges Settlement Calculator Subtitle */}
+              <div className="flex items-center gap-3 border-t border-b border-neutral-100 py-3 mt-1">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-[#00B87A] flex items-center justify-center text-white text-base shadow-sm shrink-0">
+                  📟
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-black text-neutral-800 uppercase tracking-wide font-sans flex items-center gap-1.5 leading-none">
+                    <span>{provider} POS Charges Settlement Calculator</span>
                   </h4>
-                  <p className="text-[10px] text-neutral-500 font-medium">
+                  <p className="text-[11px] text-neutral-500 font-semibold leading-normal">
                     Select how the customer is paying the charges (Add to Card vs Separate Cash).
                   </p>
                 </div>
               </div>
 
               {/* Three Option Cards */}
-              <div className="grid grid-cols-1 gap-2.5">
+              <div className="grid grid-cols-1 gap-3">
                 
                 {/* 1. Add Charges to Card Debit (YES) */}
                 <button
                   type="button"
                   onClick={() => setWithdrawChargeMode('CardAddOn')}
-                  className={`p-3 rounded-xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
+                  className={`p-4 rounded-2xl border-2 text-left cursor-pointer transition-all duration-200 flex flex-col gap-3 active:scale-[0.99] ${
                     withdrawChargeMode === 'CardAddOn'
-                      ? 'border-[#00B87A] bg-emerald-50/30 shadow-xs'
-                      : 'border-neutral-200 bg-white hover:bg-neutral-50/60'
+                      ? 'border-[#00B87A] bg-emerald-50/15 shadow-md ring-4 ring-emerald-500/5'
+                      : 'border-neutral-100 bg-white hover:bg-neutral-50/50 hover:border-neutral-200'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-black text-neutral-800 font-mono">
-                      💳 Card Add-on (Charges inside Card)
+                    <span className="text-xs sm:text-[13px] font-black text-neutral-800 flex items-center gap-1.5 leading-none">
+                      <span>💳</span> Card Add-on (Charges inside Card)
                     </span>
-                    <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">
+                    <span className="text-[9px] font-black uppercase px-2.5 py-1 rounded-lg bg-emerald-100 border border-emerald-200 text-emerald-850 font-mono tracking-wider shadow-2xs shrink-0 leading-none">
                       YES (Add charges)
                     </span>
                   </div>
-                  <p className="text-[10px] text-neutral-500 font-medium mt-1 leading-relaxed">
-                    Customer says: <strong className="text-neutral-700">"Yes, add the charges to my card."</strong> Card is charged/swiped for <strong className="text-[#00B87A] font-mono font-bold">{formatNaira(cardSwipe)}</strong>. You hand out <strong className="text-neutral-800 font-mono font-bold">{formatNaira(cashHandout)}</strong> cash.
-                  </p>
+                  <div className="text-[11px] text-neutral-600 font-semibold leading-relaxed space-y-2">
+                    <p className="italic text-neutral-500">
+                      Customer says: <strong className="text-neutral-800 font-extrabold">"Yes, add the charges to my card."</strong>
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-0.5">
+                      <span className="bg-emerald-50 text-[#00B87A] border border-emerald-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💳 Charge Terminal: {formatNaira(cardSwipe)}
+                      </span>
+                      <span className="bg-neutral-50 text-neutral-700 border border-neutral-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💵 Hand out Cash: {formatNaira(cashHandout)}
+                      </span>
+                    </div>
+                  </div>
                 </button>
 
                 {/* 2. Customer Pays Charges in Cash (NO) */}
                 <button
                   type="button"
                   onClick={() => setWithdrawChargeMode('SeparateCash')}
-                  className={`p-3 rounded-xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
+                  className={`p-4 rounded-2xl border-2 text-left cursor-pointer transition-all duration-200 flex flex-col gap-3 active:scale-[0.99] ${
                     withdrawChargeMode === 'SeparateCash'
-                      ? 'border-blue-500 bg-blue-50/20 shadow-xs'
-                      : 'border-neutral-200 bg-white hover:bg-neutral-50/60'
+                      ? 'border-blue-500 bg-blue-50/15 shadow-md ring-4 ring-blue-500/5'
+                      : 'border-neutral-100 bg-white hover:bg-neutral-50/50 hover:border-neutral-200'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-black text-neutral-800 font-mono">
-                      💵 Separate Cash (Customer pays Cash)
+                    <span className="text-xs sm:text-[13px] font-black text-neutral-800 flex items-center gap-1.5 leading-none">
+                      <span>💵</span> Separate Cash (Customer pays Cash)
                     </span>
-                    <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-850 font-mono">
+                    <span className="text-[9px] font-black uppercase px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-200 text-amber-850 font-mono tracking-wider shadow-2xs shrink-0 leading-none">
                       NO (Debit exactly base)
                     </span>
                   </div>
-                  <p className="text-[10px] text-neutral-500 font-medium mt-1 leading-relaxed">
-                    Customer says: <strong className="text-neutral-700">"No, debit exactly {formatNaira(cardSwipe)}."</strong> Card is debited <strong className="text-blue-600 font-mono font-bold">{formatNaira(cardSwipe)}</strong>. They pay <strong className="text-amber-700 font-mono font-bold">{formatNaira(customerFee)}</strong> separately in physical cash.
-                  </p>
+                  <div className="text-[11px] text-neutral-600 font-semibold leading-relaxed space-y-2">
+                    <p className="italic text-neutral-500">
+                      Customer says: <strong className="text-neutral-800 font-extrabold">"No, debit exactly {formatNaira(cardSwipe)}."</strong>
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-0.5">
+                      <span className="bg-blue-50 text-blue-700 border border-blue-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💳 Charge Terminal: {formatNaira(cardSwipe)}
+                      </span>
+                      <span className="bg-amber-50 text-amber-700 border border-amber-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💵 Collect Cash Fee: {formatNaira(customerFee)}
+                      </span>
+                      <span className="bg-neutral-50 text-neutral-700 border border-neutral-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💵 Hand out Cash: {formatNaira(cashHandout)}
+                      </span>
+                    </div>
+                  </div>
                 </button>
 
                 {/* 3. Deduct Charges from Cash (Customer gets less cash) */}
                 <button
                   type="button"
                   onClick={() => setWithdrawChargeMode('DeductFromCash')}
-                  className={`p-3 rounded-xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
+                  className={`p-4 rounded-2xl border-2 text-left cursor-pointer transition-all duration-200 flex flex-col gap-3 active:scale-[0.99] ${
                     withdrawChargeMode === 'DeductFromCash'
-                      ? 'border-purple-500 bg-purple-50/20 shadow-xs'
-                      : 'border-neutral-200 bg-white hover:bg-neutral-50/60'
+                      ? 'border-purple-500 bg-purple-50/15 shadow-md ring-4 ring-purple-500/5'
+                      : 'border-neutral-100 bg-white hover:bg-neutral-50/50 hover:border-neutral-200'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-black text-neutral-800 font-mono">
-                      ✂️ Deduct from Cash (Give Less Cash)
+                    <span className="text-xs sm:text-[13px] font-black text-neutral-800 flex items-center gap-1.5 leading-none">
+                      <span>✂️</span> Deduct from Cash (Give Less Cash)
                     </span>
-                    <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-mono">
+                    <span className="text-[9px] font-black uppercase px-2.5 py-1 rounded-lg bg-purple-100 border border-purple-200 text-purple-850 font-mono tracking-wider shadow-2xs shrink-0 leading-none">
                       DEDUCT FROM CASH
                     </span>
                   </div>
-                  <p className="text-[10px] text-neutral-500 font-medium mt-1 leading-relaxed">
-                    Card is charged/swiped for <strong className="text-neutral-700 font-mono font-bold">{formatNaira(cardSwipe)}</strong>. You deduct the fee of <strong className="text-neutral-700 font-mono font-bold">{formatNaira(customerFee)}</strong> and hand over <strong className="text-purple-700 font-mono font-bold">{formatNaira(cashHandout)}</strong> in physical cash.
-                  </p>
+                  <div className="text-[11px] text-neutral-600 font-semibold leading-relaxed space-y-2">
+                    <p className="italic text-neutral-500">
+                      Deduct the fee of {formatNaira(customerFee)} from the card amount and hand over the rest.
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-0.5">
+                      <span className="bg-purple-50 text-purple-700 border border-purple-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💳 Charge Terminal: {formatNaira(cardSwipe)}
+                      </span>
+                      <span className="bg-rose-50 text-rose-700 border border-rose-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        ✂️ Deduct Fee: {formatNaira(customerFee)}
+                      </span>
+                      <span className="bg-neutral-50 text-neutral-700 border border-neutral-150 px-2.5 py-1 rounded-lg font-mono text-[10px] font-black shadow-3xs">
+                        💵 Hand out Cash: {formatNaira(cashHandout)}
+                      </span>
+                    </div>
+                  </div>
                 </button>
 
               </div>
 
               {/* LOSS PREVENTION ALERT FLAG */}
               {type === 'Withdrawal' && (
-                <div className={`p-3 rounded-xl border flex gap-2.5 items-start ${
+                <div className={`p-4 rounded-2xl border-l-4 flex gap-3.5 items-start animate-in fade-in slide-in-from-top-1 duration-250 shadow-xs ${
                   withdrawChargeMode === 'SeparateCash' 
-                    ? 'bg-amber-50 border-amber-200 text-amber-850 animate-bounce'
+                    ? 'bg-gradient-to-r from-amber-50/50 to-white border-amber-500 text-amber-900 shadow-sm shadow-amber-50/50'
                     : withdrawChargeMode === 'DeductFromCash'
-                    ? 'bg-purple-50 border-purple-200 text-purple-850'
-                    : 'bg-emerald-50 border-emerald-200 text-emerald-850'
+                    ? 'bg-gradient-to-r from-purple-50/50 to-white border-purple-500 text-purple-900'
+                    : 'bg-gradient-to-r from-emerald-50/50 to-white border-emerald-500 text-emerald-900'
                 }`}>
-                  <span className="text-lg">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
+                    withdrawChargeMode === 'SeparateCash' 
+                      ? 'bg-amber-100 text-amber-600 animate-pulse'
+                      : withdrawChargeMode === 'DeductFromCash'
+                      ? 'bg-purple-100 text-purple-600'
+                      : 'bg-emerald-100 text-emerald-600'
+                  }`}>
                     {withdrawChargeMode === 'SeparateCash' ? '⚠️' : '💡'}
-                  </span>
-                  <div className="space-y-1">
-                    <h5 className="text-[10px] font-extrabold uppercase font-mono tracking-wider">
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <h5 className="text-[10.5px] font-black uppercase tracking-wider font-sans leading-none">
                       {withdrawChargeMode === 'SeparateCash' ? 'Cashier Warning: Collect Cash Fee First!' : 'Cashier Instruction'}
                     </h5>
-                    <p className="text-[10px] leading-relaxed font-sans font-medium">
+                    <p className="text-[11px] leading-relaxed font-sans font-semibold text-neutral-600">
                       {withdrawChargeMode === 'SeparateCash' ? (
                         <span>
-                          The customer card will be debited <strong>{formatNaira(cardSwipe)}</strong>. 
-                          The terminal will settle only <strong>{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</strong> in your POS wallet.
-                          <strong> DO NOT GIVE THE CUSTOMER {formatNaira(cardSwipe)} CASH </strong> until they hand you <strong>{formatNaira(customerFee)} cash</strong> for the charges!
+                          The customer card will be debited <strong className="text-neutral-800 font-black">{formatNaira(cardSwipe)}</strong>. 
+                          The terminal will settle only <strong className="text-neutral-800 font-black">{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</strong> in your POS wallet.
+                          <span className="block mt-1 text-rose-700 bg-rose-50 border border-rose-100 px-2.5 py-1.5 rounded-lg text-[10px] font-black leading-normal uppercase">
+                            🚨 DO NOT GIVE THE CUSTOMER {formatNaira(cardSwipe)} CASH until they hand you {formatNaira(customerFee)} cash first!
+                          </span>
                         </span>
                       ) : withdrawChargeMode === 'DeductFromCash' ? (
                         <span>
-                          The customer card will be debited <strong>{formatNaira(cardSwipe)}</strong>.
-                          You must only count and give the customer exactly <strong>{formatNaira(cashHandout)} cash</strong>, because the fee is deducted from the cash!
+                          The customer card will be debited <strong className="text-neutral-800 font-black">{formatNaira(cardSwipe)}</strong>.
+                          You must only count and give the customer exactly <strong className="text-purple-700 font-black">{formatNaira(cashHandout)} cash</strong>, because the fee is deducted from the cash!
                         </span>
                       ) : (
                         <span>
-                          Excellent! The card will be debited <strong>{formatNaira(cardSwipe)}</strong> (includes the charge).
-                          Hand over exactly <strong>{formatNaira(cashHandout)} cash</strong> to the customer.
+                          Excellent! The card will be debited <strong className="text-[#00B87A] font-black">{formatNaira(cardSwipe)}</strong> (includes the charge).
+                          Hand over exactly <strong className="text-neutral-800 font-black">{formatNaira(cashHandout)} cash</strong> to the customer.
                           The rest stays as your business profit.
                         </span>
                       )}
@@ -1564,110 +1970,171 @@ export function TransactionForm({
               )}
 
               {/* Dynamic Step-by-Step POS Reconciliation Guide */}
-              <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2 font-mono text-[10px]">
-                <div className="flex justify-between border-b border-neutral-100 pb-1 text-[8px] text-neutral-450 font-black uppercase tracking-wider">
-                  <span>Step-by-Step Action Guide</span>
+              <div className="bg-neutral-50/30 border border-neutral-200/60 rounded-2xl p-4 space-y-3 shadow-3xs">
+                <div className="flex items-center justify-between border-b border-neutral-100 pb-2 text-[10px] text-neutral-400 font-black uppercase tracking-wider font-sans leading-none">
+                  <span className="flex items-center gap-1.5">📋 Step-by-Step Action Guide</span>
                   <span>Amount</span>
                 </div>
-                
-                {withdrawChargeMode === 'CardAddOn' ? (
-                  <>
-                    <div className="flex justify-between font-bold text-neutral-850">
-                      <span>1. Input Amount on POS Terminal:</span>
-                      <span className="text-emerald-600 font-black text-xs">
-                        {formatNaira(cardSwipe)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-neutral-500">
-                      <span>2. {provider} Terminal Fee ({activeFeeRate}%):</span>
-                      <span>-{formatNaira(liveTerminalFee)}</span>
-                    </div>
-                    {liveCbnCharge > 0 && (
-                      <div className="flex justify-between text-neutral-500">
-                        <span>3. CBN EMTL Levy:</span>
-                        <span>-{formatNaira(liveCbnCharge)}</span>
+                <div className="space-y-2.5 font-sans text-[11px] font-semibold text-neutral-600">
+                  {withdrawChargeMode === 'CardAddOn' ? (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-emerald-50 text-[#00B87A] text-[9px] font-black flex items-center justify-center border border-emerald-100 shrink-0">1</span>
+                          <span>Input Amount on POS Terminal:</span>
+                        </span>
+                        <span className="text-emerald-600 font-mono font-black text-[12px]">
+                          {formatNaira(cardSwipe)}
+                        </span>
                       </div>
-                    )}
-                    <div className="flex justify-between font-extrabold text-blue-700 pt-1 border-t border-neutral-100">
-                      <span>4. Settlement Received in POS Wallet:</span>
-                      <span>{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-neutral-600">
-                      <span>5. Physical Cash given to Customer:</span>
-                      <span className="text-neutral-800 font-bold">{formatNaira(cashHandout)}</span>
-                    </div>
-                    <div className="flex justify-between font-black text-emerald-700 border-t border-dashed border-neutral-200 pt-1">
-                      <span>🎉 RECONCILED AGENT PROFIT:</span>
-                      <span>+{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                  </>
-                ) : withdrawChargeMode === 'SeparateCash' ? (
-                  <>
-                    <div className="flex justify-between font-bold text-neutral-850">
-                      <span>1. Input Amount on POS Terminal:</span>
-                      <span className="text-blue-600 font-black text-xs">
-                        {formatNaira(cardSwipe)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-neutral-500">
-                      <span>2. {provider} Terminal Fee ({activeFeeRate}%):</span>
-                      <span>-{formatNaira(liveTerminalFee)}</span>
-                    </div>
-                    {liveCbnCharge > 0 && (
-                      <div className="flex justify-between text-neutral-500">
-                        <span>3. CBN EMTL Levy:</span>
-                        <span>-{formatNaira(liveCbnCharge)}</span>
+                      <div className="flex justify-between items-center text-neutral-500">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">2</span>
+                          <span>{provider} Terminal Fee ({activeFeeRate}%):</span>
+                        </span>
+                        <span className="font-mono text-[11px]">-{formatNaira(liveTerminalFee)}</span>
                       </div>
-                    )}
-                    <div className="flex justify-between font-extrabold text-blue-700 pt-1 border-t border-neutral-100">
-                      <span>4. Settlement Received in POS Wallet:</span>
-                      <span>{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-neutral-600">
-                      <span>5. Physical Fee Cash Collected:</span>
-                      <span className="text-emerald-600 font-bold">+{formatNaira(customerFee)}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-neutral-600">
-                      <span>6. Physical Cash given to Customer:</span>
-                      <span className="text-neutral-800 font-bold">{formatNaira(cashHandout)}</span>
-                    </div>
-                    <div className="flex justify-between font-black text-emerald-700 border-t border-dashed border-neutral-200 pt-1">
-                      <span>🎉 RECONCILED AGENT PROFIT:</span>
-                      <span>+{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between font-bold text-neutral-850">
-                      <span>1. Input Amount on POS Terminal:</span>
-                      <span className="text-neutral-800 font-black text-xs">
-                        {formatNaira(cardSwipe)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-neutral-500">
-                      <span>2. {provider} Terminal Fee ({activeFeeRate}%):</span>
-                      <span>-{formatNaira(liveTerminalFee)}</span>
-                    </div>
-                    {liveCbnCharge > 0 && (
-                      <div className="flex justify-between text-neutral-500">
-                        <span>3. CBN EMTL Levy:</span>
-                        <span>-{formatNaira(liveCbnCharge)}</span>
+                      {liveCbnCharge > 0 && (
+                        <div className="flex justify-between items-center text-neutral-500">
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">3</span>
+                            <span>CBN EMTL Levy:</span>
+                          </span>
+                          <span className="font-mono text-[11px]">-{formatNaira(liveCbnCharge)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-blue-700 pt-2 border-t border-dashed border-neutral-200">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-blue-50 text-blue-600 text-[9px] font-black flex items-center justify-center border border-blue-100 shrink-0">4</span>
+                          <span className="font-bold">Settlement Received in POS Wallet:</span>
+                        </span>
+                        <span className="font-mono font-black text-[12px]">{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
                       </div>
-                    )}
-                    <div className="flex justify-between font-extrabold text-blue-700 pt-1 border-t border-neutral-100">
-                      <span>4. Settlement Received in POS Wallet:</span>
-                      <span>{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-purple-700">
-                      <span>5. Cash to hand over (Charges Deducted):</span>
-                      <span className="font-extrabold">{formatNaira(cashHandout)}</span>
-                    </div>
-                    <div className="flex justify-between font-black text-emerald-700 border-t border-dashed border-neutral-200 pt-1">
-                      <span>🎉 RECONCILED AGENT PROFIT:</span>
-                      <span>+{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}</span>
-                    </div>
-                  </>
-                )}
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-600 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">5</span>
+                          <span>Physical Cash given to Customer:</span>
+                        </span>
+                        <span className="font-mono text-[11px] font-bold text-neutral-800">{formatNaira(cashHandout)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
+                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                          <span>🎉</span> Reconciled Agent Profit:
+                        </span>
+                        <span className="font-mono font-extrabold text-[13px] leading-none">
+                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
+                        </span>
+                      </div>
+                    </>
+                  ) : withdrawChargeMode === 'SeparateCash' ? (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-blue-50 text-blue-600 text-[9px] font-black flex items-center justify-center border border-blue-100 shrink-0">1</span>
+                          <span>Input Amount on POS Terminal:</span>
+                        </span>
+                        <span className="text-blue-600 font-mono font-black text-[12px]">
+                          {formatNaira(cardSwipe)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-neutral-500">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">2</span>
+                          <span>{provider} Terminal Fee ({activeFeeRate}%):</span>
+                        </span>
+                        <span className="font-mono text-[11px]">-{formatNaira(liveTerminalFee)}</span>
+                      </div>
+                      {liveCbnCharge > 0 && (
+                        <div className="flex justify-between items-center text-neutral-500">
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">3</span>
+                            <span>CBN EMTL Levy:</span>
+                          </span>
+                          <span className="font-mono text-[11px]">-{formatNaira(liveCbnCharge)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-blue-700 pt-2 border-t border-dashed border-neutral-200">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-blue-50 text-blue-600 text-[9px] font-black flex items-center justify-center border border-blue-100 shrink-0">4</span>
+                          <span className="font-bold">Settlement Received in POS Wallet:</span>
+                        </span>
+                        <span className="font-mono font-black text-[12px]">{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-emerald-600">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-emerald-50 text-emerald-600 text-[9px] font-black flex items-center justify-center border border-emerald-100 shrink-0">5</span>
+                          <span>Physical Fee Cash Collected:</span>
+                        </span>
+                        <span className="font-mono font-extrabold text-[11px]">+{formatNaira(customerFee)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-600 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">6</span>
+                          <span>Physical Cash given to Customer:</span>
+                        </span>
+                        <span className="font-mono text-[11px] font-bold text-neutral-800">{formatNaira(cashHandout)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
+                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                          <span>🎉</span> Reconciled Agent Profit:
+                        </span>
+                        <span className="font-mono font-extrabold text-[13px] leading-none">
+                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-50 text-neutral-700 text-[9px] font-black flex items-center justify-center border border-neutral-200 shrink-0">1</span>
+                          <span>Input Amount on POS Terminal:</span>
+                        </span>
+                        <span className="text-neutral-800 font-mono font-black text-[12px]">
+                          {formatNaira(cardSwipe)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-neutral-500">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">2</span>
+                          <span>{provider} Terminal Fee ({activeFeeRate}%):</span>
+                        </span>
+                        <span className="font-mono text-[11px]">-{formatNaira(liveTerminalFee)}</span>
+                      </div>
+                      {liveCbnCharge > 0 && (
+                        <div className="flex justify-between items-center text-neutral-500">
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 rounded-full bg-neutral-100 text-neutral-500 text-[9px] font-black flex items-center justify-center border border-neutral-150 shrink-0">3</span>
+                            <span>CBN EMTL Levy:</span>
+                          </span>
+                          <span className="font-mono text-[11px]">-{formatNaira(liveCbnCharge)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-blue-700 pt-2 border-t border-dashed border-neutral-200">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-blue-50 text-blue-600 text-[9px] font-black flex items-center justify-center border border-blue-100 shrink-0">4</span>
+                          <span className="font-bold">Settlement Received in POS Wallet:</span>
+                        </span>
+                        <span className="font-mono font-black text-[12px]">{formatNaira(cardSwipe - liveTerminalFee - liveCbnCharge)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-purple-700">
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-purple-50 text-purple-600 text-[9px] font-black flex items-center justify-center border border-purple-100 shrink-0">5</span>
+                          <span>Cash to hand over (Charges Deducted):</span>
+                        </span>
+                        <span className="font-mono font-extrabold text-[11px]">{formatNaira(cashHandout)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
+                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                          <span>🎉</span> Reconciled Agent Profit:
+                        </span>
+                        <span className="font-mono font-extrabold text-[13px] leading-none">
+                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -1708,8 +2175,6 @@ export function TransactionForm({
               </p>
             </div>
           )}
-
-          {/* Assigned Employee / Operator selector */}
           <div className="bg-neutral-50 border border-neutral-100 p-3 rounded-xl flex items-center justify-between">
             <span className="text-xs text-neutral-550 font-medium">Employee Shift Authority:</span>
             {currentUser.role === 'Manager' ? (
@@ -1730,193 +2195,260 @@ export function TransactionForm({
             )}
           </div>
 
-          {mode === 'SplitWithdrawal' && (
-            <div className="bg-neutral-55/40 border border-neutral-200 rounded-2xl p-4.5 space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500 font-mono">
-                Split Transfers
-              </label>
-              <div className="space-y-3.5">
+          <div className="h-2" />
+
+          {mode === 'SplitSession' && (
+            <div className="bg-emerald-50/40 border border-emerald-100 rounded-2xl p-5 space-y-5 animate-in slide-in-from-top-2 duration-300 shadow-sm mt-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-2xl bg-[#00B87A] text-white flex items-center justify-center text-xs font-black shadow-lg shadow-emerald-100">
+                      <Zap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-widest text-[#00B87A] font-mono leading-none">
+                        Split Task Distribution
+                      </label>
+                      <p className="text-[9px] text-emerald-600/80 font-bold">Configure payouts for this session.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-8">
+                <div className="space-y-2">
+                  <label className="block text-[9px] font-black uppercase tracking-widest text-neutral-400 font-mono">
+                    Distribution Mode
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['Transfer', 'Airtime', 'Data'] as const).map((d) => {
+                      const isSelected = distributionType === d;
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setDistributionType(d)}
+                          className={`py-2 px-1 rounded-xl text-[9px] font-black border transition-all cursor-pointer text-center ${
+                            isSelected 
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                              : 'bg-white border-neutral-200 text-neutral-500'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-[9px] font-black uppercase tracking-widest text-neutral-400 font-mono">
+                    Distribution Machine
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['OPay', 'Moniepoint', 'PalmPay'] as const).map((p) => {
+                      const isSelected = distributionProvider === p;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setDistributionProvider(p)}
+                          className={`py-2 px-1 rounded-xl text-[9px] font-black border transition-all cursor-pointer text-center ${
+                            isSelected 
+                              ? 'bg-amber-600 border-amber-600 text-white shadow-md' 
+                              : 'bg-white border-neutral-100 text-neutral-500'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-4 pt-1">
                 {subTransfers.map((st, index) => (
                   <div 
                     key={index} 
-                    className="bg-white border border-neutral-200 p-4 rounded-xl space-y-3 shadow-xs relative hover:border-[#00B87A]/35 transition-all"
+                    className="bg-white border border-neutral-200 p-4 rounded-xl space-y-3.5 shadow-xs relative hover:border-[#00B87A]/40 transition-all group"
                   >
                     {/* Header Row with Serial Number and Delete button */}
                     <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
-                      <span className="text-xs font-bold text-neutral-500 font-mono flex items-center gap-1.5">
-                        <span className="flex items-center justify-center w-5 h-5 bg-[#00B87A]/10 text-[#00B87A] rounded-full text-[10px] font-black">
-                          #{index + 1}
+                      <div className="flex items-center gap-2">
+                         <div className="w-5 h-5 rounded-md bg-neutral-100 text-neutral-500 flex items-center justify-center text-[9px] font-bold font-mono">
+                          {index + 1}
+                        </div>
+                        <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest font-mono">
+                          {distributionType} SEGMENT
                         </span>
-                        Transfer Entry #{index + 1}
-                      </span>
-                      {subTransfers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setSubTransfers(subTransfers.filter((_, i) => i !== index))}
-                          className="text-red-500 hover:text-red-600 hover:bg-red-50/50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                          title="Remove this split"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {remainingBalance > 0 && index === subTransfers.length - 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newSub = [...subTransfers];
+                              newSub[index].amount += remainingBalance;
+                              setSubTransfers(newSub);
+                            }}
+                            className="text-[8px] font-black uppercase text-[#00B87A] bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 hover:bg-emerald-100 transition-all"
+                          >
+                            Fill Balance
+                          </button>
+                        )}
+                        {subTransfers.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newSub = [...subTransfers];
+                              newSub.splice(index, 1);
+                              setSubTransfers(newSub);
+                            }}
+                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Inputs Row with larger touch targets and labels */}
-                    <div className="grid grid-cols-12 gap-3.5">
-                      {/* Account Name */}
-                      <div className="col-span-12 sm:col-span-5 space-y-1.5">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                          Account Name (Recipient)
-                        </label>
-                        <input
-                          placeholder="Recipient Name"
-                          value={st.recipientName}
-                          onChange={(e) => {
-                            const updated = [...subTransfers];
-                            updated[index].recipientName = e.target.value;
-                            setSubTransfers(updated);
-                          }}
-                          className="w-full text-sm p-3 h-11 rounded-lg border border-neutral-250 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] bg-white text-neutral-800 font-medium shadow-xs transition"
-                        />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-[9px] font-black text-neutral-450 uppercase tracking-widest font-mono">Recipient Name</label>
+                        <div className="relative">
+                          <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                          <input
+                            type="text"
+                            value={st.recipientName}
+                            onChange={(e) => {
+                              const newSub = [...subTransfers];
+                              newSub[index].recipientName = e.target.value;
+                              setSubTransfers(newSub);
+                            }}
+                            placeholder="Beneficiary Name"
+                            className="w-full pl-9 pr-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                          />
+                        </div>
                       </div>
-
-                      {/* Account Number */}
-                      <div className="col-span-12 sm:col-span-4 space-y-1.5">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                          Account Number
+                      <div className="space-y-1.5">
+                        <label className="block text-[9px] font-black text-neutral-450 uppercase tracking-widest font-mono">
+                          {distributionType === 'Transfer' ? 'Account Number' : 'Phone Number'}
                         </label>
-                        <input
-                          placeholder="Acct No"
-                          value={st.accountNumber}
-                          onChange={(e) => {
-                            const updated = [...subTransfers];
-                            updated[index].accountNumber = e.target.value;
-                            setSubTransfers(updated);
-                          }}
-                          className="w-full text-sm p-3 h-11 rounded-lg border border-neutral-250 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] bg-white text-neutral-800 font-mono shadow-xs transition"
-                        />
+                        <div className="relative">
+                          {distributionType === 'Transfer' ? (
+                            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                          ) : (
+                            <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                          )}
+                          <input
+                            type="text"
+                            value={st.accountNumber}
+                            onChange={(e) => {
+                              const newSub = [...subTransfers];
+                              newSub[index].accountNumber = e.target.value;
+                              setSubTransfers(newSub);
+                            }}
+                            placeholder={distributionType === 'Transfer' ? "10-digit number" : "Phone number"}
+                            className="w-full pl-9 pr-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                          />
+                        </div>
                       </div>
+                    </div>
 
-                      {/* Amount with Serial Number */}
-                      <div className="col-span-12 sm:col-span-3 space-y-1.5">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-450 font-mono flex items-center justify-between">
-                          <span>Amount</span>
-                          <span className="text-[#00B87A] font-black text-[10px]">Amt #{index + 1}</span>
-                        </label>
+                    <div className="space-y-1.5">
+                      <label className="block text-[9px] font-black text-neutral-450 uppercase tracking-widest font-mono">Allocation Amount</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-neutral-500 font-mono">₦</span>
                         <input
-                          placeholder="₦ 0"
                           type="number"
                           value={st.amount || ''}
                           onChange={(e) => {
-                            const updated = [...subTransfers];
-                            updated[index].amount = parseFloat(e.target.value) || 0;
-                            setSubTransfers(updated);
+                            const val = parseFloat(e.target.value) || 0;
+                            const newSub = [...subTransfers];
+                            newSub[index].amount = val;
+                            setSubTransfers(newSub);
                           }}
-                          className="w-full text-sm p-3 h-11 rounded-lg border border-neutral-250 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] bg-white font-bold text-neutral-800 shadow-xs transition"
+                          placeholder="0.00"
+                          className="w-full pl-7 pr-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs font-black font-mono text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                         />
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={() => setSubTransfers([...subTransfers, { recipientName: '', accountNumber: '', amount: 0 }])}
-                className="flex items-center gap-1.5 text-xs text-[#00B87A] font-black cursor-pointer bg-white border border-neutral-200 px-3 py-2 rounded-xl hover:bg-neutral-50 transition-colors shadow-xs"
-              >
-                <Plus className="w-4 h-4" /> Add Split Transfer
-              </button>
-              <div className="text-xs font-bold text-neutral-700 bg-neutral-100 p-3 rounded-lg space-y-1">
-                <div className="flex justify-between">
-                  <span>Main Withdrawal:</span>
-                  <span>{formatNaira(amount)}</span>
+              
+              <div className="flex items-center justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => setSubTransfers([...subTransfers, { recipientName: '', accountNumber: '', amount: 0 }])}
+                  className="flex items-center gap-2.5 px-6 py-3.5 bg-neutral-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest border-none hover:bg-neutral-800 transition-all cursor-pointer shadow-xl active:scale-95"
+                >
+                  <PlusCircle className="w-4 h-4 text-emerald-400" /> 
+                  Add Distribution Task
+                </button>
+                
+                <div className="flex flex-col items-end">
+                   <div className={`text-[10px] font-black font-mono flex items-center gap-1.5 ${remainingBalance < 0 ? 'text-red-600' : 'text-neutral-500'}`}>
+                    {remainingBalance < 0 ? <AlertTriangle className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
+                    <span>{remainingBalance < 0 ? 'Shortfall:' : 'Cash to Cust:'}</span>
+                    <span className="text-xs">{formatNaira(Math.abs(remainingBalance))}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-neutral-500">
-                  <span>Total Transfers:</span>
-                  <span>-{formatNaira(subTransfers.reduce((sum, st) => sum + st.amount, 0))}</span>
-                </div>
-                <div className="flex justify-between text-neutral-500">
-                  <span>Total Fees:</span>
-                  <span>-{formatNaira(customerFee)}</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-neutral-200">
-                  <span>Cash to Customer:</span>
-                  <span className="text-[#00B87A]">{formatNaira(amount - subTransfers.reduce((sum, st) => sum + st.amount, 0) - customerFee)}</span>
+              </div>
+
+              <div className="text-[10px] font-bold text-neutral-700 bg-white/60 border border-neutral-100 p-4 rounded-xl space-y-2 shadow-inner">
+                  <div className="flex justify-between items-center text-neutral-500">
+                    <span className="flex items-center gap-1.5 font-bold uppercase text-[9px] tracking-wider">
+                      <Download className="w-3 h-3 text-emerald-500" /> Gross Inflow:
+                    </span>
+                    <span className="font-mono font-bold text-neutral-800">{formatNaira(amount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-neutral-500">
+                    <span className="flex items-center gap-1.5 font-bold uppercase text-[9px] tracking-wider">
+                      <ArrowUpRight className="w-3 h-3 text-blue-500" /> Outflow Sum:
+                    </span>
+                    <span className="font-mono font-bold text-red-500">-{formatNaira(subTransfers.reduce((sum, st) => sum + st.amount, 0))}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-neutral-500">
+                    <span className="flex items-center gap-1.5 font-bold uppercase text-[9px] tracking-wider">
+                      <ShieldCheck className="w-3 h-3 text-amber-500" /> Service Commission:
+                    </span>
+                    {isFeeWaived ? (
+                      <span className="text-rose-600 font-extrabold uppercase font-mono tracking-wider text-[9px] bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 animate-pulse">Waived (₦0)</span>
+                    ) : (
+                      <span className="font-mono font-bold text-red-500">-{formatNaira(customerFee)}</span>
+                    )}
+                  </div>
+                <div className="flex justify-between pt-2 border-t border-neutral-100 mt-1">
+                  <span className="text-xs font-black uppercase text-neutral-600">Physical Cash Balance:</span>
+                  <span className={`text-sm font-black font-mono ${remainingBalance < 0 ? 'text-red-600 animate-pulse' : 'text-[#00B87A]'}`}>
+                    {formatNaira(remainingBalance)}
+                  </span>
                 </div>
               </div>
             </div>
           )}
-
-          {/* Financial Breakdown Summary */}
-          <div className="bg-[#00B87A]/5 border border-[#00B87A]/20 rounded-2xl p-4 space-y-3 shadow-xs">
-            <div className="flex items-center justify-between border-b border-[#00B87A]/10 pb-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-[#00B87A] font-mono flex items-center gap-1.5">
-                <PieChart className="w-3.5 h-3.5" /> Core Financial Decomposition
-              </label>
-              <span className="text-[9px] font-bold text-neutral-400 font-mono">Real-Time Computed</span>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-              <div className="flex flex-col">
-                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Customer Amount</span>
-                <span className="text-xs font-black text-neutral-800 font-mono">{formatNaira(amount)}</span>
-              </div>
-              <div className="flex flex-col text-right">
-                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Customer Charge</span>
-                <span className="text-xs font-black text-neutral-800 font-mono">+{formatNaira(customerFee)}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Provider Cost</span>
-                <span className="text-xs font-black text-red-500 font-mono">
-                  -{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : amount, (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).providerCharge)}
-                </span>
-              </div>
-              <div className="flex flex-col text-right">
-                <span className="text-[9px] font-bold text-neutral-450 uppercase tracking-tighter">Regulatory Levy (CBN)</span>
-                <span className="text-xs font-black text-red-500 font-mono">
-                  -{formatNaira(getCalculatedFinancials((type === 'Withdrawal' && withdrawScenario === 'CardSwipe') ? amount : amount, (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type, provider, settings, destinationBank).cbnCharge)}
-                </span>
-              </div>
-            </div>
-
-            <div className="pt-2.5 border-t border-[#00B87A]/15 flex items-center justify-between">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-[#00B87A] uppercase tracking-tighter">Net Agent Profit</span>
-                <p className="text-[8px] text-neutral-400 font-medium leading-none">After all 3rd party deductions</p>
-              </div>
-              <div className="bg-[#00B87A] px-3.5 py-1.5 rounded-xl shadow-sm">
-                <span className="text-sm font-black text-white font-mono">
-                  {(() => {
-                    const effectiveType = (type === 'Withdrawal' && paymentMethod === 'Transfer') ? 'Cash Out (Transfer)' : type;
-                    const financials = getCalculatedFinancials(amount, effectiveType, provider, settings, destinationBank);
-                    const previewProfit = financials.agentProfit;
-                    return formatNaira(previewProfit);
-                  })()}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Transaction Status Selection */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-              Transaction Status
+          {/* Transaction Result 🌈 */}
+          <div className="space-y-4">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-400 font-mono flex items-center gap-2">
+              <span>Transaction Status 📊</span>
+              <div className="h-px flex-1 bg-neutral-100" />
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2.5">
               {(['Success', 'Pending', 'Failed'] as const).map((s) => {
                 const isActive = status === s;
-                const activeColor =
-                  s === 'Success'
-                    ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/15 shadow-md'
-                    : s === 'Pending'
-                    ? 'bg-amber-500 border-amber-500 text-white shadow-amber-500/15 shadow-md'
-                    : 'bg-red-500 border-red-500 text-white shadow-red-500/15 shadow-md';
-                const inactiveColor =
-                  s === 'Success'
-                    ? 'bg-neutral-50 hover:bg-emerald-50 border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-250'
-                    : s === 'Pending'
-                    ? 'bg-neutral-50 hover:bg-amber-50 border-neutral-200 text-neutral-600 hover:text-amber-700 hover:border-amber-250'
-                    : 'bg-neutral-50 hover:bg-red-50 border-neutral-200 text-neutral-600 hover:text-red-700 hover:border-red-250';
+                const activeColors = {
+                  Success: 'bg-emerald-500 border-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-50',
+                  Pending: 'bg-amber-500 border-amber-500 text-white shadow-xl shadow-amber-200 ring-4 ring-amber-50',
+                  Failed: 'bg-red-500 border-red-500 text-white shadow-xl shadow-red-200 ring-4 ring-red-50'
+                };
+                
+                const labels = {
+                  Success: '✅ SUCCESS',
+                  Pending: '⏳ PENDING',
+                  Failed: '❌ DECLINE'
+                };
 
                 return (
                   <button
@@ -1928,11 +2460,13 @@ export function TransactionForm({
                         playStatusSound(s);
                       }
                     }}
-                    className={`py-2 px-3 border rounded-xl text-xs font-bold transition cursor-pointer select-none text-center ${
-                      isActive ? activeColor : inactiveColor
+                    className={`py-4 px-2 rounded-[24px] border-2 transition-all duration-300 text-[11px] font-black uppercase tracking-tighter flex flex-col items-center gap-1 active:scale-95 ${
+                      isActive 
+                        ? activeColors[s] + ' scale-[1.05]'
+                        : 'bg-neutral-50 border-neutral-100 text-neutral-400 hover:border-neutral-200'
                     }`}
                   >
-                    {s}
+                    {labels[s]}
                   </button>
                 );
               })}
@@ -1974,42 +2508,74 @@ export function TransactionForm({
                 <span>⏳ Pay Later (Unpaid)</span>
               </button>
             </div>
+          </div>
 
-            {chargesStatus === 'Unpaid' && (
-              <div className="space-y-2 pt-1 animate-in slide-in-from-top-1 duration-150">
-                <label htmlFor="debtor-name" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 font-mono">
-                  Customer Debtor Name <span className="text-red-500">*</span>
+          {/* Customer Details - Beautiful and Professional */}
+          <div className="bg-neutral-50/80 border border-neutral-100 rounded-[28px] p-5 space-y-4 shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-neutral-200 text-neutral-500 flex items-center justify-center shadow-sm">
+                <UserCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-[11px] font-black uppercase tracking-widest text-neutral-500 font-mono leading-none">Customer Info</h3>
+                <p className="text-[9px] text-neutral-400 font-bold uppercase mt-1 tracking-tighter">Optional details for receipt</p>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="space-y-1.5">
+                <label htmlFor="customer-name" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
+                  Account Name {chargesStatus === 'Unpaid' && <span className="text-red-500 font-black animate-pulse">*</span>}
                 </label>
                 <input
-                  id="debtor-name"
+                  id="customer-name"
                   type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full bg-white border border-amber-300 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-neutral-850 focus:outline-none font-bold placeholder:text-neutral-350 placeholder:font-normal"
-                  placeholder="e.g. Alhaji Ibrahim Kano (or Mine Worker)"
+                  className={`w-full bg-white border-2 ${chargesStatus === 'Unpaid' && !customerName ? 'border-amber-400 shadow-md ring-4 ring-amber-50' : 'border-neutral-100'} rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-black transition-all shadow-sm`}
+                  placeholder="e.g. ALIYA MUSA"
                   required={chargesStatus === 'Unpaid'}
                 />
-                <p className="text-[10px] text-amber-700 leading-relaxed font-semibold">
-                  ⚠️ This unpaid fee of <strong>{formatNaira(customerFee)}</strong> will be logged as an outstanding debt under the customer's name.
-                </p>
               </div>
-            )}
+              
+              <div className="space-y-1.5">
+                <label htmlFor="account-number" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
+                  Account Number
+                </label>
+                <input
+                  id="account-number"
+                  type="text"
+                  value={customerAccountNumber}
+                  onChange={(e) => setCustomerAccountNumber(e.target.value.replace(/\D/g, ''))}
+                  className="w-full bg-white border-2 border-neutral-100 rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-mono font-black transition-all shadow-sm"
+                  placeholder="0123456789"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="phone-input" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
+                Phone Number
+              </label>
+              <input
+                id="phone-input"
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, ''))}
+                className="w-full bg-white border-2 border-neutral-100 rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-mono font-black transition-all shadow-sm"
+                placeholder="0801 234 5678"
+              />
+            </div>
           </div>
 
-          {/* Optional Customer Phone Number */}
-          <div>
-            <label htmlFor="phone-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 mb-2 font-mono">
-              Customer Phone Number
-            </label>
-            <input
-              id="phone-input"
-              type="tel"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, ''))}
-              className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2.5 text-neutral-800 focus:outline-none focus:border-[#00B87A] text-xs font-medium font-mono"
-              placeholder="e.g. 08012345678"
-            />
-          </div>
+              {chargesStatus === 'Unpaid' && (
+                <div className="text-[9px] text-amber-700 leading-relaxed font-semibold bg-amber-50/80 p-2.5 rounded-xl border border-amber-200 flex items-start gap-2 animate-pulse">
+                  <span className="shrink-0 mt-0.5">⚠️</span>
+                  <p>
+                    Fee of <span className="text-amber-900 font-black">{formatNaira(customerFee)}</span> will be tracked as a debt under the name above.
+                  </p>
+                </div>
+              )}
 
           {/* Optional Operation Notes */}
           <div>
@@ -2066,100 +2632,150 @@ export function TransactionForm({
             </div>
           </div>
 
-          {/* Backdating / Custom Date and Time Selection */}
-          <div className="bg-neutral-50/50 border border-neutral-150 rounded-2xl p-3.5 space-y-3">
-            <div className="flex items-center justify-between">
-              <label htmlFor="custom-timestamp-input" className="block text-xs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                📅 Date & Time (Backdate Option)
-              </label>
-              <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-md uppercase font-mono">
-                Backdating Allowed
-              </span>
-            </div>
-            <input
-              id="custom-timestamp-input"
-              type="datetime-local"
-              value={toLocalDatetimeString(customTimestamp)}
-              onChange={(e) => {
-                const iso = toISOStringFromLocal(e.target.value);
-                setCustomTimestamp(iso);
-              }}
-              className="w-full bg-white border border-neutral-200 focus:border-[#00B87A] rounded-xl px-3 py-2.5 text-neutral-800 focus:outline-none text-xs font-medium font-mono"
-            />
-            <div className="flex gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setCustomTimestamp(new Date().toISOString())}
-                className="text-[9px] font-bold bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-800 px-2.5 py-1 rounded-lg transition"
-              >
-                Set to Now (Today)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const yesterday = new Date();
-                  yesterday.setDate(yesterday.getDate() - 1);
-                  setCustomTimestamp(yesterday.toISOString());
-                }}
-                className="text-[9px] font-bold bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-800 px-2.5 py-1 rounded-lg transition"
-              >
-                Set to Yesterday
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const lastWeek = new Date();
-                  lastWeek.setDate(lastWeek.getDate() - 7);
-                  setCustomTimestamp(lastWeek.toISOString());
-                }}
-                className="text-[9px] font-bold bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-800 px-2.5 py-1 rounded-lg transition"
-              >
-                Set to 1 Week Ago
-              </button>
-            </div>
-          </div>
 
-          {/* Live computes summary block */}
-          <div className={`p-4 rounded-2xl space-y-2 transition-colors ${liveFinancials.isConfigured ? 'bg-emerald-50/60 border border-emerald-100' : 'bg-red-50 border border-red-200 animate-pulse'}`}>
-            <span className={`text-[10px] font-mono tracking-widest uppercase block font-black ${liveFinancials.isConfigured ? 'text-[#00B87A]' : 'text-red-600'}`}>
-              {liveFinancials.isConfigured ? 'LIVE PROJECTED COMMISSION COMPUTATION' : 'PRICING ERROR: RULE NOT CONFIGURED'}
-            </span>
-            
-            {!liveFinancials.isConfigured ? (
-              <div className="flex items-start gap-3 py-1">
-                <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-                <p className="text-[11px] font-bold text-red-700 leading-tight">
-                  {liveFinancials.error || "Pricing rule for this transaction combination is not configured in Firestore."}
-                </p>
+          {/* Live Projected Commission Computation Section */}
+          <div className="mt-4">
+            {/* Live computes summary block */}
+            <div className={`p-5 rounded-3xl border transition-all duration-300 ${
+              !liveFinancials.isConfigured && amount > 0 
+                ? 'bg-rose-50/50 border-rose-200 shadow-sm animate-pulse' 
+                : 'bg-emerald-50/30 border-emerald-500/10 shadow-xs'
+            }`}>
+              
+              {/* Card Header with Real-time indicators */}
+              <div className="flex items-center justify-between gap-2.5 mb-4 pb-3 border-b border-neutral-200/40">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className={`text-[10px] font-black font-mono tracking-widest uppercase ${
+                    liveFinancials.isConfigured || amount === 0 ? 'text-emerald-700' : 'text-red-650'
+                  }`}>
+                    {liveFinancials.isConfigured || amount === 0 ? 'LIVE PROJECTED COMMISSION COMPUTATION' : 'PRICING ERROR: NOT CONFIGURED'}
+                  </span>
+                </div>
+                <span className="text-[8.5px] font-black font-mono text-neutral-500 bg-neutral-100/80 border border-neutral-200/40 px-2.5 py-1 rounded-full uppercase tracking-wider shrink-0">
+                  REAL-TIME CALCULATOR
+                </span>
               </div>
-            ) : (
-              <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
-                <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
-                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Terminal Cost</span>
-                  <span className="text-[11px] font-bold font-mono text-red-500">
-                    -{formatNaira(liveTerminalFee)}
-                  </span>
+              
+              {/* Main Dynamic View Area */}
+              {!liveFinancials.isConfigured && amount > 0 ? (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3.5">
+                  <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5 animate-bounce" />
+                  <div className="space-y-1">
+                    <h5 className="text-[11px] font-black text-red-800 uppercase tracking-wider font-mono">
+                      Pricing Rule Missing
+                    </h5>
+                    <p className="text-[10.5px] font-bold text-red-700 leading-snug">
+                      {liveFinancials.error || "No active pricing rule was found in Firestore for this combination of amount, type, and terminal provider."}
+                    </p>
+                    <p className="text-[9.5px] font-bold text-red-500 leading-normal">
+                      👉 Please go to settings and configure a pricing range that covers {formatNaira(amount)} for {type} ({provider}).
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-white p-1.5 rounded-xl border border-neutral-200">
-                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate" title="CBN EMTL Levy (₦10,000+)">CBN EMTL</span>
-                  <span className="text-[11px] font-bold font-mono text-red-500">
-                    -{formatNaira(liveCbnCharge)}
-                  </span>
+              ) : amount > 0 ? (
+                <div className="space-y-4">
+                  {/* Grid of the 4 Key Financial Metrics - Spacious & clear */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[10px]">
+                    
+                    {/* Metric 1: Terminal Cost */}
+                    <div className="bg-red-50/50 border border-red-100/80 p-3 rounded-2xl transition-all hover:bg-red-50 hover:shadow-xs flex flex-col justify-between gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 text-red-700/80 font-bold uppercase tracking-wider">
+                        <Cpu className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                        <span className="text-[8px] truncate">Machine Cost</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-[14px] sm:text-[15px] font-black font-mono text-red-600 leading-none block truncate">
+                          -{formatNaira(liveTerminalFee)}
+                        </span>
+                        <span className="text-[8.5px] text-neutral-400 font-bold block leading-tight">
+                          Paid to {provider}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Metric 2: CBN EMTL Levy */}
+                    <div className="bg-amber-50/50 border border-amber-100/80 p-3 rounded-2xl transition-all hover:bg-amber-50 hover:shadow-xs flex flex-col justify-between gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 text-amber-700/80 font-bold uppercase tracking-wider">
+                        <Landmark className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                        <span className="text-[8px] truncate">Govt Levy</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-[14px] sm:text-[15px] font-black font-mono text-red-600 leading-none block truncate">
+                          -{formatNaira(liveCbnCharge)}
+                        </span>
+                        <span className="text-[8.5px] text-neutral-400 font-bold block leading-tight">
+                          CBN Stamp Duty
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Metric 3: Client Fee Collected */}
+                    <div className="bg-indigo-50/50 border border-indigo-100/80 p-3 rounded-2xl transition-all hover:bg-indigo-50 hover:shadow-xs flex flex-col justify-between gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 text-indigo-700/80 font-bold uppercase tracking-wider">
+                        <Wallet className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                        <span className="text-[8px] truncate">Client Fee</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-[14px] sm:text-[15px] font-black font-mono text-indigo-700 leading-none block truncate">
+                          +{formatNaira(customerFee)}
+                        </span>
+                        <span className="text-[8.5px] text-neutral-400 font-bold block leading-tight">
+                          We collected
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Metric 4: Net Profit (The Prize) */}
+                    <div className={`border p-3 rounded-2xl transition-all hover:shadow-md flex flex-col justify-between gap-1.5 min-w-0 ring-4 ring-current/5 ${
+                      customerFee - liveTerminalFee - liveCbnCharge >= 0 
+                        ? 'bg-[#00B87A] text-white border-emerald-600 shadow-sm' 
+                        : 'bg-rose-600 text-white border-rose-700 shadow-sm'
+                    }`}>
+                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider opacity-90">
+                        <Banknote className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                        <span className="text-[8px] truncate">Net Earnings</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-[14px] sm:text-[15px] font-black font-mono leading-none block truncate">
+                          {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
+                        </span>
+                        <span className="text-[8.5px] opacity-80 font-bold block leading-tight">
+                          Our Take-home
+                        </span>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Easy summary statement for less-literated operators */}
+                  <div className="p-3.5 rounded-2xl bg-white border border-neutral-200 shadow-xs flex items-start gap-3 text-[11px] font-bold text-neutral-600 leading-relaxed">
+                    <div className="p-1.5 rounded-xl bg-emerald-50 text-[#00B87A] shrink-0 mt-0.5">
+                      <Zap className="w-4 h-4 stroke-[2.5] animate-pulse" />
+                    </div>
+                    <p>
+                      You collected <span className="font-extrabold text-neutral-950 font-mono">{formatNaira(customerFee)}</span> in fee. After paying <span className="font-extrabold text-neutral-900 font-mono">{formatNaira(liveTerminalFee + liveCbnCharge)}</span> for machine costs & levies, you gain <span className="font-black text-[#00B87A] font-mono text-xs underline underline-offset-2 decoration-dotted">{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}</span> as real pocket profit on this ticket!
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-white p-1.5 rounded-xl border border-neutral-200 font-medium">
-                  <span className="text-[8px] text-neutral-400 uppercase font-mono block truncate">Client Fee</span>
-                  <span className="text-[11px] font-bold font-mono text-neutral-700">
-                    +{formatNaira(customerFee)}
+              ) : (
+                <div className="py-6 px-4 flex flex-col items-center justify-center border-2 border-dashed border-neutral-200 rounded-2xl bg-white text-center">
+                  <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-400 mb-2.5">
+                    <Banknote className="w-5 h-5 text-neutral-400" />
+                  </div>
+                  <span className="text-[10px] font-black text-neutral-600 tracking-wider uppercase font-mono mb-1">
+                    Waiting for Amount Inflow
                   </span>
+                  <p className="text-[10px] text-neutral-450 font-bold max-w-xs leading-normal">
+                    Enter the transaction amount above. The live engine will immediately compute fees, provider deductions, and your net profit segment here.
+                  </p>
                 </div>
-                <div className="bg-emerald-50 p-1.5 rounded-xl border border-emerald-100 font-medium">
-                  <span className="text-[8px] text-emerald-600 uppercase font-mono block truncate">Net Earnings</span>
-                  <span className={`text-[11px] font-extrabold font-mono ${customerFee - liveTerminalFee - liveCbnCharge >= 0 ? 'text-emerald-700' : 'text-red-500'}`}>
-                    {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                  </span>
-                </div>
-              </div>
-            )}
+              )}
+
+            </div>
           </div>
 
 
@@ -2177,34 +2793,34 @@ export function TransactionForm({
               <button
                 type="button"
                 onClick={handleAddToBasket}
-                disabled={!liveFinancials.isConfigured}
+                disabled={!isFormValid}
                 className={`flex-1 min-w-[130px] font-extrabold py-3 rounded-2xl cursor-pointer text-xs transition flex items-center justify-center gap-1.5 ${
-                  liveFinancials.isConfigured 
+                  isFormValid 
                     ? 'bg-neutral-50 hover:bg-neutral-100 border border-[#00B87A]/30 hover:border-[#00B87A] text-[#00B87A]' 
                     : 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'
                 }`}
-                title={liveFinancials.isConfigured ? "Add current transaction to batch ticket and start another" : "Pricing rule missing - cannot add to batch"}
+                title={isFormValid ? "Add current transaction to batch ticket and start another" : (mode === 'SplitSession' ? "Complete all distributions before adding to batch" : "Pricing rule missing - cannot add to batch")}
               >
-                <Plus className={`w-4 h-4 stroke-[2] ${liveFinancials.isConfigured ? 'text-[#00B87A]' : 'text-neutral-300'}`} />
+                <Plus className={`w-4 h-4 stroke-[2] ${isFormValid ? 'text-[#00B87A]' : 'text-neutral-300'}`} />
                 Add to Batch
               </button>
             )}
 
             <button
               type="submit"
-              disabled={!liveFinancials.isConfigured}
+              disabled={!isFormValid}
               className={`flex-1 min-w-[140px] font-extrabold py-3 rounded-2xl cursor-pointer text-xs shadow-lg transition flex items-center justify-center gap-1.5 ${
-                liveFinancials.isConfigured 
+                isFormValid 
                   ? 'bg-[#00B87A] hover:bg-emerald-600 text-white shadow-[#00B87A]/20' 
                   : 'bg-neutral-300 text-neutral-500 shadow-none cursor-not-allowed'
               }`}
             >
-              {liveFinancials.isConfigured ? <Check className="w-4 h-4 stroke-[3]" /> : <Lock className="w-4 h-4" />}
+              {isFormValid ? <Check className="w-4 h-4 stroke-[3]" /> : <Lock className="w-4 h-4" />}
               {initialTransaction 
                 ? 'Update Receipt' 
                 : basket.length > 0 
                   ? 'Confirm & Save All' 
-                  : (liveFinancials.isConfigured ? 'Confirm Receipt' : 'Pricing Restricted')}
+                  : (mode === 'SplitSession' ? 'Confirm & Process Distribution' : (liveFinancials.isConfigured ? 'Confirm Receipt' : 'Pricing Restricted'))}
             </button>
           </div>
 

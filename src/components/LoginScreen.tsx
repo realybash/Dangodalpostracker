@@ -622,12 +622,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
       <div className="absolute top-1/2 left-1/3 w-96 h-96 bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-      <div className="w-full max-w-lg bg-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] overflow-hidden border border-white/60 z-10 transition-all">
+      <div className="w-full max-w-lg bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_25px_60px_rgba(0,0,0,0.06)] overflow-hidden border border-white/80 z-10 transition-all">
         
-        {/* Header Banner - OPay Styled Theme */}
-        <div className="bg-gradient-to-br from-[#00B87A] via-[#00a36c] to-emerald-900 p-8 sm:p-12 text-center text-white relative">
-          <div className="absolute top-6 right-6 bg-white/15 px-3 py-1 rounded-full text-[10px] font-mono tracking-widest uppercase font-black flex items-center gap-1.5 backdrop-blur-md border border-white/10">
-            <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
+        {/* Header Banner - Beautiful Emerald and Mint Theme */}
+        <div className="bg-gradient-to-br from-[#00B87A] via-[#00a36c] to-emerald-950 p-8 sm:p-12 text-center text-white relative">
+          <div className="absolute top-6 right-6 bg-white/15 px-3.5 py-1.5 rounded-full text-[9px] font-mono tracking-widest uppercase font-black flex items-center gap-1.5 backdrop-blur-md border border-white/10 shadow-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-300 animate-ping" />
+            <span className="w-2 h-2 rounded-full bg-emerald-400 absolute" />
             System Live
           </div>
 
@@ -635,60 +636,70 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: 'spring', damping: 12 }}
-            className="w-20 h-20 bg-white/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 border border-white/20 backdrop-blur-xl shadow-2xl"
+            className="w-24 h-24 bg-white/10 hover:bg-white/15 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/20 backdrop-blur-md shadow-inner transition-all duration-300"
           >
-            <Smartphone className="w-10 h-10 text-white drop-shadow-lg" />
+            <div className="w-16 h-16 bg-[#00B87A] rounded-full flex items-center justify-center shadow-md">
+              <Smartphone className="w-8 h-8 text-white animate-pulse" />
+            </div>
           </motion.div>
-          <h2 className="text-3xl font-black tracking-tight font-sans uppercase">Dan Godal</h2>
-          <p className="text-emerald-100/80 text-[11px] font-bold mt-2 max-w-xs mx-auto uppercase tracking-[0.2em] leading-relaxed">
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tight font-sans uppercase">Dan Godal</h2>
+          <p className="text-emerald-100/90 text-[11px] font-black mt-2.5 max-w-xs mx-auto uppercase tracking-[0.2em] leading-relaxed font-mono font-bold">
             Premium POS Audit Terminal
           </p>
         </div>
+  );
 
-        {/* Mode Selector */}
-        <div className="bg-neutral-50 px-8 py-4 border-b border-neutral-100 flex items-center justify-between">
-          <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">System Mode</span>
-          <div className="flex gap-4">
+        {/* Mode Selector - Highly Visual */}
+        <div className="bg-neutral-50/50 px-6 sm:px-8 py-5 border-b border-neutral-150/40 flex items-center justify-between gap-4">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black text-neutral-450 uppercase tracking-widest font-mono">
+              System Mode
+            </span>
+            <span className="text-[9px] text-neutral-400 font-bold leading-normal mt-0.5">
+              Choose Online (Internet) or Offline
+            </span>
+          </div>
+          <div className="flex gap-2.5">
             <button
               onClick={() => { localStorage.setItem('POSTrack_Mode', 'online'); setMode('online'); setAuthMode('login'); }}
-              className={`px-8 py-4 rounded-full text-[13px] font-black uppercase flex items-center gap-3 transition-all active:scale-95 cursor-pointer shadow-sm ${
+              className={`px-5 py-2.5 rounded-full text-xs font-black uppercase flex items-center gap-2.5 transition-all duration-300 active:scale-95 cursor-pointer border ${
                 mode === 'online'
-                  ? 'bg-emerald-500 text-white shadow-emerald-500/20'
-                  : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'
+                  ? 'bg-[#00B87A] text-white border-[#00B87A] shadow-[0_4px_12px_rgba(0,184,122,0.15)] shadow-md'
+                  : 'bg-white text-neutral-500 border-neutral-200/80 hover:bg-neutral-100 hover:text-neutral-600 shadow-xs'
               }`}
             >
-              <div className={`w-3 h-3 rounded-full ${mode === 'online' ? 'bg-emerald-100 animate-pulse' : 'bg-neutral-400'}`}></div>
+              <span className={`w-2.5 h-2.5 rounded-full ${mode === 'online' ? 'bg-white animate-pulse' : 'bg-neutral-400'}`} />
               Online
             </button>
             <button
               onClick={() => { localStorage.setItem('POSTrack_Mode', 'offline'); setMode('offline'); setAuthMode('login'); }}
-              className={`px-8 py-4 rounded-full text-[13px] font-black uppercase flex items-center gap-3 transition-all active:scale-95 cursor-pointer shadow-sm ${
+              className={`px-5 py-2.5 rounded-full text-xs font-black uppercase flex items-center gap-2.5 transition-all duration-300 active:scale-95 cursor-pointer border ${
                 mode === 'offline'
-                  ? 'bg-amber-500 text-white shadow-amber-500/20'
-                  : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300'
+                  ? 'bg-amber-500 text-white border-amber-500 shadow-[0_4px_12px_rgba(245,158,11,0.15)] shadow-md'
+                  : 'bg-white text-neutral-500 border-neutral-200/80 hover:bg-neutral-100 hover:text-neutral-600 shadow-xs'
               }`}
             >
-              <div className={`w-3 h-3 rounded-full ${mode === 'offline' ? 'bg-amber-100 animate-pulse' : 'bg-neutral-400'}`}></div>
+              <span className={`w-2.5 h-2.5 rounded-full ${mode === 'offline' ? 'bg-white animate-pulse' : 'bg-neutral-400'}`} />
               Offline
             </button>
           </div>
         </div>
 
         {/* Mode Selector Tab (Login vs Register) */}
-        <div className="flex border-b border-neutral-100 bg-neutral-50/50 p-2">
+        <div className="flex items-center justify-between border-b border-neutral-150/40 bg-neutral-50/30 p-2.5">
           <button
             onClick={() => {
               setAuthMode('login');
               setError('');
               setSuccess('');
             }}
-            className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black tracking-wider uppercase transition-all duration-150 flex items-center justify-center gap-2 ${
+            className={`flex-1 py-3.5 px-5 rounded-[1.25rem] text-[11px] font-black tracking-wider uppercase transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer ${
               authMode === 'login'
-                ? 'bg-white text-neutral-850 shadow-sm border border-neutral-100 font-extrabold'
-                : 'text-neutral-400 hover:text-neutral-700 font-bold'
+                ? 'bg-white text-neutral-850 shadow-[0_4px_12px_rgba(0,0,0,0.03)] border border-neutral-100'
+                : 'text-neutral-450 hover:text-neutral-700 hover:bg-white/40'
             }`}
           >
-            <KeyRound className="w-4 h-4 text-[#00B87A]" />
+            <KeyRound className="w-4 h-4 text-[#00B87A] stroke-[2.5]" />
             <span>Secure Login</span>
           </button>
           <button
@@ -697,15 +708,15 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
               setError('');
               setSuccess('');
             }}
-            className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black tracking-wider uppercase transition-all duration-150 flex items-center justify-center gap-2 relative ${
+            className={`flex-1 py-3.5 px-5 rounded-[1.25rem] text-[11px] font-black tracking-wider uppercase transition-all duration-200 flex items-center justify-center gap-2 relative cursor-pointer ${
               authMode === 'register'
-                ? 'bg-white text-neutral-850 shadow-sm border border-neutral-100 font-extrabold'
-                : 'text-neutral-400 hover:text-neutral-700 font-bold'
+                ? 'bg-white text-neutral-850 shadow-[0_4px_12px_rgba(0,0,0,0.03)] border border-neutral-100 font-extrabold'
+                : 'text-neutral-450 hover:text-neutral-700 hover:bg-white/40 font-bold'
             }`}
           >
-            <UserPlus className="w-4 h-4 text-emerald-600" />
+            <UserPlus className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
             <span>Register Account</span>
-            <span className="absolute -top-1 right-2 bg-rose-500 text-white text-[8px] font-black font-mono px-1.5 py-0.5 rounded-full animate-bounce">
+            <span className="absolute -top-1.5 -right-1 bg-rose-500 text-white text-[8px] font-black font-mono px-2 py-0.5 rounded-full animate-bounce shadow-sm uppercase tracking-wide">
               NEW
             </span>
           </button>
@@ -744,7 +755,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           {authMode === 'login' ? (
             <div>
               {/* Login Sub-Tabs: Employee vs Manager */}
-              <div className="grid grid-cols-2 gap-2 bg-neutral-100 p-1 rounded-xl mb-6">
+              <div className="grid grid-cols-2 gap-2 bg-neutral-100/70 p-1.5 rounded-2xl mb-6">
                 <button
                   type="button"
                   onClick={() => {
@@ -752,13 +763,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     setError('');
                     setPin('');
                   }}
-                  className={`py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                  className={`py-3.5 px-4 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
                     loginTab === 'staff'
-                      ? 'bg-[#00B87A] text-white shadow'
-                      : 'text-neutral-500 hover:text-neutral-800'
+                      ? 'bg-[#00B87A] text-white shadow-[0_4px_10px_rgba(0,184,122,0.2)]'
+                      : 'text-neutral-500 hover:text-neutral-800 hover:bg-white/30'
                   }`}
                 >
-                  👤 Cashier / Staff
+                  <span className="text-sm">👤</span> Cashier / Staff
                 </button>
                 <button
                   type="button"
@@ -767,13 +778,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     setError('');
                     setPin('');
                   }}
-                  className={`py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                  className={`py-3.5 px-4 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
                     loginTab === 'manager'
-                      ? 'bg-neutral-800 text-white shadow'
-                      : 'text-neutral-500 hover:text-neutral-800'
+                      ? 'bg-neutral-850 text-white shadow-[0_4px_10px_rgba(30,41,59,0.2)]'
+                      : 'text-neutral-500 hover:text-neutral-800 hover:bg-white/30'
                   }`}
                 >
-                  👑 Manager Portal
+                  <span className="text-sm">👑</span> Manager Portal
                 </button>
               </div>
 
@@ -781,11 +792,13 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                 /* STAFF LOGIN FORM */
                 <form onSubmit={handleStaffLogin} className="space-y-5">
                   <div>
-                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">
+                    <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                       Cashier Phone Number or Full Name
                     </label>
                     <div className="relative">
-                      <Smartphone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                        <Smartphone className="w-5 h-5 stroke-[2]" />
+                      </div>
                       <input
                         type="text"
                         value={loginPhone}
@@ -793,8 +806,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           setLoginPhone(e.target.value);
                           setError('');
                         }}
-                        placeholder="e.g. 08123456781 or Cashier Name"
-                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-xs font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A]"
+                        placeholder="Type phone number or your name"
+                        className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm sm:text-base font-black text-neutral-850 placeholder:text-neutral-455 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] transition-all shadow-xs"
                       />
                     </div>
                   </div>
@@ -802,13 +815,15 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                   <div className="space-y-4">
                     <div>
                       <div className="flex justify-between items-center mb-2">
-                        <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+                        <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest font-mono">
                           Passcode (4-digit PIN)
                         </label>
-                        <span className="text-[10px] text-neutral-400 font-medium font-mono">Quick check-in</span>
+                        <span className="text-[10px] text-neutral-400 font-bold font-mono uppercase tracking-wider">Quick check-in</span>
                       </div>
                       <div className="relative">
-                        <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                          <Lock className="w-5 h-5 stroke-[2]" />
+                        </div>
                         <input
                           type={showPin ? "text" : "password"}
                           inputMode="numeric"
@@ -817,31 +832,50 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           value={pin}
                           onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                           placeholder="Enter 4-digit PIN"
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-12 py-3.5 text-base font-mono font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-normal placeholder:text-sm text-center"
+                          className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-12 py-4 text-base sm:text-lg font-mono font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-bold placeholder:text-sm text-center transition-all shadow-xs"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPin(!showPin)}
                           className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 transition"
                         >
-                          {showPin ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                          {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                         </button>
                       </div>
                     </div>
 
+                    {/* Visual 4-Dot Indicator for immediate visual feedback */}
+                    <div className="flex flex-col items-center justify-center py-3 bg-neutral-50/50 rounded-2xl border border-neutral-150/40">
+                      <span className="text-[9px] text-neutral-400 font-black uppercase tracking-wider mb-2 font-mono">
+                        PIN Progress
+                      </span>
+                      <div className="flex items-center gap-4">
+                        {[0, 1, 2, 3].map((idx) => (
+                          <div
+                            key={idx}
+                            className={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-300 ${
+                              pin.length > idx
+                                ? 'bg-[#00B87A] border-[#00B87A] scale-125 shadow-[0_0_8px_rgba(0,184,122,0.4)]'
+                                : 'bg-white border-neutral-300'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Tactile Virtual PIN Pad for Cashier login */}
-                    <div className="bg-neutral-50/60 border border-neutral-100 p-4 rounded-3xl">
-                      <div className="flex justify-between items-center mb-3">
-                        <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Tactile POS Keypad</div>
+                    <div className="bg-neutral-50/60 border border-neutral-150/40 p-4 sm:p-5 rounded-3xl">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="text-[10px] text-neutral-450 font-black uppercase tracking-wider font-mono">Tactile POS Keypad</div>
                         <button 
                           type="button" 
                           onClick={() => setShowForgotPasscode(true)}
-                          className="text-[10px] text-[#00B87A] font-bold underline hover:text-[#00a36c] cursor-pointer uppercase tracking-wider font-mono"
+                          className="text-[10px] text-[#00B87A] font-black underline hover:text-[#00a36c] cursor-pointer uppercase tracking-wider font-mono"
                         >
                           Forgot Passcode?
                         </button>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto">
+                      <div className="grid grid-cols-3 gap-3.5 max-w-[280px] mx-auto">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                           <button
                             key={num}
@@ -852,7 +886,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                                 setError('');
                               }
                             }}
-                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                            className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xl font-black font-mono shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                           >
                             {num}
                           </button>
@@ -863,7 +897,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                             setPin('');
                             setError('');
                           }}
-                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-black font-sans shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase"
+                          className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-black font-sans shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase tracking-wider"
                         >
                           Clear
                         </button>
@@ -875,7 +909,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                               setError('');
                             }
                           }}
-                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                          className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xl font-black font-mono shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                         >
                           0
                         </button>
@@ -885,7 +919,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                             setPin(prev => prev.slice(0, -1));
                             setError('');
                           }}
-                          className="w-14 h-14 rounded-2xl border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg font-bold shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                          className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 transition-all flex items-center justify-center mx-auto cursor-pointer"
                         >
                           ⌫
                         </button>
@@ -893,7 +927,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 px-1 mt-3">
+                  <div className="flex items-center gap-2.5 px-1 mt-3">
                     <input
                       type="checkbox"
                       id="rememberMeStaff"
@@ -904,9 +938,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           localStorage.setItem('OPay_Remember_Me', e.target.checked ? 'true' : 'false');
                         } catch (err) {}
                       }}
-                      className="w-4 h-4 text-[#00B87A] border-neutral-300 rounded focus:ring-[#00B87A] accent-[#00B87A] cursor-pointer"
+                      className="w-4.5 h-4.5 text-[#00B87A] border-neutral-300 rounded focus:ring-[#00B87A] accent-[#00B87A] cursor-pointer"
                     />
-                    <label htmlFor="rememberMeStaff" className="text-xs text-neutral-500 font-semibold cursor-pointer select-none">
+                    <label htmlFor="rememberMeStaff" className="text-xs text-neutral-500 font-bold cursor-pointer select-none">
                       Remember login details on this device
                     </label>
                   </div>
@@ -922,23 +956,25 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                 </form>
               ) : (
                 /* MANAGER LOGIN FORM */
-                <form onSubmit={handleManagerLogin} className="space-y-5">
-                  <div className="p-4 bg-indigo-50 border border-indigo-100/65 rounded-2xl flex items-start gap-3">
+                <form onSubmit={handleManagerLogin} className="space-y-5 font-sans">
+                  <div className="p-4 bg-indigo-50 border border-indigo-100/60 rounded-2xl flex items-start gap-3">
                     <ShieldCheck className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider">Manager Control Center</h4>
-                      <p className="text-[11px] text-indigo-700 mt-1 font-medium leading-relaxed">
+                      <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider font-mono">Manager Control Center</h4>
+                      <p className="text-[11px] text-indigo-700 mt-1 font-bold leading-relaxed">
                         Managers can change commission rates, monitor all terminals, approve staff shifts, and export raw audits.
                       </p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">
+                    <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                       Manager Phone Number or Full Name
                     </label>
                     <div className="relative">
-                      <Smartphone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                        <Smartphone className="w-5 h-5 stroke-[2]" />
+                      </div>
                       <input
                         type="text"
                         value={managerPhone}
@@ -946,8 +982,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           setManagerPhone(e.target.value);
                           setError('');
                         }}
-                        placeholder="e.g. 08123456789 or Dan Godal"
-                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-xs font-bold text-neutral-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        placeholder="Type Manager phone or name"
+                        className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm sm:text-base font-black text-neutral-850 placeholder:text-neutral-450 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-xs"
                       />
                     </div>
                   </div>
@@ -955,15 +991,17 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                   <div className="space-y-4">
                     <div>
                       <div className="flex justify-between items-center mb-2">
-                        <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+                        <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest font-mono">
                           Manager Passcode (PIN)
                         </label>
                         {isUsersLoaded && managerUsers.length === 0 && (
-                          <span className="text-[10px] text-rose-600 font-bold">Please Register a Manager First</span>
+                          <span className="text-[10px] text-rose-600 font-black uppercase font-mono">Please Register a Manager First</span>
                         )}
                       </div>
                       <div className="relative">
-                        <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                          <Lock className="w-5 h-5 stroke-[2]" />
+                        </div>
                         <input
                           type={showPin ? "text" : "password"}
                           inputMode="numeric"
@@ -972,95 +1010,116 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                           value={pin}
                           onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                           placeholder="Enter Manager 4-Digit PIN"
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-12 py-3.5 text-base font-mono font-black text-neutral-850 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-normal placeholder:text-sm text-center"
+                          className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-12 py-4 text-base sm:text-lg font-mono font-black text-neutral-850 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-bold placeholder:text-sm text-center transition-all shadow-xs"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPin(!showPin)}
                           className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 transition"
                         >
-                          {showPin ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                          {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                         </button>
                       </div>
-                    {isUsersLoaded && managerUsers.length > 0 ? (
-                        <p className="text-[10px] text-neutral-400 mt-2 font-medium">
-                          Hint: Use your registered 4-digit passcode PIN .
+                      {isUsersLoaded && managerUsers.length > 0 ? (
+                        <p className="text-[10px] text-neutral-400 mt-2 font-bold uppercase tracking-wider font-mono">
+                          👉 Use your registered 4-digit passcode PIN .
                         </p>
                       ) : isUsersLoaded ? (
-                        <p className="text-xs text-rose-600 font-bold mt-2 leading-relaxed">
-                          No manager account exists yet. Click the <strong className="underline cursor-pointer" onClick={() => { setAuthMode('register'); setRegRole('Manager'); }}>Register Account</strong> tab above to configure your manager profile!
+                        <p className="text-xs text-rose-600 font-black mt-2 leading-relaxed">
+                          No manager account exists yet. Click the <strong className="underline cursor-pointer text-indigo-600 hover:text-indigo-800" onClick={() => { setAuthMode('register'); setRegRole('Manager'); }}>Register Account</strong> tab above to configure your manager profile!
                         </p>
                       ) : (
-                        <p className="text-[10px] text-neutral-400 mt-2 font-medium flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                        <p className="text-[10px] text-neutral-400 mt-2 font-bold uppercase tracking-wider font-mono flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
                           Synchronizing cloud user accounts...
                         </p>
                       )}
                     </div>
 
                     {isUsersLoaded && managerUsers.length > 0 && (
-                      /* Tactile Virtual PIN Pad for Manager login */
-                      <div className="bg-neutral-50/60 border border-neutral-100 p-4 rounded-3xl">
-                        <div className="flex justify-between items-center mb-3">
-                          <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Tactile Manager Keypad</div>
-                          <button 
-                            type="button" 
-                            onClick={() => setShowForgotPasscode(true)}
-                            className="text-[10px] text-indigo-600 font-bold underline hover:text-indigo-800 cursor-pointer uppercase tracking-wider font-mono"
-                          >
-                            Forgot Passcode?
-                          </button>
+                      <>
+                        {/* Visual 4-Dot Indicator for Manager */}
+                        <div className="flex flex-col items-center justify-center py-3 bg-neutral-50/50 rounded-2xl border border-neutral-150/40">
+                          <span className="text-[9px] text-neutral-400 font-black uppercase tracking-wider mb-2 font-mono">
+                            PIN Progress
+                          </span>
+                          <div className="flex items-center gap-4">
+                            {[0, 1, 2, 3].map((idx) => (
+                              <div
+                                key={idx}
+                                className={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-300 ${
+                                  pin.length > idx
+                                    ? 'bg-indigo-600 border-indigo-600 scale-125 shadow-[0_0_8px_rgba(79,70,229,0.4)]'
+                                    : 'bg-white border-neutral-300'
+                                }`}
+                              />
+                            ))}
+                          </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto">
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+
+                        {/* Tactile Virtual PIN Pad for Manager login */}
+                        <div className="bg-neutral-50/60 border border-neutral-150/40 p-4 sm:p-5 rounded-3xl">
+                          <div className="flex justify-between items-center mb-4">
+                            <div className="text-[10px] text-neutral-450 font-black uppercase tracking-wider font-mono">Tactile Manager Keypad</div>
+                            <button 
+                              type="button" 
+                              onClick={() => setShowForgotPasscode(true)}
+                              className="text-[10px] text-indigo-600 font-black underline hover:text-indigo-800 cursor-pointer uppercase tracking-wider font-mono"
+                            >
+                              Forgot Passcode?
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3.5 max-w-[280px] mx-auto">
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                              <button
+                                key={num}
+                                type="button"
+                                onClick={() => {
+                                  if (pin.length < 4) {
+                                    setPin(prev => prev + num);
+                                    setError('');
+                                  }
+                                }}
+                                className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xl font-black font-mono shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                              >
+                                {num}
+                              </button>
+                            ))}
                             <button
-                              key={num}
+                              type="button"
+                              onClick={() => {
+                                setPin('');
+                                setError('');
+                              }}
+                              className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-black font-sans shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase tracking-wider"
+                            >
+                              Clear
+                            </button>
+                            <button
                               type="button"
                               onClick={() => {
                                 if (pin.length < 4) {
-                                  setPin(prev => prev + num);
+                                  setPin(prev => prev + '0');
                                   setError('');
                                 }
                               }}
-                              className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                              className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xl font-black font-mono shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
                             >
-                              {num}
+                              0
                             </button>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPin('');
-                              setError('');
-                            }}
-                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-black font-sans shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer uppercase"
-                          >
-                            Clear
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (pin.length < 4) {
-                                setPin(prev => prev + '0');
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPin(prev => prev.slice(0, -1));
                                 setError('');
-                              }
-                            }}
-                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-lg font-black font-mono shadow-sm active:scale-90 active:bg-neutral-100 transition-all flex items-center justify-center mx-auto cursor-pointer"
-                          >
-                            0
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPin(prev => prev.slice(0, -1));
-                              setError('');
-                            }}
-                            className="w-14 h-14 rounded-2xl border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg font-bold shadow-sm active:scale-90 transition-all flex items-center justify-center mx-auto cursor-pointer"
-                          >
-                            ⌫
-                          </button>
+                              }}
+                              className="w-16 h-16 rounded-[1.25rem] border border-neutral-200 bg-amber-50 hover:bg-amber-100 text-amber-700 text-lg shadow-[0_2px_4px_rgba(0,0,0,0.02)] active:scale-95 transition-all flex items-center justify-center mx-auto cursor-pointer"
+                            >
+                              ⌫
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      </>
                     )}
                   </div>
 
@@ -1094,53 +1153,53 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
               )}
 
               {/* High-Security System Seal */}
-              <div className="mt-8 pt-5 border-t border-neutral-200/60 text-center">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-50 rounded-full border border-neutral-200/50 text-[10px] text-neutral-400 font-mono tracking-wide font-semibold select-none">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="mt-8 pt-5 border-t border-neutral-150/40 text-center">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-neutral-50 rounded-full border border-neutral-200/55 text-[10px] text-neutral-450 font-mono tracking-widest font-black select-none uppercase">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                   SECURED AES-256 POS CLIENT
                 </div>
               </div>
             </div>
           ) : (
             /* ACCOUNT REGISTRATION FORM */
-            <form onSubmit={handleRegister} className="space-y-5 animate-fade-in">
-              <div className="text-center mb-1">
-                <span className="text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-[#00B87A] px-3 py-1 rounded-full border border-emerald-100">
-                  <Sparkles className="w-3 h-3 inline mr-1" /> Custom Account Registration
+            <form onSubmit={handleRegister} className="space-y-6 animate-fade-in font-sans">
+              <div className="text-center mb-2">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-[#00B87A] px-3.5 py-1.5 rounded-full border border-emerald-100">
+                  <Sparkles className="w-3.5 h-3.5 mr-0.5 text-[#00B87A]" /> Custom Account Registration
                 </span>
-                <p className="text-[11px] text-neutral-400 font-semibold mt-2">
+                <p className="text-[11px] text-neutral-450 font-bold mt-3 leading-relaxed">
                   Create a secure operator profile to begin auditing and tracking POS slips.
                 </p>
               </div>
 
               {/* Role Picker Cards */}
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+              <div className="space-y-2.5">
+                <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest font-mono">
                   Choose Operator Role
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3.5">
                   {/* Manager Option */}
                   <div
                     onClick={() => setRegRole('Manager')}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all duration-300 flex flex-col justify-between ${
                       regRole === 'Manager'
-                        ? 'border-indigo-500 bg-indigo-50/20 shadow-sm'
-                        : 'border-neutral-200 bg-white hover:border-neutral-300'
+                        ? 'border-indigo-600 bg-indigo-50/30 shadow-[0_4px_12px_rgba(79,70,229,0.08)]'
+                        : 'border-neutral-200/85 bg-white hover:border-neutral-350 shadow-xs'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-black uppercase text-indigo-950 font-mono flex items-center gap-1.5">
+                      <span className="text-xs font-black uppercase text-indigo-950 font-mono flex items-center gap-1">
                         👑 Manager 
-                        <span className="text-[8px] bg-indigo-600 text-white font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90 origin-left">FREE</span>
+                        <span className="text-[8px] bg-indigo-650 text-white font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90 origin-left">FREE</span>
                       </span>
                       <input
                         type="radio"
                         checked={regRole === 'Manager'}
                         onChange={() => {}}
-                        className="accent-indigo-600"
+                        className="accent-indigo-600 w-4 h-4 cursor-pointer"
                       />
                     </div>
-                    <span className="text-[10px] text-neutral-400 font-semibold mt-2 leading-tight">
+                    <span className="text-[10px] text-neutral-450 font-bold mt-2.5 leading-tight">
                       Full control. Manage cashiers, sound, target levels & terminals.
                     </span>
                   </div>
@@ -1148,10 +1207,10 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                   {/* Employee Option */}
                   <div
                     onClick={() => setRegRole('Employee')}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all duration-300 flex flex-col justify-between ${
                       regRole === 'Employee'
-                        ? 'border-[#00B87A] bg-emerald-50/20'
-                        : 'border-neutral-200 bg-white hover:border-neutral-300'
+                        ? 'border-[#00B87A] bg-emerald-50/20 shadow-[0_4px_12px_rgba(0,184,122,0.08)]'
+                        : 'border-neutral-200/85 bg-white hover:border-neutral-350 shadow-xs'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -1160,21 +1219,21 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                         type="radio"
                         checked={regRole === 'Employee'}
                         onChange={() => {}}
-                        className="accent-[#00B87A]"
+                        className="accent-[#00B87A] w-4 h-4 cursor-pointer"
                       />
                     </div>
-                    <span className="text-[10px] text-neutral-400 font-semibold mt-2 leading-tight">
+                    <span className="text-[10px] text-neutral-455 font-bold mt-2.5 leading-tight">
                       Log slips. Focuses entirely on inputting withdrawals & transfers.
                     </span>
                   </div>
                 </div>
 
                 {regRole === 'Manager' && (
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 p-3 rounded-xl flex items-start gap-2.5 animate-pulse">
-                    <span className="text-base">⭐</span>
+                  <div className="bg-gradient-to-r from-indigo-50/70 to-purple-50/70 border border-indigo-100 p-3.5 rounded-2xl flex items-start gap-2.5 animate-pulse">
+                    <span className="text-base leading-none">⭐</span>
                     <div className="text-left">
                       <p className="text-[11px] font-black text-indigo-950 uppercase tracking-wide">Free Lifetime Manager Account Activated</p>
-                      <p className="text-[9px] text-indigo-700/80 font-semibold leading-relaxed mt-0.5">
+                      <p className="text-[9px] text-indigo-700/90 font-bold leading-relaxed mt-1">
                         Track unlimited POS workers, manage active sessions, view comprehensive transaction statistics, and enforce direct terminal control with zero activation fees or monthly charges!
                       </p>
                     </div>
@@ -1184,35 +1243,39 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
               {/* Full Name */}
               <div>
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">
+                <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                   Full Name
                 </label>
                 <div className="relative">
-                  <UserIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                    <UserIcon className="w-5 h-5 stroke-[2]" />
+                  </div>
                   <input
                     type="text"
                     required
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
-                    placeholder="e.g. Cashier Name"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-sm font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400"
+                    placeholder="Enter full legal name"
+                    className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400 transition-all shadow-xs"
                   />
                 </div>
               </div>
 
               {/* Phone Number */}
               <div>
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">
+                <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                   Phone Number (10 - 11 digits)
                 </label>
                 <div className="relative">
-                  <Phone className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                    <Phone className="w-5 h-5 stroke-[2]" />
+                  </div>
                   <input
                     type="tel"
                     value={regPhone}
                     onChange={(e) => setRegPhone(e.target.value.replace(/[^\d+]/g, ''))}
                     placeholder="e.g. 08123456789"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-sm font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400"
+                    className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400 transition-all shadow-xs"
                   />
                 </div>
               </div>
@@ -1221,34 +1284,38 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
               {regRole === 'Employee' && (
                 <>
                   <div>
-                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">
+                    <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                       Referral Code (Required)
                     </label>
                     <div className="relative">
-                      <KeyRound className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                        <KeyRound className="w-5 h-5 stroke-[2]" />
+                      </div>
                       <input
                         type="text"
                         required
                         value={regReferralCode}
                         onChange={(e) => setRegReferralCode(e.target.value)}
                         placeholder="e.g. MGR-123456789"
-                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-sm font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400"
+                        className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400 transition-all shadow-xs"
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">
+                    <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 font-mono">
                       Work Area/Location
                     </label>
                     <div className="relative">
-                      <MapPin className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                        <MapPin className="w-5 h-5 stroke-[2]" />
+                      </div>
                       <input
                         type="text"
                         required
                         value={regArea}
                         onChange={(e) => setRegArea(e.target.value)}
                         placeholder="e.g. Shop A12"
-                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-4 py-3.5 text-sm font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400"
+                        className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] placeholder:text-neutral-400 transition-all shadow-xs"
                       />
                     </div>
                   </div>
@@ -1257,14 +1324,16 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
               {/* Passcode PIN */}
               <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-widest font-mono">
                     Create 4-Digit Passcode (PIN)
                   </label>
-                  <span className="text-[9px] text-rose-500 font-bold uppercase tracking-wider font-mono">Numbers Only</span>
+                  <span className="text-[9px] text-rose-500 font-black uppercase tracking-wider font-mono">Numbers Only</span>
                 </div>
                 <div className="relative">
-                  <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                    <Lock className="w-5 h-5 stroke-[2]" />
+                  </div>
                   <input
                     type={showRegPin ? "text" : "password"}
                     inputMode="numeric"
@@ -1274,35 +1343,35 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                     value={regPin}
                     onChange={(e) => setRegPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="Enter unique 4-digit PIN"
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl pl-12 pr-12 py-3.5 text-base font-mono font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-normal placeholder:text-sm text-center"
+                    className="w-full bg-neutral-50/50 border border-neutral-200 rounded-2xl pl-12 pr-12 py-4 text-base font-mono font-black text-neutral-850 focus:outline-none focus:border-[#00B87A] focus:ring-1 focus:ring-[#00B87A] tracking-widest placeholder:tracking-normal placeholder:font-sans placeholder:font-bold placeholder:text-sm text-center transition-all shadow-xs"
                   />
                   <button
                     type="button"
                     onClick={() => setShowRegPin(!showRegPin)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 transition"
                   >
-                    {showRegPin ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                    {showRegPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                <p className="text-[10px] text-neutral-400 mt-1.5 leading-normal">
-                  Write down your PIN! You will use this passcode to instantly log in and secure the terminal.
+                <p className="text-[10px] text-neutral-400 mt-2 font-bold uppercase tracking-wider font-mono">
+                  🚨 Write down your PIN! You will use this passcode to instantly log in and secure the terminal.
                 </p>
               </div>
 
               {/* Cloud Sync Extra Fields (Optional) */}
-              <div className="border-t border-neutral-100 pt-4 mt-2">
-                <div className="flex items-center gap-1.5 mb-3 text-neutral-400">
-                  <Briefcase className="w-4 h-4" />
-                  <span className="text-[9px] font-bold tracking-widest uppercase">Optional Email Recovery</span>
+              <div className="border-t border-neutral-150/40 pt-5 mt-2">
+                <div className="flex items-center gap-1.5 mb-3.5 text-neutral-400">
+                  <Briefcase className="w-4 h-4 stroke-[2]" />
+                  <span className="text-[9px] font-black tracking-widest uppercase font-mono">Optional Email Recovery</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <input
                       type="email"
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
                       placeholder="Email (Optional)"
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-xs font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A]"
+                      className="w-full bg-neutral-50/50 border border-neutral-200 rounded-xl px-4 py-3 text-xs font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] placeholder:text-neutral-400"
                     />
                   </div>
                   <div>
@@ -1311,7 +1380,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
                       placeholder="Password (Optional)"
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-xs font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A]"
+                      className="w-full bg-neutral-50/50 border border-neutral-200 rounded-xl px-4 py-3 text-xs font-bold text-neutral-800 focus:outline-none focus:border-[#00B87A] placeholder:text-neutral-400"
                     />
                   </div>
                 </div>
@@ -1341,11 +1410,11 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         </div>
 
         {/* Footer info banner */}
-        <div className="bg-neutral-50 p-5 text-center border-t border-neutral-100 flex flex-col items-center justify-center gap-3">
-          <p className="text-[10px] font-bold text-neutral-400 flex items-center justify-center gap-1.5 uppercase tracking-widest font-mono">
-            <CheckCircle2 className="w-4 h-4 text-[#00B87A]" /> Secure CBN Licensed Agency Terminal
+        <div className="bg-neutral-50/70 p-5 text-center border-t border-neutral-150/40 flex flex-col items-center justify-center gap-3">
+          <p className="text-[10px] font-black text-neutral-450 flex items-center justify-center gap-1.5 uppercase tracking-widest font-mono select-none">
+            <CheckCircle2 className="w-4.5 h-4.5 text-[#00B87A] stroke-[2.5]" /> Secure CBN Licensed Agency Terminal
           </p>
-          <p className="text-[9px] text-neutral-400 max-w-xs leading-relaxed font-semibold">
+          <p className="text-[9px] text-neutral-400 max-w-xs leading-relaxed font-bold uppercase tracking-wider font-mono">
             All cashier sessions are monitored and logged. Keep your terminal safe. For support, call 0700-OPAY-HELP.
           </p>
         </div>

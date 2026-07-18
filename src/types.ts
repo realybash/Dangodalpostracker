@@ -28,6 +28,8 @@ export interface SubTransfer {
   recipientName: string;
   accountNumber: string;
   amount: number;
+  type?: TransactionType;
+  provider?: ProviderType;
 }
 
 export interface Expense {
@@ -61,7 +63,7 @@ export interface BorrowKeepTransaction {
   photoBack?: string; // base64-encoded back view snapshot proof (cash/receipt)
 }
 
-export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Cash Out (Transfer)' | 'Airtime' | 'Data' | 'Bills';
+export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Cash Out (Transfer)' | 'Airtime' | 'Data' | 'Bills' | 'Money Received';
 export type ProviderType = 'OPay' | 'Moniepoint' | 'PalmPay' | 'Nomba' | 'Others' | string;
 
 export interface ChargeRange {
@@ -101,6 +103,8 @@ export interface Transaction {
   cbnCharge?: number; // ₦50 EMTL on transactions 10,000+
   profit: number; // customerFee - terminalFee - cbnCharge
   timestamp: string; // ISO String
+  businessDate?: string; // YYYY-MM-DD representing permanent ledger date
+  createdAt?: string; // ISO String of exact creation
   notes?: string;
   customerPhone?: string;
   status?: 'Success' | 'Pending' | 'Failed';
@@ -127,13 +131,20 @@ export interface Transaction {
   createdBy?: string;
   branchName?: string;
 
-  // New fields for split withdrawals
-  mode?: 'Standard' | 'SplitWithdrawal';
+  // New fields for split sessions
+  mode?: 'Standard' | 'SplitSession' | 'SplitChild';
+  sourceType?: TransactionType; 
+  distributionType?: TransactionType;
+  distributionProvider?: ProviderType;
   subTransfers?: SubTransfer[];
+  isSplitParent?: boolean;
+  parentTransactionId?: string;
+  splitSegmentIndex?: number;
   commissionAmount?: number;
   remainingBalance?: number;
   chargesStatus?: 'Paid' | 'Unpaid' | 'PartiallyPaid';
   customerName?: string;
+  customerAccountNumber?: string;
   unpaidFeeAmount?: number;
   originalFeeAmount?: number;
   chargesPaidAmount?: number;
@@ -255,18 +266,28 @@ export interface AppSettings {
   regulatoryConfig?: RegulatoryConfig;
 }
 
+export type HistoryFilterType = 'DAY_1' | 'DAY_2' | 'DAY_3' | 'DAY_4' | 'DAY_5' | 'DAY_6' | 'DAY_7' | 'THIS_WEEK' | 'THIS_MONTH' | 'THIS_YEAR' | 'LIFETIME' | 'CUSTOM';
+
+export interface HistoryFilter {
+  type: HistoryFilterType;
+  customStart?: string; // ISO String
+  customEnd?: string;   // ISO String
+}
+
 export interface AppState {
   currentUser: User;
   availableEmployees: User[];
   transactions: Transaction[];
+  historyTransactions: Transaction[];
   expenses: Expense[];
   posTerminals: PosTerminal[]; // Array of custom linked POS terminals
   selectedEmployeeFilter: string; // 'ALL' or employeeId
   impersonatedUserId?: string; // ID of employee being viewed by manager
-  activeTimeframe: 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
+  activeTimeframe: 'Daily' | 'Yesterday' | 'Last 3 Days' | 'Last 4 Days' | 'Last 5 Days' | 'Last 6 Days' | 'Last 7 Days' | 'Weekly' | 'Monthly' | 'Yearly' | 'All-Time';
   terminalFeeRate: number; // Baseline terminal operating fee package
   dailyTarget: number; // User-defined target
   settings?: AppSettings;
+  historyFilter: HistoryFilter;
 }
 
 export type AppAction =
@@ -282,6 +303,7 @@ export type AppAction =
   | { type: 'DELETE_EXPENSE'; payload: string }
   | { type: 'RESET_DATA' }
   | { type: 'SET_TRANSACTIONS'; payload: Transaction[] }
+  | { type: 'SET_HISTORY_TRANSACTIONS'; payload: Transaction[] }
   | { type: 'SET_EXPENSES'; payload: Expense[] }
   | { type: 'SET_REGISTERED_USERS'; payload: User[] }
   | { type: 'SET_POS_TERMINALS'; payload: PosTerminal[] }
@@ -291,4 +313,5 @@ export type AppAction =
   | { type: 'SET_IMPERSONATED_USER'; payload: string | undefined }
   | { type: 'BULK_DELETE_TRANSACTIONS'; payload: string[] }
   | { type: 'BULK_UPDATE_TRANSACTIONS'; payload: Transaction[] }
+  | { type: 'SET_HISTORY_FILTER'; payload: HistoryFilter }
   | { type: 'UPDATE_SETTINGS'; payload: Partial<AppSettings> };

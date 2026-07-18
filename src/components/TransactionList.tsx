@@ -5,9 +5,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Transaction, TransactionType, ProviderType, User, AppSettings } from '../types';
-import { formatNaira, getProviderTransactionNumber, isSameDay, isSameWeek, isSameMonth, isSameYear, getFriendlyTypeLabel } from '../utils';
-import { CalendarFilter } from './CalendarFilter';
+import { Transaction, TransactionType, ProviderType, User, AppSettings, HistoryFilter, HistoryFilterType } from '../types';
+import { formatNaira, getProviderTransactionNumber, getFriendlyTypeLabel, analyzeQuery } from '../utils';
 import { 
   Search, 
   Trash2, 
@@ -16,6 +15,7 @@ import {
   Calendar,
   Layers,
   ArrowRightLeft,
+  Sparkles,
   DollarSign,
   Pencil,
   FileCheck,
@@ -76,10 +76,19 @@ interface TransactionListProps {
   onEditTransaction: (tx: Transaction) => void;
   onViewReceipt?: (tx: Transaction) => void;
   onUpdateTransaction?: (tx: Transaction) => void;
+  onSplitTransaction?: (tx: Transaction) => void;
   onBulkDeleteTransactions?: (ids: string[]) => void;
   onBulkUpdateTransactions?: (txs: Transaction[]) => void;
   settings?: AppSettings;
   onOpenSettings?: () => void;
+  historyFilter: HistoryFilter;
+  onSetHistoryFilter: (filter: HistoryFilter) => void;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  typeFilter: string;
+  setTypeFilter: (t: string) => void;
+  providerFilter: string;
+  setProviderFilter: (p: string) => void;
 }
 
 export const TransactionList = React.memo(({
@@ -89,17 +98,24 @@ export const TransactionList = React.memo(({
   onEditTransaction,
   onViewReceipt,
   onUpdateTransaction,
+  onSplitTransaction,
   onBulkDeleteTransactions,
   onBulkUpdateTransactions,
   settings,
-  onOpenSettings
+  onOpenSettings,
+  historyFilter,
+  onSetHistoryFilter,
+  searchQuery,
+  setSearchQuery,
+  typeFilter,
+  setTypeFilter,
+  providerFilter,
+  setProviderFilter
 }: TransactionListProps) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
-  const [providerFilter, setProviderFilter] = useState<string>('ALL');
-  const [dateFilter, setDateFilter] = useState<'TODAY' | 'YESTERDAY' | 'THREE_DAYS' | 'SEVEN_DAYS' | 'WEEK' | 'MONTH' | 'YEAR' | 'SPECIFIC' | 'ALL'>('TODAY');
-  const [selectedSpecificDate, setSelectedSpecificDate] = useState<string>(new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
   const [currentPage, setCurrentPage] = useState(1);
+  const [customStart, setCustomStart] = useState<string>(historyFilter?.customStart || new Date().toISOString().slice(0, 10));
+  const [customEnd, setCustomEnd] = useState<string>(historyFilter?.customEnd || new Date().toISOString().slice(0, 10));
+  const [isCustomDateOpen, setIsCustomDateOpen] = useState(false);
   
   // Bulk selection state for managers
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -115,9 +131,6 @@ export const TransactionList = React.memo(({
   const [settleFeeInput, setSettleFeeInput] = useState<string>('');
   const [settleFeeMethod, setSettleFeeMethod] = useState<'Cash' | 'CardDebit'>('Cash');
   
-  // Calendar Filtering
-  const [filterDate, setFilterDate] = useState(new Date());
-
   // Audio playback state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
@@ -236,149 +249,49 @@ export const TransactionList = React.memo(({
     };
   }, [transactions]);
 
-  // Advanced Combined Query Parser
-  const queryAnalysis = useMemo(() => {
-    const trimmed = searchQuery.trim().toLowerCase();
-    if (!trimmed) {
-      return {
-        hasQuery: false,
-        tokens: [],
-        extractedProviders: [] as string[],
-        extractedTypes: [] as string[],
-        textKeywords: [] as string[]
-      };
-    }
+  // Transactions are already filtered in App.tsx (Synchronization Layer)
+  const filteredList = transactions;
+  
+  // Re-run analysis for UI display of filter pills
+  const queryAnalysis = useMemo(() => analyzeQuery(searchQuery), [searchQuery]);
 
-    // Split query into individual token words
-    const tokens = trimmed.split(/\s+/).filter(Boolean);
-    const extractedProviders: string[] = [];
-    const extractedTypes: string[] = [];
-    const textKeywords: string[] = [];
+  // Financial Summary for filtered transactions
+  const financialSummary = useMemo(() => {
+    return filteredList.reduce((acc, tx) => {
+      acc.totalTransactions++;
+      const isSuccess = tx.status === 'Success' || (tx.status || 'Success') === 'Success';
+      const isFailed = tx.status === 'Failed';
+      const isPending = !isSuccess && !isFailed;
 
-    // Valid option sets
-    const providerOptions = ['opay', 'moniepoint', 'palmpay'];
-    const typeOptions = ['withdrawal', 'deposit', 'transfer'];
-
-    tokens.forEach((token) => {
-      // Check for standalone match of providers
-      const matchedProv = providerOptions.find(p => p === token || (token.length >= 3 && p.includes(token)));
-      if (matchedProv) {
-        extractedProviders.push(matchedProv);
-        return;
+      if (isSuccess) {
+        acc.totalSuccessful++;
+        acc.totalVolume += tx.amount || 0;
+        acc.totalCustomerFees += tx.customerFee || 0;
+        acc.totalProviderCharges += tx.providerCharge || 0;
+        acc.totalCBNCharges += tx.cbnCharge || 0;
+        acc.totalCashback += tx.cashback || 0;
+        
+        // Use stored profit value as per enterprise requirements
+        acc.totalProfit += tx.profit || 0;
+      } else if (isFailed) {
+        acc.totalFailed++;
+      } else if (isPending) {
+        acc.totalPending++;
       }
-
-      // Check for standalone match of transaction types
-      const matchedType = typeOptions.find(t => t === token || (token.length >= 4 && t.includes(token)));
-      if (matchedType) {
-        extractedTypes.push(matchedType);
-        return;
-      }
-
-      // Check for subType
-      if (token === 'same' || token === 'samebank') {
-        textKeywords.push('samebank');
-        return;
-      }
-      if (token === 'inter' || token === 'interbank' || token === 'otherbank') {
-        textKeywords.push('otherbank');
-        return;
-      }
-
-      // Otherwise, it's a general text lookup keyword (e.g., operator name, amount, or TXID)
-      textKeywords.push(token);
+      return acc;
+    }, {
+      totalTransactions: 0,
+      totalSuccessful: 0,
+      totalFailed: 0,
+      totalPending: 0,
+      totalVolume: 0,
+      totalCustomerFees: 0,
+      totalProviderCharges: 0,
+      totalCBNCharges: 0,
+      totalCashback: 0,
+      totalProfit: 0
     });
-
-    return {
-      hasQuery: true,
-      tokens,
-      extractedProviders,
-      extractedTypes,
-      textKeywords
-    };
-  }, [searchQuery]);
-
-  // Multi-criteria filter with advanced combined query capability
-  const filteredList = useMemo(() => {
-    return transactions.filter((tx) => {
-      // 0. Date Filter check
-      const txDate = new Date(tx.timestamp);
-      
-      if (dateFilter === 'TODAY') {
-        if (!isSameDay(txDate, filterDate)) return false;
-      } else if (dateFilter === 'YESTERDAY') {
-        const yesterday = new Date(filterDate);
-        yesterday.setDate(yesterday.getDate() - 1);
-        if (!isSameDay(txDate, yesterday)) return false;
-      } else if (dateFilter === 'THREE_DAYS') {
-        const limit = new Date(filterDate);
-        limit.setDate(limit.getDate() - 3);
-        limit.setHours(0, 0, 0, 0);
-        if (txDate < limit) return false;
-      } else if (dateFilter === 'SEVEN_DAYS') {
-        const limit = new Date(filterDate);
-        limit.setDate(limit.getDate() - 7);
-        limit.setHours(0, 0, 0, 0);
-        if (txDate < limit) return false;
-      } else if (dateFilter === 'WEEK') {
-        if (!isSameWeek(txDate, filterDate)) return false;
-      } else if (dateFilter === 'MONTH') {
-        if (!isSameMonth(txDate, filterDate)) return false;
-      } else if (dateFilter === 'YEAR') {
-        if (!isSameYear(txDate, filterDate)) return false;
-      } else if (dateFilter === 'SPECIFIC') {
-        if (!isSameDay(txDate, filterDate)) return false;
-      }
-      
-      // 1. Evaluate advanced search combined query if present
-      if (queryAnalysis.hasQuery) {
-        const { extractedProviders, extractedTypes, textKeywords } = queryAnalysis;
-
-        // If specific providers were identified, the transaction MUST match one of them
-        if (extractedProviders.length > 0) {
-          const txProvLower = tx.provider.toLowerCase();
-          const matchesAnyExtractedProd = extractedProviders.some((prov) => {
-            if (prov === 'others') {
-              return !['opay', 'moniepoint', 'palmpay'].includes(txProvLower);
-            }
-            return txProvLower === prov;
-          });
-          if (!matchesAnyExtractedProd) return false;
-        }
-
-        // If specific types were identified, the transaction MUST match one of them
-        if (extractedTypes.length > 0) {
-          const txTypeLower = tx.type.toLowerCase();
-          const matchesAnyExtractedType = extractedTypes.some(type => txTypeLower === type);
-          if (!matchesAnyExtractedType) return false;
-        }
-
-        // Remaining general keyword text tokens must all be matched (AND matching)
-        if (textKeywords.length > 0) {
-          const matchesAllTextKeywords = textKeywords.every((keyword) => {
-            if (keyword === 'samebank') return tx.subType === 'SameBank';
-            if (keyword === 'otherbank') return tx.subType === 'OtherBank';
-            
-            const providerTxId = getProviderTransactionNumber(tx);
-            return (
-              tx.notes?.toLowerCase().includes(keyword) || 
-              tx.customerPhone?.toLowerCase().includes(keyword) ||
-              tx.employeeName.toLowerCase().includes(keyword) ||
-              tx.id.toLowerCase().includes(keyword) ||
-              providerTxId.toLowerCase().includes(keyword) ||
-              tx.amount.toString().includes(keyword)
-            );
-          });
-          if (!matchesAllTextKeywords) return false;
-        }
-      }
-
-      // 2. Fallback or Intersect with dropdown category filter
-      const matchesType = typeFilter === 'ALL' || tx.type === typeFilter;
-      const matchesProvider = providerFilter === 'ALL' || tx.provider === providerFilter;
-
-      return matchesType && matchesProvider;
-    });
-  }, [transactions, queryAnalysis, typeFilter, providerFilter, dateFilter, selectedSpecificDate]);
+  }, [filteredList]);
 
   const totalItems = filteredList.length;
   const pageSize = settings?.pageSize || 10;
@@ -387,26 +300,32 @@ export const TransactionList = React.memo(({
   // Reset page when filters or queries change to avoid blank pages
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [typeFilter, providerFilter, searchQuery, dateFilter, selectedSpecificDate]);
+  }, [typeFilter, providerFilter, searchQuery, historyFilter]);
+
+  const displayList = useMemo(() => {
+    // Show all transactions, but we'll style 'SplitChild' differently
+    // We keep the filter logic for search/type/provider/history
+    return filteredList;
+  }, [filteredList]);
 
   const paginatedList = useMemo(() => {
     const startIdx = (currentPage - 1) * pageSize;
-    return filteredList.slice(startIdx, startIdx + pageSize);
-  }, [filteredList, currentPage, pageSize]);
+    return displayList.slice(startIdx, startIdx + pageSize);
+  }, [displayList, currentPage, pageSize]);
 
-  // Synchronize selection with visible filtered list to avoid orphaned selections
+  // Synchronize selection with visible display list to avoid orphaned selections
   React.useEffect(() => {
-    setSelectedIds(prev => prev.filter(id => filteredList.some(tx => tx.id === id)));
-  }, [filteredList]);
+    setSelectedIds(prev => prev.filter(id => displayList.some(tx => tx.id === id)));
+  }, [displayList]);
 
   const isAllSelected = useMemo(() => {
-    if (filteredList.length === 0) return false;
-    return filteredList.every(tx => selectedIds.includes(tx.id));
-  }, [filteredList, selectedIds]);
+    if (displayList.length === 0) return false;
+    return displayList.every(tx => selectedIds.includes(tx.id));
+  }, [displayList, selectedIds]);
 
   const handleSelectAllToggle = (checked: boolean) => {
     if (checked) {
-      const allIds = filteredList.map(tx => tx.id);
+      const allIds = displayList.map(tx => tx.id);
       setSelectedIds(allIds);
     } else {
       setSelectedIds([]);
@@ -538,7 +457,7 @@ export const TransactionList = React.memo(({
   };
 
   return (
-    <div className="bg-white border border-neutral-200 rounded-3xl p-5 space-y-4 shadow-sm max-h-[80vh] overflow-y-auto">
+    <div className="bg-white border border-neutral-200 rounded-3xl p-5 space-y-5 shadow-sm max-h-[80vh] overflow-y-auto">
       {/* List Toolbar Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-neutral-100 pb-4">
         <div>
@@ -546,7 +465,7 @@ export const TransactionList = React.memo(({
             <Layers className="text-[#00B87A] w-4.5 h-4.5" /> General Ledger Receipts
           </h3>
           <p className="text-xs text-neutral-500 mt-1 font-medium">
-            Displaying {filteredList.length} of {transactions.length} processed receipts.
+            Displaying {displayList.length} of {transactions.filter(t => t.mode !== 'SplitChild').length} processed receipts.
           </p>
         </div>
 
@@ -556,7 +475,7 @@ export const TransactionList = React.memo(({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="flex-1 sm:flex-initial bg-white hover:bg-[#00B87A]/10 border border-[#00B87A]/25 text-[#00B87A] px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center justify-center gap-1.5 transition cursor-pointer select-none active:scale-[0.98]"
+              className="flex-1 sm:flex-initial bg-white hover:bg-[#00B87A]/10 border border-[#00B87A]/25 text-[#00B87A] px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center justify-center gap-1.5 transition cursor-pointer select-none active:scale-[0.98] shadow-2xs"
               title="Configure receipt branding and baseline commission parameters"
             >
               <Settings className="w-3.5 h-3.5" />
@@ -568,7 +487,7 @@ export const TransactionList = React.memo(({
           <button
             type="button"
             onClick={handleExportCSV}
-            className="flex-1 sm:flex-initial bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-700 hover:text-neutral-900 px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center justify-center gap-2 transition cursor-pointer"
+            className="flex-1 sm:flex-initial bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-neutral-700 hover:text-neutral-900 px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center justify-center gap-2 transition cursor-pointer shadow-2xs"
           >
             <Download className="w-3.5 h-3.5" />
             Export CSV Log
@@ -577,172 +496,172 @@ export const TransactionList = React.memo(({
       </div>
 
       {/* Visual Tracking Mode & Size Selector */}
-      <div className="bg-neutral-50 border border-neutral-200 p-3 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-xs">
-        <div className="space-y-0.5">
-          <span className="text-[10px] font-mono font-black tracking-widest text-[#00B87A] uppercase block flex items-center gap-1">
-            ⭐ LEDGER VISUAL SETTINGS:
+      <div className="bg-neutral-50/80 border border-neutral-200/70 p-3.5 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-2xs">
+        <div className="space-y-1">
+          <span className="text-[10px] font-mono font-black tracking-widest text-[#00B87A] uppercase flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse shrink-0" /> LEDGER VISUAL SETTINGS:
           </span>
-          <p className="text-[11px] text-neutral-600 font-bold leading-normal">
+          <p className="text-[11px] text-neutral-500 font-semibold leading-normal">
             Choose display layout and density spacing. Small mode provides a beautiful, high-efficiency compact layout!
           </p>
         </div>
         
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-3">
           {/* View Format Selector */}
-          <div className="flex bg-neutral-200/60 p-1 rounded-xl self-start lg:self-auto shrink-0 w-full sm:w-auto">
+          <div className="flex bg-neutral-200/50 p-1 rounded-xl self-start lg:self-auto shrink-0 w-full sm:w-auto border border-neutral-200/40">
             <button
               type="button"
               onClick={() => setViewMode('easy')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-black transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer ${
                 viewMode === 'easy'
-                  ? 'bg-[#00B87A] text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900'
+                  ? 'bg-[#00B87A] text-white shadow-xs border border-[#00B87A]'
+                  : 'text-neutral-500 hover:text-neutral-850'
               }`}
             >
-              💡 Easy Cards
+              <Layers className="w-3.5 h-3.5 shrink-0" /> Easy Cards
             </button>
             <button
               type="button"
               onClick={() => setViewMode('advanced')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-black transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer ${
                 viewMode === 'advanced'
-                  ? 'bg-neutral-800 text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900'
+                  ? 'bg-neutral-800 text-white shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-850'
               }`}
             >
-              📊 Detailed Table
+              <CreditCard className="w-3.5 h-3.5 shrink-0" /> Detailed Table
             </button>
           </div>
 
           {/* Size Density Selector */}
-          <div className="flex bg-neutral-200/60 p-1 rounded-xl self-start lg:self-auto shrink-0 w-full sm:w-auto">
+          <div className="flex bg-neutral-200/50 p-1 rounded-xl self-start lg:self-auto shrink-0 w-full sm:w-auto border border-neutral-200/40">
             <button
               type="button"
               onClick={() => setCardSize('small')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition-all duration-150 flex items-center justify-center gap-1 cursor-pointer ${
                 cardSize === 'small'
-                  ? 'bg-neutral-900 text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900'
+                  ? 'bg-neutral-900 text-white shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-850'
               }`}
-              title="Compact compact high-density layout"
+              title="Compact high-density layout"
             >
-              🗜️ Small Mode
+              Small Mode
             </button>
             <button
               type="button"
               onClick={() => setCardSize('medium')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition-all duration-150 flex items-center justify-center gap-1 cursor-pointer ${
                 cardSize === 'medium'
-                  ? 'bg-neutral-900 text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900'
+                  ? 'bg-neutral-900 text-white shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-850'
               }`}
               title="Standard balanced spacing"
             >
-              ⚖️ Medium
+              Medium
             </button>
             <button
               type="button"
               onClick={() => setCardSize('large')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 cursor-pointer ${
+              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-black transition-all duration-150 flex items-center justify-center gap-1 cursor-pointer ${
                 cardSize === 'large'
-                  ? 'bg-neutral-900 text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900'
+                  ? 'bg-neutral-900 text-white shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-850'
               }`}
               title="Large cozy readability layout"
             >
-              🔍 Large
+              Large
             </button>
           </div>
         </div>
       </div>
 
       {/* Dynamic Sized Transaction History Metrics Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {/* Metric 1: Number of Transactions */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-neutral-100 text-neutral-600 flex items-center justify-center shrink-0 border border-neutral-200">
+        <div className="bg-neutral-50/60 border border-neutral-200/50 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-neutral-300 hover:shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-neutral-600 flex items-center justify-center shrink-0 border border-neutral-200/80 shadow-2xs">
             <Receipt className="w-4 h-4 stroke-[2.3]" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
               Transactions
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none">
+            <div className="text-[12px] font-mono font-black text-neutral-800 mt-1 leading-none">
               {metrics.totalCount} receipts
             </div>
           </div>
         </div>
 
         {/* Metric 2: Total Transaction Amount */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
+        <div className="bg-blue-50/30 border border-blue-100 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-blue-200 hover:shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-blue-600 flex items-center justify-center shrink-0 border border-blue-105 shadow-2xs">
             <Layers className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+            <span className="text-[9px] font-mono font-black text-neutral-450 uppercase tracking-wider block leading-none">
               Total Amount
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+            <div className="text-[12px] font-mono font-black text-neutral-800 mt-1 leading-none truncate">
               {formatNaira(metrics.totalAmount)}
             </div>
           </div>
         </div>
 
         {/* Metric 3: Total Customer Fees */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
+        <div className="bg-indigo-50/30 border border-indigo-100 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-indigo-200 hover:shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-105 shadow-2xs">
             <DollarSign className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+            <span className="text-[9px] font-mono font-black text-neutral-450 uppercase tracking-wider block leading-none">
               Customer Fees
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+            <div className="text-[12px] font-mono font-black text-neutral-800 mt-1 leading-none truncate">
               {formatNaira(metrics.totalCustomerFees)}
             </div>
           </div>
         </div>
 
         {/* Metric 4: Total Provider Charges */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 border border-orange-100">
+        <div className="bg-orange-50/30 border border-orange-100 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-orange-200 hover:shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-orange-600 flex items-center justify-center shrink-0 border border-orange-105 shadow-2xs">
             <CreditCard className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+            <span className="text-[9px] font-mono font-black text-neutral-450 uppercase tracking-wider block leading-none">
               Provider Charges
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+            <div className="text-[12px] font-mono font-black text-neutral-800 mt-1 leading-none truncate">
               {formatNaira(metrics.totalProviderCharges)}
             </div>
           </div>
         </div>
 
         {/* Metric 5: Total CBN Charges */}
-        <div className="bg-neutral-50/50 border border-neutral-200/60 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
+        <div className="bg-red-50/30 border border-red-105 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-red-200 hover:shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-red-600 flex items-center justify-center shrink-0 border border-red-105 shadow-2xs">
             <AlertTriangle className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[9px] font-mono font-black text-neutral-400 uppercase tracking-wider block leading-none">
+            <span className="text-[9px] font-mono font-black text-neutral-450 uppercase tracking-wider block leading-none">
               CBN Charges
             </span>
-            <div className="text-[11px] font-mono font-black text-neutral-800 mt-0.5 leading-none truncate">
+            <div className="text-[12px] font-mono font-black text-neutral-800 mt-1 leading-none truncate">
               {formatNaira(metrics.totalCbnCharges)}
             </div>
           </div>
         </div>
 
         {/* Metric 6: Total Profit */}
-        <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-xl flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
+        <div className="bg-emerald-50 border border-emerald-250 p-2.5 rounded-2xl flex items-center gap-2.5 min-w-0 transition-all hover:border-emerald-300 hover:shadow-2xs shadow-2xs">
+          <div className="w-8 h-8 rounded-xl bg-white text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-150 shadow-2xs">
             <DollarSign className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <span className="text-[9px] font-mono font-black text-emerald-600 uppercase tracking-wider block leading-none">
               Total Profit
             </span>
-            <div className="text-[11px] font-mono font-black text-emerald-900 mt-0.5 leading-none truncate">
+            <div className="text-[12px] font-mono font-black text-emerald-900 mt-1 leading-none truncate">
               {formatNaira(metrics.totalProfit)}
             </div>
           </div>
@@ -765,15 +684,15 @@ export const TransactionList = React.memo(({
 
       {/* Intermittent category quick filters */}
       <div className="space-y-4">
-        <div className="space-y-1.5">
-          <span className="text-[10px] font-mono font-bold tracking-widest text-neutral-450 uppercase block">Category Operation Filters:</span>
+        <div className="space-y-2">
+          <span className="text-[10px] font-mono font-black tracking-widest text-neutral-400 uppercase block">Category Operation Filters:</span>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {[
-              { id: 'ALL', label: 'Every Transaction 🌐', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/50', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white' },
-              { id: 'Withdrawal', label: '📥 Withdraw', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-orange-100 text-orange-700 bg-orange-50/30', activeColor: 'bg-orange-600 border-orange-600 text-white' },
-              { id: 'Transfer', label: '💸 Bank Transfers', count: stats.transferCount, vol: stats.transferVol, color: 'border-indigo-100 text-indigo-700 bg-indigo-50/30', activeColor: 'bg-indigo-600 border-indigo-600 text-white' },
-              { id: 'Deposit', label: '📤 Money Receive', count: stats.depositCount, vol: stats.depositVol, color: 'border-blue-100 text-blue-700 bg-blue-50/30', activeColor: 'bg-blue-600 border-blue-600 text-white' },
-              { id: 'Airtime', label: '📱 Airtime Sale', count: stats.airtimeCount, vol: stats.airtimeVol, color: 'border-purple-100 text-purple-700 bg-purple-50/30', activeColor: 'bg-purple-600 border-purple-600 text-white' }
+              { id: 'ALL', label: 'Every Transaction', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/40', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-md shadow-emerald-500/10' },
+              { id: 'Withdrawal', label: '📥 Withdraw', count: stats.withdrawCount, vol: stats.withdrawVol, color: 'border-orange-100 text-orange-700 bg-orange-50/20', activeColor: 'bg-orange-600 border-orange-600 text-white shadow-md shadow-orange-500/10' },
+              { id: 'Transfer', label: '💸 Bank Transfers', count: stats.transferCount, vol: stats.transferVol, color: 'border-indigo-100 text-indigo-700 bg-indigo-50/20', activeColor: 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/10' },
+              { id: 'Deposit', label: '📤 Money Receive', count: stats.depositCount, vol: stats.depositVol, color: 'border-blue-100 text-blue-700 bg-blue-50/20', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10' },
+              { id: 'Airtime', label: '📱 Airtime Sale', count: stats.airtimeCount, vol: stats.airtimeVol, color: 'border-purple-100 text-purple-700 bg-purple-50/20', activeColor: 'bg-purple-600 border-purple-600 text-white shadow-md shadow-purple-500/10' }
             ].map((tab) => {
               const isActive = typeFilter === tab.id;
               return (
@@ -781,10 +700,10 @@ export const TransactionList = React.memo(({
                   key={tab.id}
                   type="button"
                   onClick={() => setTypeFilter(tab.id)}
-                  className={`flex flex-col justify-between p-3 rounded-2xl border text-left transition-all duration-155 cursor-pointer active:scale-98 ${
+                  className={`flex flex-col justify-between p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
                     isActive 
-                      ? `${tab.activeColor} shadow-md font-bold scale-[1.01]` 
-                      : `${tab.color} hover:bg-neutral-50 hover:border-neutral-300`
+                      ? `${tab.activeColor} font-bold scale-[1.01]` 
+                      : `${tab.color} hover:bg-neutral-50 hover:border-neutral-300 hover:shadow-2xs`
                   }`}
                 >
                   <div className="flex items-center justify-between w-full gap-1">
@@ -795,7 +714,7 @@ export const TransactionList = React.memo(({
                       {tab.count}
                     </span>
                   </div>
-                  <div className="mt-2 flex items-baseline justify-between w-full">
+                  <div className="mt-2.5 flex items-baseline justify-between w-full">
                     <span className={`text-[8px] font-mono uppercase tracking-wider ${isActive ? 'text-white/60' : 'text-neutral-450'}`}>Vol:</span>
                     <span className="text-xs font-black font-mono">
                       {formatNaira(tab.vol)}
@@ -808,9 +727,9 @@ export const TransactionList = React.memo(({
         </div>
 
         {/* Separated host network history quick-tabs bar */}
-        <div className="space-y-1.5 border-t border-neutral-100 pt-3">
+        <div className="space-y-2 border-t border-neutral-100 pt-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono font-bold tracking-widest text-[#00B87A] uppercase block">POS Network Split Ledger:</span>
+            <span className="text-[10px] font-mono font-black tracking-widest text-neutral-400 uppercase block">POS Network Split Ledger:</span>
             {providerFilter !== 'ALL' && (
               <button
                 type="button"
@@ -821,12 +740,12 @@ export const TransactionList = React.memo(({
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { id: 'ALL', label: 'All Networks 🌐', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/50', activeColor: 'bg-neutral-800 border-neutral-800 text-white' },
-              { id: 'OPay', label: 'OPay Logs 🟢', count: stats.opayCount, vol: stats.opayVol, color: 'border-emerald-100 text-[#00B87A] bg-[#00B87A]/5', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-[#00b87a]/20 shadow-lg' },
-              { id: 'Moniepoint', label: 'Moniepoint Logs 🔵', count: stats.moniepointCount, vol: stats.moniepointVol, color: 'border-blue-105 text-blue-600 bg-blue-50/15', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-blue-550/20 shadow-lg' },
-              { id: 'PalmPay', label: 'PalmPay Logs 🟠', count: stats.palmpayCount, vol: stats.palmpayVol, color: 'border-orange-100 text-orange-600 bg-orange-50/15', activeColor: 'bg-orange-600 border-orange-600 text-white shadow-orange-550/20 shadow-lg' }
+              { id: 'ALL', label: 'All Networks', count: stats.allCount, vol: stats.allVol, color: 'border-neutral-200 text-neutral-600 bg-neutral-50/40', activeColor: 'bg-neutral-800 border-neutral-800 text-white shadow-md' },
+              { id: 'OPay', label: 'OPay Logs', count: stats.opayCount, vol: stats.opayVol, color: 'border-emerald-100 text-emerald-700 bg-emerald-50/10', activeColor: 'bg-[#00B87A] border-[#00B87A] text-white shadow-emerald-500/15 shadow-md', indicatorColor: 'bg-[#00B87A]' },
+              { id: 'Moniepoint', label: 'Moniepoint Logs', count: stats.moniepointCount, vol: stats.moniepointVol, color: 'border-blue-105 text-blue-600 bg-blue-50/10', activeColor: 'bg-blue-600 border-blue-600 text-white shadow-blue-500/15 shadow-md', indicatorColor: 'bg-blue-500' },
+              { id: 'PalmPay', label: 'PalmPay Logs', count: stats.palmpayCount, vol: stats.palmpayVol, color: 'border-orange-100 text-orange-600 bg-orange-50/10', activeColor: 'bg-orange-600 border-orange-600 text-white shadow-orange-500/15 shadow-md', indicatorColor: 'bg-orange-500' }
             ].map((tab) => {
               const isActive = providerFilter === tab.id;
               return (
@@ -834,22 +753,30 @@ export const TransactionList = React.memo(({
                   key={tab.id}
                   type="button"
                   onClick={() => setProviderFilter(tab.id)}
-                  className={`flex flex-col justify-between p-2.5 rounded-2xl border text-left transition-all duration-155 cursor-pointer active:scale-98 text-xs ${
+                  className={`flex flex-col justify-between p-3 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 text-xs ${
                     isActive 
                       ? `${tab.activeColor} font-bold scale-[1.01]` 
-                      : `${tab.color} hover:bg-neutral-100/60 hover:border-neutral-300`
+                      : `${tab.color} hover:bg-neutral-100/60 hover:border-neutral-300 hover:shadow-2xs`
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full gap-1">
-                    <span className="text-[10px] font-extrabold tracking-tight truncate">{tab.label}</span>
-                    <span className={`text-[8px] font-mono font-black px-1 py-0.5 rounded-full ${
-                      isActive ? 'bg-white/25 text-white' : 'bg-neutral-200/90 text-neutral-700'
+                  <div className="flex items-center justify-between w-full gap-1.5">
+                    <span className="text-[10px] font-extrabold tracking-tight truncate flex items-center gap-1.5">
+                      {tab.indicatorColor && (
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${tab.indicatorColor} opacity-75`}></span>
+                          <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${tab.indicatorColor}`}></span>
+                        </span>
+                      )}
+                      {tab.label}
+                    </span>
+                    <span className={`text-[8px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                      isActive ? 'bg-white/25 text-white' : 'bg-neutral-200 text-neutral-700'
                     }`}>
                       {tab.count}
                     </span>
                   </div>
-                  <div className="mt-1.5 flex items-baseline justify-between w-full">
-                    <span className={`text-[7px] font-mono uppercase tracking-wider ${isActive ? 'text-white/60' : 'text-neutral-450'}`}>Vol:</span>
+                  <div className="mt-2 flex items-baseline justify-between w-full">
+                    <span className={`text-[7px] font-mono uppercase tracking-wider ${isActive ? 'text-white/60' : 'text-neutral-400'}`}>Vol:</span>
                     <span className="text-[10px] font-black font-mono">
                       {formatNaira(tab.vol)}
                     </span>
@@ -862,17 +789,17 @@ export const TransactionList = React.memo(({
       </div>
 
       {/* Advanced Combined search information guide */}
-      <div className="bg-[#00B87A]/5 border border-[#00B87A]/15 p-3.5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-        <div className="space-y-0.5">
+      <div className="bg-neutral-50 border border-neutral-200/60 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="space-y-1">
           <span className="text-[10px] font-extrabold text-[#00B87A] tracking-wider uppercase flex items-center gap-1.5 font-mono">
-            <Search className="w-3.5 h-3.5 animate-pulse" /> SMART COMBINED NATSEARCH ENGINE
+            <Search className="w-3.5 h-3.5 animate-pulse" /> SMART COMBINED SEARCH ASSISTANT
           </span>
-          <p className="text-neutral-600 font-medium">
-            Type natural multi-parameters in the search fields! E.g. <strong className="text-neutral-800 font-bold bg-[#00B87A]/10 px-1 rounded">"opay withdrawal 5000"</strong> or <strong className="text-neutral-800 font-bold bg-[#00B87A]/10 px-1 rounded">"moniepoint transfer"</strong>.
+          <p className="text-neutral-500 font-semibold leading-normal">
+            Type multi-parameters directly into search. E.g. <strong className="text-neutral-700 font-bold bg-[#00B87A]/10 px-1.5 py-0.5 rounded">"opay withdrawal 5000"</strong> or <strong className="text-neutral-700 font-bold bg-[#00B87A]/10 px-1.5 py-0.5 rounded">"moniepoint transfer"</strong>.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[9px] text-neutral-450 uppercase font-mono font-bold mr-1">Tweak Demo:</span>
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          <span className="text-[9px] text-neutral-400 uppercase font-mono font-bold mr-1">Tweak Demo:</span>
           {[
             { label: 'OPay Withdraw', query: 'OPay Withdrawal' },
             { label: 'Moniepoint Transfer', query: 'Moniepoint Transfer' },
@@ -886,7 +813,7 @@ export const TransactionList = React.memo(({
                 setTypeFilter('ALL');
                 setProviderFilter('ALL');
               }}
-              className="px-2.5 py-1 text-[10px] font-bold bg-white text-neutral-700 hover:text-[#00B87A] border border-neutral-200 hover:border-[#00B87A] rounded-lg cursor-pointer transition active:scale-95 shadow-xs"
+              className="px-2.5 py-1 text-[10px] font-bold bg-white text-neutral-600 hover:text-[#00B87A] border border-neutral-200 hover:border-[#00B87A] rounded-full cursor-pointer transition active:scale-95 shadow-2xs hover:shadow-xs"
             >
               🚀 {item.label}
             </button>
@@ -950,65 +877,114 @@ export const TransactionList = React.memo(({
         </div>
 
         {/* Unified Transaction History Date Search Panel */}
-        <div className="bg-neutral-50/75 border border-neutral-200/60 p-3.5 rounded-2xl space-y-3">
+        <div className="bg-neutral-50/60 border border-neutral-200 p-4 rounded-3xl space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-[#00B87A] flex items-center justify-center border border-emerald-100 shrink-0">
-                <Calendar className="w-4 h-4 stroke-[2.3]" />
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#00B87A] flex items-center justify-center border border-emerald-100 shrink-0 shadow-2xs">
+                <Calendar className="w-4.5 h-4.5 stroke-[2.3]" />
               </div>
               <div>
                 <span className="text-[10px] font-mono font-black text-neutral-400 uppercase tracking-widest block leading-none">
-                  Date Range Filter
+                  Server-Side Date Filtering
                 </span>
-                <span className="text-xs font-bold text-neutral-800">
-                  Search & Audit Transaction History
+                <span className="text-xs font-extrabold text-neutral-800 mt-0.5 block">
+                  Transaction Audit Logs
                 </span>
               </div>
             </div>
 
-            {/* Custom Date Picker / Calendar Input */}
-            <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-neutral-200 shadow-xs">
-              <span className="text-[10px] font-mono font-bold text-neutral-500 uppercase">Calendar:</span>
-              <input
-                type="date"
-                value={filterDate.toISOString().split('T')[0]}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setFilterDate(new Date(e.target.value));
-                    setDateFilter('SPECIFIC');
-                  }
-                }}
-                className="text-xs font-bold text-neutral-700 bg-transparent border-none outline-none focus:ring-0 p-0 cursor-pointer"
-              />
+            {/* Custom Date Range Picker Toggle */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCustomDateOpen(!isCustomDateOpen)}
+                className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                  isCustomDateOpen || historyFilter.type === 'CUSTOM'
+                    ? 'bg-[#00B87A] border-[#00B87A] text-white shadow-emerald-500/10'
+                    : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 hover:border-neutral-300'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                Custom Range
+              </button>
             </div>
           </div>
+
+          {/* Custom Date Inputs Panel */}
+          <AnimatePresence>
+            {(isCustomDateOpen || historyFilter.type === 'CUSTOM') && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-wrap items-end gap-3 p-3 bg-white border border-neutral-250 rounded-2xl mb-2 shadow-2xs">
+                  <div className="flex-1 min-w-[120px] space-y-1">
+                    <label className="text-[10px] font-mono font-bold text-neutral-400 uppercase">Start Date:</label>
+                    <input
+                      type="date"
+                      value={customStart}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                      className="w-full text-xs font-bold text-neutral-700 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 outline-none focus:border-[#00B87A] transition"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[120px] space-y-1">
+                    <label className="text-[10px] font-mono font-bold text-neutral-400 uppercase">End Date:</label>
+                    <input
+                      type="date"
+                      value={customEnd}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                      className="w-full text-xs font-bold text-neutral-700 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2 outline-none focus:border-[#00B87A] transition"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetHistoryFilter({
+                        type: 'CUSTOM',
+                        customStart: new Date(customStart).toISOString(),
+                        customEnd: new Date(customEnd).toISOString()
+                      });
+                      setIsCustomDateOpen(false);
+                    }}
+                    className="bg-[#00B87A] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-[#009664] transition active:scale-95 shadow-sm shadow-emerald-500/10 cursor-pointer"
+                  >
+                    Apply Range
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Preset Buttons Grid/Scrollbar */}
           <div className="flex flex-wrap gap-1.5">
             {[
-              { id: 'TODAY', label: 'Today 📅' },
-              { id: 'YESTERDAY', label: 'Yesterday 🕰️' },
-              { id: 'SEVEN_DAYS', label: 'Last 7 Days 🗓️' },
-              { id: 'WEEK', label: 'This Week 📆' },
-              { id: 'MONTH', label: 'This Month 📊' },
-              { id: 'YEAR', label: 'This Year 📈' },
-              { id: 'ALL', label: 'Lifetime 🌐' }
+              { id: 'DAY_1', label: 'Day 1 (Today)' },
+              { id: 'DAY_2', label: 'Yesterday' },
+              { id: 'DAY_3', label: 'Last 3 Days' },
+              { id: 'DAY_4', label: 'Last 4 Days' },
+              { id: 'DAY_5', label: 'Last 5 Days' },
+              { id: 'DAY_6', label: 'Last 6 Days' },
+              { id: 'DAY_7', label: 'Last 7 Days' },
+              { id: 'THIS_WEEK', label: 'This Week' },
+              { id: 'THIS_MONTH', label: 'This Month' },
+              { id: 'THIS_YEAR', label: 'This Year' },
+              { id: 'LIFETIME', label: 'Lifetime' }
             ].map((preset) => {
-              const isActive = dateFilter === preset.id;
+              const isActive = historyFilter.type === preset.id;
               return (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => {
-                    setDateFilter(preset.id as any);
-                    if (preset.id !== 'SPECIFIC') {
-                      setFilterDate(new Date());
-                    }
+                    onSetHistoryFilter({ type: preset.id as HistoryFilterType });
+                    if (preset.id !== 'CUSTOM') setIsCustomDateOpen(false);
                   }}
-                  className={`px-3 py-1.5 text-xs font-extrabold rounded-xl border transition-all cursor-pointer active:scale-95 ${
+                  className={`px-3 py-1.5 text-[11px] font-bold rounded-full border transition-all cursor-pointer active:scale-95 ${
                     isActive
-                      ? 'bg-[#00B87A] border-[#00B87A] text-white shadow-xs'
-                      : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+                      ? 'bg-neutral-900 border-neutral-900 text-white shadow-2xs'
+                      : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 hover:border-neutral-300'
                   }`}
                 >
                   {preset.label}
@@ -1017,14 +993,76 @@ export const TransactionList = React.memo(({
             })}
           </div>
 
-          {/* Active Filter description helper */}
-          <div className="text-[11px] text-neutral-500 flex items-center justify-between bg-white px-3 py-1.5 rounded-xl border border-neutral-100">
-            <span className="font-medium">
-              Showing <strong className="text-[#00B87A] font-black">{filteredList.length}</strong> matched of <strong className="text-neutral-700 font-bold">{transactions.length}</strong> total active records
+          <div className="text-[11px] text-neutral-500 flex items-center justify-between bg-white px-3.5 py-2 rounded-2xl border border-neutral-200/60 shadow-2xs">
+            <span className="font-semibold">
+              Audit Scope: <strong className="text-[#00B87A] font-black">{(historyFilter?.type || 'Day 1').replace('_', ' ')}</strong>
             </span>
             <span className="text-[10px] font-mono font-bold text-neutral-400">
-              Active Mode: {dateFilter}
+              Fetched {transactions?.length || 0} records from Firestore
             </span>
+          </div>
+
+          {/* Financial Summary Dashboard */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-1">
+            <div className="bg-white border border-neutral-200 p-3 rounded-2xl shadow-2xs hover:shadow-xs transition duration-150">
+              <span className="text-[9px] text-neutral-450 font-mono uppercase font-black block mb-1">Transactions</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-base font-black text-neutral-800 font-mono leading-none">{financialSummary.totalTransactions}</span>
+                <span className="text-[9px] text-neutral-450 font-bold uppercase">Total</span>
+              </div>
+              <div className="flex gap-3 mt-2.5 pt-2 border-t border-neutral-100">
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-emerald-500 font-bold uppercase leading-none">Succ</span>
+                  <span className="text-[10px] font-black text-emerald-600 font-mono mt-0.5">{financialSummary.totalSuccessful}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-red-400 font-bold uppercase leading-none">Decl</span>
+                  <span className="text-[10px] font-black text-red-500 font-mono mt-0.5">{financialSummary.totalFailed}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50/20 border border-emerald-100 p-3 rounded-2xl shadow-2xs hover:shadow-xs transition duration-150">
+              <span className="text-[9px] text-emerald-600 font-mono uppercase font-black block mb-1">Volume (Succ)</span>
+              <span className="text-base font-black text-emerald-700 font-mono leading-none">{formatNaira(financialSummary.totalVolume)}</span>
+              <div className="mt-2.5 pt-2 flex items-center gap-1 border-t border-emerald-100/30">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[8px] text-emerald-600 font-bold uppercase">Settled Volume</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-neutral-200 p-3 rounded-2xl shadow-2xs hover:shadow-xs transition duration-150">
+              <span className="text-[9px] text-neutral-450 font-mono uppercase font-black block mb-1">Gross Fees</span>
+              <span className="text-base font-black text-neutral-800 font-mono leading-none">{formatNaira(financialSummary.totalCustomerFees)}</span>
+              <div className="mt-2.5 pt-2 border-t border-neutral-100 flex justify-between items-center">
+                <span className="text-[8px] font-bold text-neutral-400 uppercase">Provider Cost</span>
+                <span className="text-[10px] font-black text-red-500 font-mono">-{formatNaira(financialSummary.totalProviderCharges)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-neutral-200 p-3 rounded-2xl shadow-2xs hover:shadow-xs transition duration-150">
+              <span className="text-[9px] text-neutral-450 font-mono uppercase font-black block mb-1">CBN & Cashback</span>
+              <div className="flex flex-col gap-1.5 mt-0.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-[8px] font-bold text-neutral-400 uppercase">CBN Cost</span>
+                  <span className="text-[10px] font-black text-neutral-800 font-mono">{formatNaira(financialSummary.totalCBNCharges)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[8px] font-bold text-neutral-400 uppercase">Cashback</span>
+                  <span className="text-[10px] font-black text-[#00B87A] font-mono">{formatNaira(financialSummary.totalCashback)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-neutral-900 to-neutral-800 border border-neutral-850 p-3.5 rounded-2xl shadow-md col-span-2 md:col-span-1 flex flex-col justify-between hover:shadow-lg transition duration-150 text-white">
+              <div>
+                <span className="text-[9px] text-emerald-400 font-mono uppercase font-black block mb-1">Realized Gain</span>
+                <span className="text-base font-black text-white font-mono leading-tight">{formatNaira(financialSummary.totalProfit)}</span>
+              </div>
+              <div className="mt-2 flex items-center gap-1 opacity-90">
+                <span className="text-[8px] text-neutral-300 font-bold uppercase tracking-tight">Net Profit after fees</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1121,7 +1159,7 @@ export const TransactionList = React.memo(({
                 <option value="" className="text-neutral-800">Change...</option>
                 <option value="Success" className="text-neutral-800 font-bold">🟢 Success</option>
                 <option value="Pending" className="text-neutral-800 font-bold">🟡 Pending</option>
-                <option value="Failed" className="text-neutral-800 font-bold">🔴 Failed</option>
+                <option value="Failed" className="text-neutral-800 font-bold">🔴 Decline</option>
               </select>
             </div>
 
@@ -1195,7 +1233,7 @@ export const TransactionList = React.memo(({
                 </span>
               </div>
             )}
-            <div className={cardSize === 'small' ? 'space-y-2' : cardSize === 'medium' ? 'space-y-2.5' : 'space-y-3'}>
+            <div className={cardSize === 'small' ? 'space-y-1.5' : cardSize === 'medium' ? 'space-y-2' : 'space-y-2.5'}>
               <AnimatePresence mode="popLayout">
                 {paginatedList.map((tx) => {
                   const serialNumber = transactions.length - transactions.indexOf(tx);
@@ -1221,7 +1259,12 @@ export const TransactionList = React.memo(({
                   let easyIconBg = '';
                   let easyIconColor = '';
    
-                  if (tx.type === 'Withdrawal') {
+                  if (tx.mode === 'SplitSession') {
+                    easyCategoryTitle = `🔄 Split Transaction`;
+                    easyCategoryDesc = `Unified Multi-Segment POS Receipt`;
+                    easyIconBg = 'bg-emerald-600 text-white shadow-lg shadow-emerald-200/50';
+                    easyIconColor = 'text-white';
+                  } else if (tx.type === 'Withdrawal') {
                     easyCategoryTitle = '📥 Withdraw';
                     easyCategoryDesc = 'Customer swiped card, you gave them paper cash';
                     easyIconBg = 'bg-emerald-50 text-emerald-700 border border-emerald-200/50';
@@ -1250,63 +1293,71 @@ export const TransactionList = React.memo(({
                   };
    
                   const isExpanded = expandedTxId === tx.id;
-  
+                  const isChild = tx.mode === 'SplitChild';
+                  
+                  // SESSION PROFITS FOR SPLIT WITHDRAWALS
+                  const sessionChildren = transactions.filter(t => t.parentTransactionId === tx.id);
+                  const sessionProfit = tx.profit + sessionChildren.reduce((sum, child) => sum + (child.profit || 0), 0);
+                  const sessionTerminalFee = tx.terminalFee + sessionChildren.reduce((sum, child) => sum + (child.terminalFee || 0), 0);
+                  const isSplitMode = tx.mode === 'SplitSession';
+
                   // Dynamic Density Layout Spacing Configurations
                   const cardPadding = 
                     cardSize === 'small' 
-                      ? 'p-2 sm:p-2.5 rounded-xl border-l-[4px]' 
+                      ? `${isChild ? 'ml-4 sm:ml-6 bg-neutral-50/10' : ''} p-2 rounded-xl border-l-[4px]` 
                       : cardSize === 'medium'
-                      ? 'p-3 rounded-xl border-l-[5px]'
-                      : 'p-4 rounded-2xl border-l-[6px]';
-  
+                      ? `${isChild ? 'ml-6 sm:ml-8 bg-neutral-50/20' : ''} p-3 rounded-2xl border-l-[5px]`
+                      : `${isChild ? 'ml-8 sm:ml-10 bg-neutral-50/30' : ''} p-4 rounded-3xl border-l-[6px]`;
+
                   const iconSizeClass = 
                     cardSize === 'small' 
-                      ? 'w-7.5 h-7.5 rounded-md' 
+                      ? 'w-7 h-7 rounded-lg' 
                       : cardSize === 'medium'
-                      ? 'w-8.5 h-8.5 rounded-lg'
-                      : 'w-10 h-10 rounded-xl';
-  
+                      ? 'w-8.5 h-8.5 rounded-xl'
+                      : 'w-10 h-10 rounded-2xl';
+
                   const arrowSizeClass = 
                     cardSize === 'small' 
-                      ? 'w-3.5 h-3.5 stroke-[2.8]' 
+                      ? 'w-3.5 h-3.5 stroke-[3]' 
                       : cardSize === 'medium'
-                      ? 'w-4 h-4 stroke-[2.8]'
-                      : 'w-4.5 h-4.5 stroke-[2.8]';
-  
+                      ? 'w-4 h-4 stroke-[3]'
+                      : 'w-4.5 h-4.5 stroke-[3]';
+
                   const titleTextSize = 
                     cardSize === 'small' 
-                      ? 'text-[11px] font-extrabold' 
+                      ? 'text-[11px] font-black' 
                       : cardSize === 'medium'
                       ? 'text-xs font-black'
                       : 'text-sm font-black';
-  
+
                   const subTextSize = 
                     cardSize === 'small' 
                       ? 'text-[9px] font-bold' 
                       : cardSize === 'medium'
                       ? 'text-[10px] font-bold'
                       : 'text-[11px] font-bold';
-  
+
                   const amountTextSize = 
                     cardSize === 'small' 
-                      ? 'text-xs sm:text-sm font-black' 
+                      ? 'text-xs font-black' 
                       : cardSize === 'medium'
-                      ? 'text-sm sm:text-base font-black'
-                      : 'text-base sm:text-lg font-black';
-  
+                      ? 'text-sm font-black'
+                      : 'text-base font-black';
+
                   const statusBadgeTextSize = 
                     cardSize === 'small' 
-                      ? 'text-[7.5px] px-1 py-0.2 rounded font-black tracking-wider' 
+                      ? 'text-[7px] px-1.5 py-0.2 rounded font-black tracking-wider uppercase' 
                       : cardSize === 'medium'
-                      ? 'text-[8.5px] px-1.5 py-0.2 rounded font-black tracking-wider'
-                      : 'text-[9px] px-2 py-0.5 rounded font-black tracking-wider';
-  
+                      ? 'text-[8px] px-2 py-0.4 rounded font-black tracking-wider uppercase'
+                      : 'text-[9px] px-2.5 py-0.6 rounded font-black tracking-wider uppercase';
+
                   const gapSpacing = 
                     cardSize === 'small' 
-                      ? 'gap-2' 
+                      ? 'gap-3' 
                       : cardSize === 'medium'
-                      ? 'gap-2.5'
-                      : 'gap-3';
+                      ? 'gap-3.5'
+                      : 'gap-4';
+
    
                   return (
                     <motion.div
@@ -1315,8 +1366,18 @@ export const TransactionList = React.memo(({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.98 }}
                       onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}
-                      className={`bg-white border border-neutral-100/90 ${cardPadding} ${cardBorderColor} hover:shadow-sm hover:border-neutral-200/80 transition-all duration-150 cursor-pointer relative overflow-hidden select-none`}
+                      className={`bg-white border border-neutral-150/80 shadow-[0_3px_12px_rgba(0,0,0,0.015)] ${cardPadding} ${cardBorderColor} hover:shadow-[0_8px_30px_rgba(0,0,0,0.05)] hover:border-neutral-300 hover:scale-[1.008] active:scale-[0.995] transition-all duration-300 ease-out cursor-pointer relative overflow-visible select-none group`}
                     >
+                      {/* Serial Connector Line for Split Children */}
+                      {isChild && (
+                        <div className="absolute -left-[1.25rem] top-0 bottom-0 flex flex-col items-center">
+                           <div className="w-px h-full bg-neutral-200 opacity-50" />
+                           <div className="absolute top-1/2 -translate-y-1/2 w-4 h-px bg-neutral-200 opacity-50" />
+                           {tx.splitSegmentIndex === 1 && (
+                             <div className="absolute -top-3 w-1.5 h-1.5 rounded-full border border-neutral-200 bg-white" />
+                           )}
+                        </div>
+                      )}
                       {/* Collapsed view Header Row */}
                       <div className={`flex items-center justify-between ${gapSpacing}`}>
                         {/* Left side: Type Icon + Labels */}
@@ -1343,33 +1404,58 @@ export const TransactionList = React.memo(({
                             <span className={`${titleTextSize} text-neutral-800 tracking-tight`}>
                               {getFriendlyTypeLabel(tx.type)}
                             </span>
+                            {tx.mode === 'SplitChild' && (
+                              <span className="bg-blue-50 text-blue-700 text-[6px] font-black px-1 py-0.2 rounded-full uppercase tracking-tighter flex items-center gap-0.5 shadow-sm border border-blue-100">
+                                Segment #{tx.splitSegmentIndex || '??'}
+                              </span>
+                            )}
+                            {isSplitMode && (
+                              <span className="bg-emerald-600 text-white text-[6px] font-black px-1 py-0.2 rounded-full uppercase tracking-tighter flex items-center gap-0.5 shadow-sm ring-2 ring-emerald-100">
+                                <Sparkles className="w-1.5 h-1.5" /> Unified Session
+                              </span>
+                            )}
                             <span className="text-neutral-300 text-[10px]">•</span>
-                            <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
+                            <span className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-lg border shadow-sm select-none ${
                               tx.provider === 'OPay' 
-                                ? 'bg-emerald-50 text-[#00B87A] border-emerald-200' 
+                                ? 'bg-emerald-50/90 text-[#00B87A] border-emerald-150' 
                                 : tx.provider === 'Moniepoint' 
-                                ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                : 'bg-orange-50 text-orange-700 border-orange-200'
+                                ? 'bg-blue-50/90 text-blue-700 border-blue-150' 
+                                : 'bg-orange-50/90 text-orange-700 border-orange-150'
                             }`}>
                               {tx.provider}
                             </span>
 
+                            {isSplitMode && tx.distributionProvider && (
+                              <>
+                                <ArrowRightLeft className="w-2.5 h-2.5 text-neutral-400" />
+                                <span className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-lg border shadow-sm select-none ${
+                                  tx.distributionProvider === 'OPay' 
+                                    ? 'bg-emerald-50/90 text-[#00B87A] border-emerald-150' 
+                                    : tx.distributionProvider === 'Moniepoint' 
+                                    ? 'bg-blue-50/90 text-blue-700 border-blue-150' 
+                                    : 'bg-orange-50/90 text-orange-700 border-orange-150'
+                                }`}>
+                                  {tx.distributionProvider}
+                                </span>
+                              </>
+                            )}
+
                             {destBank && (
                               <>
-                                <span className="text-neutral-300 text-[10px]">➔</span>
-                                <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${getBankBadgeStyle(destBank)}`}>
+                                <span className="text-neutral-300 text-[8px]">➔</span>
+                                <span className={`text-[8px] font-mono font-black px-2 py-0.5 rounded-lg border shadow-sm select-none ${getBankBadgeStyle(destBank)}`}>
                                   {destBank}
                                 </span>
                               </>
                             )}
 
                             {hasBankDetail && (
-                              <span className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm ${
+                              <span className={`text-[8px] font-mono font-black px-2 py-0.5 rounded-lg border shadow-sm select-none ${
                                 isSameBank
-                                  ? 'bg-emerald-100/80 text-emerald-800 border-emerald-250'
-                                  : 'bg-neutral-100/70 text-neutral-500 border-neutral-200'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                                  : 'bg-neutral-50 text-neutral-500 border-neutral-150'
                               }`}>
-                                {isSameBank ? '🔄 Same Bank' : '🌐 Other Bank'}
+                                {isSameBank ? '🔄 Same Bank' : '🌐 Interbank'}
                               </span>
                             )}
 
@@ -1379,9 +1465,9 @@ export const TransactionList = React.memo(({
                                   e.stopPropagation();
                                   playAudioNote(tx.id, tx.audioNote!);
                                 }}
-                                className={`text-[8.5px] font-mono font-black px-1.5 py-0.2 rounded border shadow-sm flex items-center gap-1 transition-all cursor-pointer ${
+                                className={`text-[8.5px] font-mono font-black px-2 py-0.5 rounded-lg border shadow-sm flex items-center gap-1.5 transition-all cursor-pointer select-none ${
                                   playingAudioId === tx.id 
-                                    ? 'bg-[#00B87A] text-white border-emerald-600 animate-pulse' 
+                                    ? 'bg-[#00B87A] text-white border-emerald-600 animate-pulse shadow-md shadow-emerald-100' 
                                     : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                                 }`}
                                 title={playingAudioId === tx.id ? "Pause voice note" : "Play voice note"}
@@ -1401,51 +1487,97 @@ export const TransactionList = React.memo(({
                             )}
                           </div>
                           
-                          <div className={`${subTextSize} text-neutral-400 mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5`}>
-                            <span className="font-black text-neutral-500">SLIP #{serialNumber}</span>
+                          <div className={`${subTextSize} text-neutral-400 mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 select-none`}>
+                            <span className="font-mono font-black text-neutral-500 uppercase tracking-tighter">SLIP #{serialNumber}</span>
                             <span className="text-neutral-300">•</span>
-                            <span>{friendlyTime(tx.timestamp)}</span>
+                            <span className="tracking-tighter font-medium">{friendlyTime(tx.timestamp)}</span>
                             <span className="text-neutral-300">•</span>
-                            <span className="font-sans capitalize font-extrabold text-neutral-500">By {tx.employeeName}</span>
+                            <span className="font-sans capitalize font-extrabold text-neutral-500 tracking-tight">By {tx.employeeName}</span>
                           </div>
 
                           {/* Added financial summary fields for visibility without interaction */}
-                          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[8px] sm:text-[9px] font-mono font-bold bg-neutral-50 px-2 py-0.5 rounded-lg text-neutral-600 border border-neutral-100">
-                            <span className="text-neutral-500">Fee: <span className="text-neutral-800">{formatNaira(tx.customerFee || 0)}</span></span>
-                            <span className="text-neutral-200">|</span>
-                            <span className="text-neutral-500">Cost: <span className="text-red-600">-{formatNaira(tx.terminalFee || 0)}</span></span>
-                            <span className="text-neutral-200">|</span>
-                            <span className="text-neutral-500">Prof: <span className="text-emerald-600">{formatNaira(tx.profit || 0)}</span></span>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2 select-none">
+                            {isSplitMode ? (
+                              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                                <span className="bg-emerald-50/80 text-emerald-800 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-emerald-150 flex items-center gap-0.5 shadow-sm">
+                                  <Sparkles className="w-2 h-2 text-emerald-500 shrink-0" /> 
+                                  Profit: <span className="font-black text-emerald-700">{formatNaira(sessionProfit)}</span>
+                                </span>
+                                {tx.customerFee > 0 && (
+                                  <span className="bg-neutral-50/80 text-neutral-600 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-neutral-150 flex items-center gap-0.5 shadow-sm">
+                                    Fee: <span className="font-black text-neutral-800">{formatNaira(tx.customerFee)}</span>
+                                  </span>
+                                )}
+                                <span className="bg-rose-50/60 text-rose-700 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-rose-100 flex items-center gap-0.5 shadow-sm">
+                                  Cost: <span className="font-black text-rose-600">-{formatNaira(sessionTerminalFee + (tx.cbnCharge || 0))}</span>
+                                </span>
+                              </div>
+                            ) : isChild ? (
+                              <div className="flex flex-wrap items-center gap-1 bg-neutral-50/60 px-1.5 py-0.5 rounded-lg border border-neutral-100/80">
+                                <span className="text-neutral-500 italic flex items-center gap-1 text-[8px]">
+                                  <ArrowRightLeft className="w-2.5 h-2.5 text-neutral-400" />
+                                  Distribution Segment
+                                </span>
+                                {tx.customerFee > 0 && (
+                                  <span className="bg-neutral-100/80 text-neutral-600 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-neutral-200/50">
+                                    Fee: <span className="text-neutral-800 font-black">{formatNaira(tx.customerFee)}</span>
+                                  </span>
+                                )}
+                                <span className="bg-rose-50/60 text-rose-700 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-rose-100">
+                                  Cost: <span className="text-rose-600 font-black">-{formatNaira(tx.terminalFee || 0)}</span>
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                                {tx.customerFee > 0 && (
+                                  <span className="bg-neutral-50/80 text-neutral-600 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-neutral-150 flex items-center gap-0.5 shadow-sm">
+                                    Fee: <span className="font-black text-neutral-800">{formatNaira(tx.customerFee)}</span>
+                                  </span>
+                                )}
+                                <span className="bg-rose-50/60 text-rose-700 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-rose-100 flex items-center gap-0.5 shadow-sm">
+                                  Cost: <span className="font-black text-rose-600">-{formatNaira(tx.terminalFee || 0)}</span>
+                                </span>
+                                <span className="bg-emerald-50/80 text-emerald-800 text-[8.5px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border border-emerald-150 flex items-center gap-0.5 shadow-sm">
+                                  Profit: <span className="font-black text-emerald-700">{formatNaira(tx.profit || 0)}</span>
+                                </span>
+                              </div>
+                            )}
                             { (tx.chargesStatus !== 'Paid') && (
-                              <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-black text-[9px] uppercase border border-amber-200">
-                                {tx.chargesStatus === 'Unpaid' ? 'Unpaid' : 'Waived'}
+                              <span className={`px-1.5 py-0.5 rounded-md font-black text-[8.5px] uppercase border shadow-sm ${
+                                tx.chargesStatus === 'Unpaid' 
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse' 
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}>
+                                {tx.chargesStatus === 'Unpaid' ? 'Debt' : 'Waived'}
                               </span>
                             )}
                           </div>
                         </div>
                       </div>
- 
-                      {/* Right side: Amount + Status + Chevron */}
+
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="text-right">
-                          <div className={`${amountTextSize} font-mono text-neutral-900 tracking-tight`}>
+                          <div className={`${amountTextSize} font-mono text-neutral-900 tracking-tighter flex items-center justify-end gap-0.5`}>
+                            {(isSplitMode || tx.mode === 'SplitChild') && (
+                              <Sparkles className="w-2.5 h-2.5 text-emerald-500 animate-pulse shrink-0" />
+                            )}
                             {formatNaira(tx.amount)}
                           </div>
                           
-                          <div className="flex items-center justify-end gap-1 mt-0.5">
+                          <div className="flex items-center justify-end gap-1 mt-1">
                             {tx.chargesStatus === 'Unpaid' ? (
-                              <span className={`text-[7.5px] font-black tracking-wider bg-red-50 border border-red-100 px-1 py-0.1 rounded animate-pulse ${((new Date().getTime() - new Date(tx.timestamp).getTime()) > 172800000) ? 'text-red-700' : 'text-red-600'}`}>
+                              <span className={`text-[6.5px] font-black tracking-wider bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-md animate-pulse ${((new Date().getTime() - new Date(tx.timestamp).getTime()) > 172800000) ? 'text-red-700' : 'text-red-600'}`}>
                                 {((new Date().getTime() - new Date(tx.timestamp).getTime()) > 172800000) ? '⚠️ OVERDUE' : '⚠️ DEBT'}
                               </span>
                             ) : (
-                              <span className={`${statusBadgeTextSize} ${
-                                  tx.status === 'Success' ? 'text-emerald-600' :
-                                  tx.status === 'Pending' ? 'text-amber-600' : 'text-red-600'
-                                } tracking-wider flex items-center gap-0.5`}>
+                              <span className={`${statusBadgeTextSize} border flex items-center gap-1 select-none shadow-sm ${
+                                  tx.status === 'Success' ? 'bg-emerald-50 text-emerald-700 border-emerald-150' :
+                                  tx.status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-150' : 'bg-rose-50 text-rose-700 border-rose-150'
+                                }`}>
                                 <span className={`w-1 h-1 ${
                                     tx.status === 'Success' ? 'bg-emerald-500' :
-                                    tx.status === 'Pending' ? 'bg-amber-500' : 'bg-red-500'
-                                  } rounded-full`} /> {tx.status.toUpperCase()}
+                                    tx.status === 'Pending' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'
+                                  } rounded-full`} /> {tx.status === 'Failed' ? 'DECLINE' : tx.status.toUpperCase()}
                               </span>
                             )}
                           </div>
@@ -1505,10 +1637,10 @@ export const TransactionList = React.memo(({
                           {/* Box 4: Net Profit */}
                           <div className="border-l border-neutral-200/50 px-2">
                             <span className="text-[8px] font-mono font-black text-neutral-400 tracking-wider uppercase block">
-                              📈 Net Profit
+                              {isSplitMode ? '✨ Session Profit' : '📈 Net Profit'}
                             </span>
                             <div className={`font-black text-emerald-600 font-mono mt-0.5 ${cardSize === 'small' ? 'text-xs' : 'text-xs sm:text-sm'}`}>
-                              {formatNaira(tx.profit)}
+                              {formatNaira(isSplitMode ? sessionProfit : tx.profit)}
                             </div>
                           </div>
                         </div>
@@ -1571,22 +1703,65 @@ export const TransactionList = React.memo(({
                           </div>
  
                           {/* Customer Details & Remarks */}
-                          {(tx.customerName || tx.customerPhone || tx.notes || tx.audioNote) && (
+                          {(tx.customerName || tx.customerPhone || tx.customerAccountNumber || tx.notes || tx.audioNote) && (
                             <div className="border-t border-neutral-100 pt-2 flex flex-col gap-2 text-[11px] text-left">
-                              {(tx.customerName || tx.customerPhone || tx.notes) && (
+                              {(tx.customerName || tx.customerPhone || tx.customerAccountNumber || tx.notes) && (
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                  {(tx.customerName || tx.customerPhone) && (
-                                    <span className="bg-amber-50 border border-amber-100/50 text-neutral-700 px-2 py-0.5 rounded-md font-bold">
-                                      👤 Cust: <strong className="text-neutral-900 font-black">{tx.customerName || 'Customer'}</strong> {tx.customerPhone && `(${tx.customerPhone})`}
+                                  {(tx.customerName || tx.customerPhone || tx.customerAccountNumber) && (
+                                    <span className="bg-amber-50 border border-amber-100/50 text-neutral-700 px-2.5 py-1 rounded-xl font-bold flex flex-wrap items-center gap-2">
+                                      <span>👤 Cust: <strong className="text-neutral-900 font-black">{tx.customerName || 'Customer'}</strong></span>
+                                      {tx.customerAccountNumber && (
+                                        <span className="bg-amber-100 border border-amber-200 text-amber-900 text-[10px] font-mono px-1.5 py-0.2 rounded font-black">
+                                          💳 {tx.customerAccountNumber}
+                                        </span>
+                                      )}
+                                      {tx.customerPhone && (
+                                        <span className="text-neutral-500 font-mono text-[10px]">
+                                          📞 {tx.customerPhone}
+                                        </span>
+                                      )}
                                     </span>
                                   )}
-                                  {tx.notes && (
+                                  {tx.mode === 'SplitSession' && tx.subTransfers && tx.subTransfers.length > 0 && (
+                                <div className="mt-2 bg-emerald-50/40 border border-emerald-100/50 rounded-xl p-2.5 space-y-2">
+                                  <div className="flex items-center justify-between border-b border-emerald-100 pb-1 mb-1">
+                                    <span className="text-[9px] font-black text-emerald-800 uppercase tracking-widest font-mono flex items-center gap-1">
+                                      <ArrowRightLeft className="w-2.5 h-2.5" /> Distribution Ledger
+                                    </span>
+                                    <span className="text-[8px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.2 rounded-full uppercase">
+                                      {tx.subTransfers.length} Segments
+                                    </span>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {tx.subTransfers.map((st, i) => (
+                                      <div key={i} className="flex justify-between items-center text-[9px]">
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="font-black text-neutral-800 truncate">{st.recipientName}</span>
+                                        </div>
+                                        <span className="font-bold text-emerald-700 font-mono ml-2 shrink-0">{formatNaira(st.amount)}</span>
+                                      </div>
+                                    ))}
+                                    {tx.remainingBalance !== undefined && tx.remainingBalance > 0 && (
+                                      <div className="flex justify-between items-center text-neutral-500 pt-1 border-t border-emerald-100/30">
+                                        <span className="text-[8px] font-bold uppercase">Cash Balance</span>
+                                        <span className="text-[9px] font-bold font-mono">{formatNaira(tx.remainingBalance)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {tx.notes && (
                                     <span className="text-neutral-500 italic">
                                       • "{tx.notes}"
                                     </span>
                                   )}
                                 </div>
                               )}
+                              
+                              {/* Distribution details removed from here as they are now always visible in the main card */}
+                              
+
                               {tx.audioNote && (
                                 <div className="mt-0.5" onClick={(e) => e.stopPropagation()}>
                                   <div className="flex items-center gap-2.5 p-2 bg-emerald-50/75 border border-emerald-100/80 rounded-xl max-w-sm shadow-sm hover:bg-emerald-50 transition-all">
@@ -1649,6 +1824,17 @@ export const TransactionList = React.memo(({
                                 <Pencil className="w-2.5 h-2.5" />
                                 Edit Receipt
                               </button>
+                              {tx.type === 'Withdrawal' && onSplitTransaction && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSplitTransaction(tx)}
+                                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded transition font-black text-[11px] flex items-center gap-1 cursor-pointer"
+                                  title="Split this withdrawal into transfers"
+                                >
+                                  <ArrowRightLeft className="w-3 h-3" />
+                                  Split
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1815,7 +2001,7 @@ export const TransactionList = React.memo(({
                             ? 'bg-amber-500'
                             : 'bg-red-500'
                         }`} />
-                        {(tx.status || 'Success') === 'Success' ? 'SUCCESS' : (tx.status || 'Success') === 'Pending' ? 'PENDING' : 'FAILED'}
+                        {(tx.status || 'Success') === 'Success' ? 'SUCCESS' : (tx.status || 'Success') === 'Pending' ? 'PENDING' : 'DECLINE'}
                       </span>
                     </td>
 
@@ -1903,10 +2089,15 @@ export const TransactionList = React.memo(({
                     </td>
 
                     {/* Customer Info & Notes */}
-                    <td className={`${rowPadding} max-w-[150px] text-neutral-400 font-medium hidden md:table-cell`} title={`${tx.customerName ? 'Debtor: ' + tx.customerName + '\n' : ''}${tx.customerPhone ? 'Phone: ' + tx.customerPhone + '\n' : ''}${tx.notes || ''}`}>
+                    <td className={`${rowPadding} max-w-[150px] text-neutral-400 font-medium hidden md:table-cell`} title={`${tx.customerName ? 'Debtor: ' + tx.customerName + '\n' : ''}${tx.customerAccountNumber ? 'Acct: ' + tx.customerAccountNumber + '\n' : ''}${tx.customerPhone ? 'Phone: ' + tx.customerPhone + '\n' : ''}${tx.notes || ''}`}>
                       {tx.customerName && (
                         <div className="text-[10px] text-amber-700 font-black mb-0.5 flex items-center gap-1 bg-amber-50 border border-amber-200/50 px-1.5 py-0.5 rounded-lg w-max shrink-0">
                           👤 {tx.customerName}
+                        </div>
+                      )}
+                      {tx.customerAccountNumber && (
+                        <div className="text-[10px] text-amber-900 font-bold font-mono mb-0.5 flex items-center gap-1 bg-amber-100/60 border border-amber-200/40 px-1.5 py-0.5 rounded-lg w-max shrink-0">
+                          💳 {tx.customerAccountNumber}
                         </div>
                       )}
                       {tx.customerPhone && (
@@ -1917,7 +2108,7 @@ export const TransactionList = React.memo(({
                           "{tx.notes}"
                         </div>
                       )}
-                      {!tx.customerName && !tx.customerPhone && !tx.notes && !tx.audioNote && (
+                      {!tx.customerName && !tx.customerPhone && !tx.customerAccountNumber && !tx.notes && !tx.audioNote && (
                         <span className="italic text-neutral-300">No notes</span>
                       )}
                       {tx.audioNote && (
@@ -1972,6 +2163,17 @@ export const TransactionList = React.memo(({
                               <Pencil className="w-3 h-3" />
                               <span>Edit</span>
                             </button>
+                            {tx.type === 'Withdrawal' && onSplitTransaction && (
+                              <button
+                                type="button"
+                                onClick={() => onSplitTransaction(tx)}
+                                className="p-1 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl transition duration-100 border border-emerald-200 text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                                title="Split this withdrawal into multiple transfers"
+                              >
+                                <ArrowRightLeft className="w-3 h-3" />
+                                <span>Split</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {

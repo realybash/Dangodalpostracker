@@ -15,6 +15,7 @@ import {
   Sparkles,
   ChevronRight,
   Plus,
+  PlusCircle,
   Coins,
   FileCheck
 } from 'lucide-react';
@@ -29,7 +30,7 @@ interface MetricCardsProps {
   timeframe: 'Daily' | 'Weekly' | 'Monthly' | 'Yearly';
   dailyTarget: number;
   onSetDailyTarget: (newTarget: number) => void;
-  onOpenAddModal: () => void;
+  onOpenAddModal: (mode?: 'Standard' | 'SplitSession') => void;
   isManager?: boolean;
   language: 'en' | 'ha';
 }
@@ -80,13 +81,36 @@ export const MetricCards = React.memo(({
               : 'Keep track of your transaction receipts logged under your shift profile.'}
           </p>
         </div>
-        <button
-          onClick={onOpenAddModal}
-          className="w-full sm:w-auto bg-[#00B87A] hover:bg-emerald-600 text-white font-extrabold px-5 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm shadow-md shadow-[#00B87A]/20 active:scale-95 transition-all cursor-pointer"
-        >
-          <Plus className="w-4.5 h-4.5 stroke-[3]" />
-          Record New Receipt
-        </button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => {
+              onOpenAddModal('SplitSession');
+            }}
+            className="flex-1 sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-none font-black px-5 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs shadow-lg shadow-emerald-200/50 active:scale-95 transition-all cursor-pointer group"
+            title="Perform a unified multi-action distribution session"
+          >
+            <div className="p-1.5 bg-white/20 rounded-lg group-hover:rotate-12 transition-transform">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex flex-col items-start leading-none text-left">
+              <span className="text-[8px] uppercase tracking-widest opacity-80 font-bold">Unified</span>
+              <span className="text-sm">Split Transaction</span>
+            </div>
+          </button>
+          
+          <button
+            onClick={onOpenAddModal}
+            className="flex-1 sm:w-auto bg-neutral-900 hover:bg-black text-white border-none font-black px-5 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs shadow-lg shadow-neutral-200 active:scale-95 transition-all cursor-pointer group"
+          >
+            <div className="p-1.5 bg-white/20 rounded-lg group-hover:scale-110 transition-transform">
+              <PlusCircle className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex flex-col items-start leading-none text-left">
+              <span className="text-[8px] uppercase tracking-widest opacity-80 font-bold">Single</span>
+              <span className="text-sm">Standard Receipt</span>
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* Grid of Financial Metrics */}

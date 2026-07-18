@@ -1,0 +1,13 @@
+    case 'SET_HISTORY_FILTER': {
+      let aTimeframe = state.activeTimeframe;
+      if (action.payload.type === 'DAY_1') aTimeframe = 'Daily';
+      else if (action.payload.type === 'THIS_WEEK') aTimeframe = 'Weekly';
+      else if (action.payload.type === 'THIS_MONTH') aTimeframe = 'Monthly';
+      else if (action.payload.type === 'THIS_YEAR') aTimeframe = 'Yearly';
+
+      nextState = {
+        ...state,
+        historyFilter: action.payload,
+        activeTimeframe: aTimeframe
+      };
+      break;
