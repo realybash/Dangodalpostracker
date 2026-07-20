@@ -481,20 +481,8 @@ export default function App() {
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   useEffect(() => {
-    const handleQuotaEvent = () => {
-      setIsQuotaExceeded(true);
-    };
-    if (typeof window !== 'undefined') {
-      if ((window as any).__firestoreQuotaExceeded) {
-        setIsQuotaExceeded(true);
-      }
-      window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
-      }
-    };
+    // Quota monitoring disabled
+    return () => {};
   }, []);
 
   const updateIndexedDbPendingCount = async () => {
@@ -803,14 +791,19 @@ export default function App() {
   }, [state.transactions]);
 
   // Initialize Auth state listener
+  const authInitializedRef = useRef(false);
   useEffect(() => {
     
-    // Safety timeout: force cloudLoading to false after 300ms to prevent startup hangs
+    // Safety timeout: force cloudLoading to false after 2.5s to prevent startup hangs on slow networks/offline
     const safetyTimer = setTimeout(() => {
-      setCloudLoading(false);
-    }, 300);
+      if (!authInitializedRef.current) {
+        console.warn('[Auth] Safety timer expired before Firebase Auth response. Forcing loading state off.');
+        setCloudLoading(false);
+      }
+    }, 2500);
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      authInitializedRef.current = true;
       clearTimeout(safetyTimer);
       setCloudUser(user);
       setCloudLoading(false);
@@ -973,7 +966,7 @@ export default function App() {
           // Don't log out, maybe it's just a network glitch
         }
       } else {
-        // Reset to default empty user to trigger LoginScreen
+        // Reset to default empty user to trigger LoginScreen ONLY if auth is truly settled as null
         const emptyUser: User = {
           id: '',
           name: 'Please Login',
@@ -983,7 +976,14 @@ export default function App() {
           ownerId: ''
         };
         dispatch({ type: 'SWITCH_USER', payload: emptyUser });
-        setIsLocked(true);
+        
+        // Only force lock if we are definitively logged out and not just transitioning
+        if (localStorage.getItem('OPay_Terminal_Locked') === 'true') {
+          setIsLocked(true);
+        } else {
+          // If not explicitly locked by user action, we only lock if Firebase truly confirms no user
+          setIsLocked(true);
+        }
       }
     });
     return () => unsubscribe();
@@ -1049,7 +1049,7 @@ export default function App() {
                       errMsg.toLowerCase().includes('exhausted');
 
       if (isQuota) {
-        setIsQuotaExceeded(true);
+        // Silently handle quota errors without showing the banner
         try {
           const { getCachedTransactions, getCachedExpenses, getCachedPosTerminals } = await import('./lib/offlineDb');
           if (path.includes('transactions')) {
@@ -2226,11 +2226,11 @@ export default function App() {
   const authorizedTransactions = useMemo(() => {
     let txs = state.transactions;
     if (state.currentUser.role === 'Employee') {
-      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+      txs = txs.filter(t => t.employeeId === state.currentUser.id || t.cashierId === state.currentUser.id || t.createdBy === state.currentUser.id);
     } else {
       const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
       if (targetUserId) {
-        txs = txs.filter(t => t.employeeId === targetUserId);
+        txs = txs.filter(t => t.employeeId === targetUserId || t.cashierId === targetUserId || t.createdBy === targetUserId);
       }
     }
     return txs;
@@ -2239,11 +2239,11 @@ export default function App() {
   const authorizedHistoryTransactions = useMemo(() => {
     let txs = state.historyTransactions;
     if (state.currentUser.role === 'Employee') {
-      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+      txs = txs.filter(t => t.employeeId === state.currentUser.id || t.cashierId === state.currentUser.id || t.createdBy === state.currentUser.id);
     } else {
       const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
       if (targetUserId) {
-        txs = txs.filter(t => t.employeeId === targetUserId);
+        txs = txs.filter(t => t.employeeId === targetUserId || t.cashierId === targetUserId || t.createdBy === targetUserId);
       }
     }
     
@@ -2305,15 +2305,20 @@ export default function App() {
     const todayStr = getBusinessDate(new Date());
     let txs = state.transactions.filter(t => t.businessDate === todayStr);
     if (state.currentUser.role === 'Employee') {
-      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+      txs = txs.filter(t => t.employeeId === state.currentUser.id || t.cashierId === state.currentUser.id || t.createdBy === state.currentUser.id);
     } else {
       const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
       if (targetUserId) {
-        txs = txs.filter(t => t.employeeId === targetUserId);
+        txs = txs.filter(t => t.employeeId === targetUserId || t.cashierId === targetUserId || t.createdBy === targetUserId);
       }
     }
     return computeTxMetrics(txs, 'Daily', state.terminalFeeRate);
   }, [state.transactions, state.currentUser, state.selectedEmployeeFilter, state.impersonatedUserId, state.terminalFeeRate]);
+
+  // Stable Lifetime Metrics - Total actual balance
+  const lifetimeMetrics = useMemo(() => {
+    return computeTxMetrics(authorizedTransactions, 'Lifetime', state.terminalFeeRate);
+  }, [authorizedTransactions, state.terminalFeeRate]);
 
   // Compute Timeframe Blocks metrics for Overview Matrix items
   const summaryOverviews = useMemo(() => {
@@ -2512,10 +2517,59 @@ export default function App() {
 
   if (cloudLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 flex-col gap-4">
-        <div className="w-12 h-12 border-4 border-[#00B87A] border-t-transparent rounded-full animate-spin" />
-        <p className="text-neutral-500 font-bold animate-pulse text-sm">Synchronizing your session...</p>
-      </div>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.4 }}
+        className="min-h-screen flex items-center justify-center bg-white flex-col gap-8 antialiased"
+      >
+        <div className="relative">
+          <div className="w-20 h-20 border-[3px] border-emerald-50 border-t-emerald-500 rounded-full animate-spin shadow-sm" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <motion.div 
+              animate={{ scale: [1, 1.15, 1], opacity: [0.8, 1, 0.8] }}
+              transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+              className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center shadow-inner"
+            >
+              <Zap className="w-6 h-6 text-emerald-500 fill-emerald-500" />
+            </motion.div>
+          </div>
+        </div>
+        <div className="text-center space-y-3">
+          <motion.h2 
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-xl font-black text-neutral-800 tracking-tight uppercase"
+          >
+            Restoring Your Session
+          </motion.h2>
+          <motion.div 
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="flex flex-col items-center gap-2"
+          >
+            <p className="text-neutral-500 font-medium text-xs max-w-xs mx-auto leading-relaxed">
+              Verifying your digital credentials and synchronizing with our secure cloud infrastructure...
+            </p>
+            <div className="flex items-center gap-1.5 px-3 py-1 bg-neutral-50 rounded-full border border-neutral-200/50">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-[10px] font-black text-neutral-600 uppercase tracking-wider">Secure Access Verified</span>
+            </div>
+          </motion.div>
+        </div>
+        
+        {/* Decorative elements to look more professional */}
+        <div className="fixed bottom-8 left-0 right-0 flex justify-center opacity-20 pointer-events-none">
+          <div className="flex items-center gap-6">
+            <div className="w-8 h-px bg-neutral-300" />
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">Dan Godal Postracker System</div>
+            <div className="w-8 h-px bg-neutral-300" />
+          </div>
+        </div>
+      </motion.div>
     );
   }
 
@@ -4755,6 +4809,7 @@ export default function App() {
           <MetricCards
             dailyProfit={todayLedgerMetrics.profit}
             periodProfit={activeMetrics.profit}
+            lifetimeProfit={lifetimeMetrics.profit}
             volume={activeMetrics.volume}
             totalExpenses={state.expenses.filter(e => {
               const d = new Date(e.timestamp);

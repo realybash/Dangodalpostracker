@@ -24,6 +24,7 @@ import { t } from '../i18n';
 interface MetricCardsProps {
   dailyProfit: number;
   periodProfit: number;
+  lifetimeProfit: number;
   volume: number;
   totalExpenses: number;
   count: number;
@@ -39,6 +40,7 @@ interface MetricCardsProps {
 export const MetricCards = React.memo(({
   dailyProfit,
   periodProfit,
+  lifetimeProfit,
   volume,
   totalExpenses,
   count,
@@ -79,18 +81,16 @@ export const MetricCards = React.memo(({
   return (
     <div className="space-y-6">
       {/* Both Profits Display (if not daily) */}
-      {!isDaily && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="p-4 bg-white border border-neutral-200 rounded-2xl shadow-sm">
-            <span className="text-[10px] font-bold uppercase text-neutral-400">Stable Daily Gain (Today)</span>
-            <p className="text-lg font-black text-neutral-800">{formatNaira(dailyProfit)}</p>
-          </div>
-          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl shadow-sm">
-            <span className="text-[10px] font-bold uppercase text-emerald-600">Selected {timeframe} Gain</span>
-            <p className="text-lg font-black text-emerald-900">{formatNaira(periodProfit)}</p>
-          </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="p-4 bg-white border border-neutral-200 rounded-2xl shadow-sm">
+          <span className="text-[10px] font-bold uppercase text-neutral-400">Stable Daily Gain (Today)</span>
+          <p className="text-lg font-black text-neutral-800">{formatNaira(dailyProfit)}</p>
         </div>
-      )}
+        <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl shadow-sm">
+          <span className="text-[10px] font-bold uppercase text-indigo-600">Lifetime Actual Balance</span>
+          <p className="text-lg font-black text-indigo-900">{formatNaira(lifetimeProfit)}</p>
+        </div>
+      </div>
 
       {/* Dynamic Segment Header Call-out */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-neutral-200 p-5 rounded-3xl gap-4 shadow-sm">
