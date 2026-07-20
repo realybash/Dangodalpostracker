@@ -578,11 +578,9 @@ export function TransactionForm({
     const isUnpaid = chargesStatus === 'Unpaid';
     const actualProfit = isUnpaid 
       ? 0 
-      : isFeeWaived
-        ? 0 // Waived transactions yield exactly ₦0 profit (company absorbs cost, daily profit does NOT decrease)
-        : customerFee - financials.providerCharge - (financials.cbnCharge || 0) + (financials.cashback || 0);
+      : (isFeeWaived ? 0 : customerFee) - financials.providerCharge - (financials.cbnCharge || 0) + (financials.cashback || 0);
 
-    // We keep the standard realistic provider charge and CBN charge even if profit is floored to 0
+    // We keep the standard realistic provider charge and CBN charge even if profit is negative
     const actualTerminalFee = financials.providerCharge;
     const actualCbnCharge = financials.cbnCharge;
 
@@ -609,6 +607,8 @@ export function TransactionForm({
       id: initialTransaction ? initialTransaction.id : generateId(),
       employeeId: employeeId,
       employeeName: [currentUser, ...availableEmployees].find(emp => emp.id === employeeId)?.name || currentUser.name,
+      cashierId: currentUser.id,
+      ownerId: currentUser.ownerId || (currentUser.role === 'Manager' ? currentUser.id : undefined),
       type,
       provider,
       subType,

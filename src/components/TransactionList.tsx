@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {  motion, AnimatePresence } from 'motion/react';
 import {  Transaction, TransactionType, ProviderType, User, AppSettings, HistoryFilter, HistoryFilterType } from '../types';
-import { copyToClipboard,    formatNaira, getProviderTransactionNumber, getFriendlyTypeLabel, analyzeQuery } from '../utils';
+import { copyToClipboard,    formatNaira, getProviderTransactionNumber, getFriendlyTypeLabel, analyzeQuery, getBusinessDate } from '../utils';
 import {  
   Search, 
   Trash2, 
@@ -1815,6 +1815,31 @@ export const TransactionList = React.memo(({
                           )}
  
                           {currentUser.role === 'Manager' ? (
+                        (() => {
+                          const txDate = tx.businessDate || getBusinessDate(tx.timestamp);
+                          const today = getBusinessDate(new Date());
+                          const isSettled = txDate !== today;
+
+                          if (isSettled) {
+                            return (
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 border border-neutral-200 rounded text-neutral-500 font-bold text-[10px] uppercase tracking-wider">
+                                  <FileCheck className="w-3 h-3" />
+                                  Settled & Locked
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => onViewReceipt?.(tx)}
+                                  className="px-3 py-1.5 bg-neutral-800 hover:bg-black text-white rounded transition font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-sm"
+                                >
+                                  <Receipt className="w-3.5 h-3.5" />
+                                  View
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
                             <>
                               <button
                                 type="button"
@@ -1848,6 +1873,8 @@ export const TransactionList = React.memo(({
                                 <Trash2 className="w-3 h-3" />
                               </button>
                             </>
+                          );
+                        })()
                           ) : (
                             <button
                               type="button"
@@ -2153,40 +2180,67 @@ export const TransactionList = React.memo(({
                         )}
 
                         {currentUser.role === 'Manager' ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => onEditTransaction(tx)}
-                              className="p-1 px-2.5 bg-neutral-100 hover:bg-[#00B87A]/10 text-neutral-650 hover:text-[#00B87A] rounded-xl transition duration-100 border border-neutral-200 hover:border-[#00B87A]/30 text-[10px] font-extrabold flex items-center gap-1 cursor-pointer"
-                              title="Edit transaction parameters (amount or charges)"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
-                            {tx.type === 'Withdrawal' && onSplitTransaction && (
-                              <button
-                                type="button"
-                                onClick={() => onSplitTransaction(tx)}
-                                className="p-1 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl transition duration-100 border border-emerald-200 text-[10px] font-black flex items-center gap-1 cursor-pointer"
-                                title="Split this withdrawal into multiple transfers"
-                              >
-                                <ArrowRightLeft className="w-3 h-3" />
-                                <span>Split</span>
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm('Are you sure you want to delete/void this transaction receipt?')) {
-                                  onDeleteTransaction(tx.id);
-                                }
-                              }}
-                              className="p-1 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                              title="Void / Delete Transaction"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                          (() => {
+                            const txDate = tx.businessDate || getBusinessDate(tx.timestamp);
+                            const today = getBusinessDate(new Date());
+                            const isSettled = txDate !== today;
+
+                            if (isSettled) {
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1 px-2.5 py-1 bg-neutral-100 border border-neutral-200 rounded-lg text-neutral-500 font-bold text-[9px] uppercase tracking-wider">
+                                    <FileCheck className="w-2.5 h-2.5" />
+                                    Settled
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => onViewReceipt?.(tx)}
+                                    className="p-1 px-2 bg-neutral-800 text-white rounded-lg transition text-[9px] font-black flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Receipt className="w-3 h-3" />
+                                    View
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => onEditTransaction(tx)}
+                                  className="p-1 px-2.5 bg-neutral-100 hover:bg-[#00B87A]/10 text-neutral-650 hover:text-[#00B87A] rounded-xl transition duration-100 border border-neutral-200 hover:border-[#00B87A]/30 text-[10px] font-extrabold flex items-center gap-1 cursor-pointer"
+                                  title="Edit transaction parameters (amount or charges)"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                                {tx.type === 'Withdrawal' && onSplitTransaction && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onSplitTransaction(tx)}
+                                    className="p-1 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl transition duration-100 border border-emerald-200 text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                                    title="Split this withdrawal into multiple transfers"
+                                  >
+                                    <ArrowRightLeft className="w-3 h-3" />
+                                    <span>Split</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm('Are you sure you want to delete/void this transaction receipt?')) {
+                                      onDeleteTransaction(tx.id);
+                                    }
+                                  }}
+                                  className="p-1 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                                  title="Void / Delete Transaction"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            );
+                          })()
                         ) : (
                           <button
                             type="button"

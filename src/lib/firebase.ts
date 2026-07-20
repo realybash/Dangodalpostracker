@@ -86,5 +86,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // We no longer throw to prevent application crashes per Senior Developer stability requirements.
+  // The app will gracefully fall back to local/cached data.
 }

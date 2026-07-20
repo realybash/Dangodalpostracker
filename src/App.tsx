@@ -1078,17 +1078,28 @@ export default function App() {
 
     const buildTxQuery = (field: 'ownerId' | 'cashierId', value: string) => {
       // Load ALL transactions to ensure accurate daily/weekly summaries on the dashboard.
-      if (field === 'ownerId' && value === 'JcC1krC85wXQidNcL8no2NEJc4v1') {
+      if (field === 'ownerId') {
+        const targetIds = [value];
+        // Special legacy mapping: if this is a known primary manager or if they have legacy tags
+        if (value === 'JcC1krC85wXQidNcL8no2NEJc4v1' || value === 'mgr_1') {
+          targetIds.push('mgr_1', 'local_owner', 'JcC1krC85wXQidNcL8no2NEJc4v1');
+        }
+        
         return query(
           collection(db, 'transactions'),
-          where(field, 'in', ['JcC1krC85wXQidNcL8no2NEJc4v1', 'mgr_1', 'local_owner']),
+          where(field, 'in', targetIds),
           orderBy('timestamp', 'desc')
         );
       }
 
+      // Cashiers should see transactions where they were the employee, the cashier, or the creator
       return query(
         collection(db, 'transactions'),
-        where(field, '==', value),
+        or(
+          where('cashierId', '==', value),
+          where('employeeId', '==', value),
+          where('createdBy', '==', value)
+        ),
         orderBy('timestamp', 'desc')
       );
     };
@@ -1190,6 +1201,58 @@ export default function App() {
       unsubscribeTerminals();
     };
   }, [syncOwnerId, state.currentUser.id, state.currentUser.role, appMode]);
+
+  // Archive previous day's gain if not already locked in Firestore to ensure data immutability
+  const archiveAttemptedRef = useRef<Record<string, boolean>>({});
+  const quotaExceededRef = useRef(false);
+
+  useEffect(() => {
+    if (appMode === 'offline' || !syncOwnerId || state.currentUser.role !== 'Manager' || quotaExceededRef.current) return;
+    if (state.transactions.length === 0) return;
+
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = getBusinessDate(yesterday);
+
+    // Only attempt once per session per date
+    if (archiveAttemptedRef.current[yesterdayStr]) return;
+
+    const archivePreviousDay = async () => {
+      try {
+        const summaryDocRef = doc(db, 'daily_summaries', `${syncOwnerId}_${yesterdayStr}`);
+        const summarySnap = await getDoc(summaryDocRef);
+        
+        archiveAttemptedRef.current[yesterdayStr] = true;
+
+        if (!summarySnap.exists()) {
+          const yesterdayTxs = state.transactions.filter(t => (t.businessDate === yesterdayStr || getBusinessDate(t.timestamp) === yesterdayStr) && t.status === 'Success');
+          if (yesterdayTxs.length > 0) {
+            const stats = computeTxMetrics(yesterdayTxs, 'Daily');
+            await setDoc(summaryDocRef, {
+              ...stats,
+              ownerId: syncOwnerId,
+              businessDate: yesterdayStr,
+              finalizedAt: new Date().toISOString(),
+              txCount: yesterdayTxs.length,
+              status: 'locked'
+            });
+            console.log(`[Archive] Successfully archived daily summary for ${yesterdayStr}`);
+          }
+        }
+      } catch (err: any) {
+        if (err?.message?.includes('Quota') || err?.code === 'resource-exhausted') {
+          console.warn('[Archive] Quota exceeded. Suspending background tasks.');
+          quotaExceededRef.current = true;
+        } else {
+          console.error('[Archive] Failed to archive previous day gain:', err);
+        }
+      }
+    };
+
+    const timer = setTimeout(archivePreviousDay, 10000); // Wait 10s for full sync
+    return () => clearTimeout(timer);
+  }, [syncOwnerId, state.currentUser.role, state.transactions.length > 0]);
 
   // Firestore mutation wrappers
   const handleUpdatePosTerminal = async (term: PosTerminal) => {
@@ -2217,7 +2280,7 @@ export default function App() {
   const availableEmployees = useMemo(() => {
     return registeredUsers.filter(u => 
       u.role === 'Employee' && 
-      (u.ownerId === state.currentUser.id || u.ownerId === 'mgr_1' || u.ownerId === 'local_owner' || !u.ownerId)
+      (u.ownerId === state.currentUser.id || u.ownerId === 'mgr_1' || u.ownerId === 'local_owner' || !u.ownerId || state.currentUser.id === 'JcC1krC85wXQidNcL8no2NEJc4v1')
     );
   }, [registeredUsers, state.currentUser.id]);
 
@@ -2226,11 +2289,19 @@ export default function App() {
   const authorizedTransactions = useMemo(() => {
     let txs = state.transactions;
     if (state.currentUser.role === 'Employee') {
-      txs = txs.filter(t => t.employeeId === state.currentUser.id || t.cashierId === state.currentUser.id || t.createdBy === state.currentUser.id);
+      txs = txs.filter(t => 
+        t.employeeId === state.currentUser.id || 
+        t.cashierId === state.currentUser.id || 
+        t.createdBy === state.currentUser.id
+      );
     } else {
       const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
       if (targetUserId) {
-        txs = txs.filter(t => t.employeeId === targetUserId || t.cashierId === targetUserId || t.createdBy === targetUserId);
+        txs = txs.filter(t => 
+          t.employeeId === targetUserId || 
+          t.cashierId === targetUserId || 
+          t.createdBy === targetUserId
+        );
       }
     }
     return txs;
@@ -2239,11 +2310,19 @@ export default function App() {
   const authorizedHistoryTransactions = useMemo(() => {
     let txs = state.historyTransactions;
     if (state.currentUser.role === 'Employee') {
-      txs = txs.filter(t => t.employeeId === state.currentUser.id || t.cashierId === state.currentUser.id || t.createdBy === state.currentUser.id);
+      txs = txs.filter(t => 
+        t.employeeId === state.currentUser.id || 
+        t.cashierId === state.currentUser.id || 
+        t.createdBy === state.currentUser.id
+      );
     } else {
       const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
       if (targetUserId) {
-        txs = txs.filter(t => t.employeeId === targetUserId || t.cashierId === targetUserId || t.createdBy === targetUserId);
+        txs = txs.filter(t => 
+          t.employeeId === targetUserId || 
+          t.cashierId === targetUserId || 
+          t.createdBy === targetUserId
+        );
       }
     }
     
