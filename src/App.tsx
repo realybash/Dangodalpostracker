@@ -1077,21 +1077,19 @@ export default function App() {
     };
 
     const buildTxQuery = (field: 'ownerId' | 'cashierId', value: string) => {
-      // Load the most recent 1000 transactions to ensure accurate daily/weekly summaries on the dashboard.
+      // Load ALL transactions to ensure accurate daily/weekly summaries on the dashboard.
       if (field === 'ownerId' && value === 'JcC1krC85wXQidNcL8no2NEJc4v1') {
         return query(
           collection(db, 'transactions'),
           where(field, 'in', ['JcC1krC85wXQidNcL8no2NEJc4v1', 'mgr_1', 'local_owner']),
-          orderBy('timestamp', 'desc'),
-          limit(1000)
+          orderBy('timestamp', 'desc')
         );
       }
 
       return query(
         collection(db, 'transactions'),
         where(field, '==', value),
-        orderBy('timestamp', 'desc'),
-        limit(1000)
+        orderBy('timestamp', 'desc')
       );
     };
 
@@ -1347,6 +1345,9 @@ export default function App() {
         collection: 'pos_terminals',
         docId: id
       });
+      
+      // ADDED: Immediate Firestore deletion
+      await deleteDoc(doc(db, 'pos_terminals', id));
     } catch (dbErr) {
       console.error('[DB] Failed to delete POS terminal from main cache:', dbErr);
     }
@@ -4434,15 +4435,22 @@ export default function App() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('Remove POS clicked for terminal:', term.id);
-                            if (confirm(`Are you sure you want to remove ${term.name}?`)) {
-                              console.log('Confirmed removal for:', term.id);
+                            console.log('[POS REMOVE DEBUG] Remove POS button clicked for terminal:', term.id);
+                            
+                            const isConfirmed = confirm(`Are you sure you want to remove ${term.name}?`);
+                            console.log('[POS REMOVE DEBUG] Confirmation result:', isConfirmed);
+                            
+                            if (isConfirmed) {
+                              console.log('[POS REMOVE DEBUG] Removal confirmed for:', term.id);
                               handleDeletePosTerminal(term.id);
+                              console.log('[POS REMOVE DEBUG] handleDeletePosTerminal called');
+                            } else {
+                              console.log('[POS REMOVE DEBUG] Removal cancelled');
                             }
                           }}
-                          className="relative z-[60] text-red-500 hover:text-red-700 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer select-none"
+                          className="flex items-center gap-1 text-red-500 hover:text-red-700 text-[11px] font-bold cursor-pointer select-none p-2"
                         >
-                          <Trash2 className="w-3.5 h-3.5" /> Remove POS
+                          <Trash2 className="w-3.5 h-3.5 pointer-events-none" /> Remove POS
                         </button>
                       )}
                     </div>
