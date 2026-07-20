@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
-import { formatNaira } from '../utils';
+import { formatNaira, getBusinessDate } from '../utils';
 import { Sparkles, Users, Award, TrendingUp, DollarSign, Activity, Calendar } from 'lucide-react';
 import { Transaction, User } from '../types';
 
@@ -10,20 +10,12 @@ interface ManagerAggregatedStatsProps {
 }
 
 export function ManagerAggregatedStats({ transactions, registeredUsers }: ManagerAggregatedStatsProps) {
-  const isToday = (timestamp: string) => {
-    const d = new Date(timestamp);
-    const today = new Date();
-    return (
-      d.getDate() === today.getDate() &&
-      d.getMonth() === today.getMonth() &&
-      d.getFullYear() === today.getFullYear()
-    );
-  };
+  const todayStr = getBusinessDate();
 
   // Compute daily cashier-by-cashier breakdown
   const cashierStats = useMemo(() => {
-    // We only care about transactions performed today
-    const todayTxs = transactions.filter(tx => isToday(tx.timestamp));
+    // We only care about transactions performed today (Lagos stable business date)
+    const todayTxs = transactions.filter(tx => getBusinessDate(tx.timestamp) === todayStr);
 
     // Calculate aggregated metrics for each registered cashier / employee
     const statsMap = registeredUsers.map(user => {
@@ -46,11 +38,11 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
 
     // Sort active users to the top, then by profit desc
     return statsMap.sort((a, b) => b.profit - a.profit);
-  }, [transactions, registeredUsers]);
+  }, [transactions, registeredUsers, todayStr]);
 
   // Compute overall totals for today
   const grandTotals = useMemo(() => {
-    const todayTxs = transactions.filter(tx => isToday(tx.timestamp));
+    const todayTxs = transactions.filter(tx => getBusinessDate(tx.timestamp) === todayStr);
     const volume = todayTxs.reduce((sum, tx) => sum + (tx.amount || 0), 0);
     const profit = todayTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
     const count = todayTxs.length;
@@ -70,7 +62,7 @@ export function ManagerAggregatedStats({ transactions, registeredUsers }: Manage
     }, {} as Record<string, { profit: number, count: number }>);
 
     return { volume, profit, count, customerCharges, providerCharges, regulatoryFees, totalFees, vat, cashback, typeBreakdown };
-  }, [transactions]);
+  }, [transactions, todayStr]);
 
   return (
     <motion.div

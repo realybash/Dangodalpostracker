@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { BorrowKeepTransaction } from '../types';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { formatNaira, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
-import { AudioRecorder } from './AudioRecorder';
-import { 
+import {  BorrowKeepTransaction } from '../types';
+import {  db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import {  collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { copyToClipboard,    formatNaira, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
+import {  AudioRecorder } from './AudioRecorder';
+import {  
   UserPlus, 
   ArrowUpRight, 
   ArrowDownLeft, 
@@ -263,6 +263,11 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
       const cust = customers[key];
       if (!cust) return;
 
+      // Skip unapproved repayments/returns so they do not reduce active debts or loans
+      if (t.approvalStatus === 'pending' || t.approvalStatus === 'rejected') {
+        return;
+      }
+
       if (t.type === 'loan_repaid') {
         if (t.linkedTransactionId) {
           const match = cust.loans.find(l => l.tx.id === t.linkedTransactionId);
@@ -322,6 +327,9 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
         ? doc(collection(db, 'borrowKeep')).id 
         : 'bk_' + Math.floor(100000 + Math.random() * 900000);
 
+      const isRepaymentOrReturn = type === 'loan_repaid' || type === 'money_returned';
+      const requiresApproval = isRepaymentOrReturn && state.currentUser.role === 'Employee';
+
       const record: BorrowKeepTransaction = {
         id: transactionId,
         name: name.trim(),
@@ -336,7 +344,8 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
         linkedTransactionId: linkedTransactionId || undefined,
         photoFront: (type === 'money_kept' || type === 'money_returned') ? (photoFront || undefined) : undefined,
         photoBack: (type === 'money_kept' || type === 'money_returned') ? (photoBack || undefined) : undefined,
-        photo: (type === 'money_kept' || type === 'money_returned') ? (photoFront || photoBack || undefined) : undefined
+        photo: (type === 'money_kept' || type === 'money_returned') ? (photoFront || photoBack || undefined) : undefined,
+        approvalStatus: requiresApproval ? 'pending' : 'approved'
       };
 
       if (isCloudMode) {
@@ -344,8 +353,8 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
           console.log("BorrowKeepSection: Saving to Firestore:", record);
           await setDoc(doc(db, 'borrowKeep', transactionId), record);
           
-          // If we linked this repayment/return, also update the original document's running values
-          if (linkedTransactionId) {
+          // If we linked this repayment/return, also update the original document's running values (ONLY IF approved immediately)
+          if (linkedTransactionId && !requiresApproval) {
             const originalDoc = transactions.find(t => t.id === linkedTransactionId);
             if (originalDoc) {
               const prevRepaid = originalDoc.repaidAmount || 0;
@@ -359,6 +368,9 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
             }
           }
           
+          if (requiresApproval) {
+            alert(`📢 Record submitted successfully! Since you are a Cashier, this settlement is marked as "Pending" and has been sent to your Manager for approval. Active balance totals will update once approved.`);
+          }
           resetForm();
         } catch (error) {
           console.error("Error saving document to Firestore in BorrowKeepSection:", error);
@@ -369,9 +381,9 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
           const saved = localStorage.getItem('OPay_BorrowKeep_Transactions');
           const list = saved ? JSON.parse(saved) as BorrowKeepTransaction[] : [];
           
-          // If linked, update original transaction in the local array
+          // If linked, update original transaction in the local array (ONLY IF approved immediately)
           let updatedList = [...list];
-          if (linkedTransactionId) {
+          if (linkedTransactionId && !requiresApproval) {
             updatedList = updatedList.map(item => {
               if (item.id === linkedTransactionId) {
                 const prevRepaid = item.repaidAmount || 0;
@@ -390,6 +402,9 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
           const nextList = [record, ...updatedList];
           localStorage.setItem('OPay_BorrowKeep_Transactions', JSON.stringify(nextList));
           setTransactions(nextList);
+          if (requiresApproval) {
+            alert(`📢 Record submitted successfully! Since you are a Cashier, this settlement is marked as "Pending" and has been sent to your Manager for approval. Active balance totals will update once approved.`);
+          }
           resetForm();
         } catch (err) {
           console.error("Error saving record locally:", err);
@@ -499,9 +514,11 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
 
   // Calculate stats strictly for the selected timeframe
   const periodLoansGiven = filteredTimeline.filter(t => t.type === 'loan_given').reduce((sum, t) => sum + t.amount, 0);
-  const periodLoansRepaid = filteredTimeline.filter(t => t.type === 'loan_repaid').reduce((sum, t) => sum + t.amount, 0);
+  const periodLoansRepaid = filteredTimeline.filter(t => t.type === 'loan_repaid' && t.approvalStatus !== 'pending').reduce((sum, t) => sum + t.amount, 0);
+  const periodLoansRepaidPending = filteredTimeline.filter(t => t.type === 'loan_repaid' && t.approvalStatus === 'pending').reduce((sum, t) => sum + t.amount, 0);
   const periodMoneyKept = filteredTimeline.filter(t => t.type === 'money_kept').reduce((sum, t) => sum + t.amount, 0);
-  const periodMoneyReturned = filteredTimeline.filter(t => t.type === 'money_returned').reduce((sum, t) => sum + t.amount, 0);
+  const periodMoneyReturned = filteredTimeline.filter(t => t.type === 'money_returned' && t.approvalStatus !== 'pending').reduce((sum, t) => sum + t.amount, 0);
+  const periodMoneyReturnedPending = filteredTimeline.filter(t => t.type === 'money_returned' && t.approvalStatus === 'pending').reduce((sum, t) => sum + t.amount, 0);
 
   // Perform name search pre-filtering for summary metrics
   const searchFilteredTransactions = React.useMemo(() => {
@@ -513,27 +530,35 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
 
   // Daily totals
   const dailyLoansGiven = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_given' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const dailyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const dailyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus !== 'pending' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const dailyLoansRepaidPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus === 'pending' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
   const dailyMoneyKept = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_kept' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const dailyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const dailyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus !== 'pending' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const dailyMoneyReturnedPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus === 'pending' && isSameDay(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
 
   // Weekly totals
   const weeklyLoansGiven = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_given' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const weeklyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const weeklyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus !== 'pending' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const weeklyLoansRepaidPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus === 'pending' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
   const weeklyMoneyKept = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_kept' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const weeklyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const weeklyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus !== 'pending' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const weeklyMoneyReturnedPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus === 'pending' && isSameWeek(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
 
   // Monthly totals
   const monthlyLoansGiven = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_given' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const monthlyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const monthlyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus !== 'pending' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const monthlyLoansRepaidPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus === 'pending' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
   const monthlyMoneyKept = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_kept' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const monthlyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const monthlyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus !== 'pending' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const monthlyMoneyReturnedPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus === 'pending' && isSameMonth(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
 
   // Yearly totals
   const yearlyLoansGiven = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_given' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const yearlyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const yearlyLoansRepaid = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus !== 'pending' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const yearlyLoansRepaidPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'loan_repaid' && t.approvalStatus === 'pending' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
   const yearlyMoneyKept = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_kept' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
-  const yearlyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const yearlyMoneyReturned = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus !== 'pending' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
+  const yearlyMoneyReturnedPending = React.useMemo(() => searchFilteredTransactions.filter(t => t.type === 'money_returned' && t.approvalStatus === 'pending' && isSameYear(new Date(t.timestamp), nowRef)).reduce((sum, t) => sum + t.amount, 0), [searchFilteredTransactions]);
 
   const typeConfig = {
     loan_given: { label: 'Loan Given', color: 'text-red-600 bg-red-50 border-red-100', icon: ArrowUpRight },
@@ -613,7 +638,7 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
   }, [customerTransactions]);
 
   const handleCopyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
+    copyToClipboard(text).then(() => {
       setIsDisputeCopied(true);
       setTimeout(() => setIsDisputeCopied(false), 2500);
     });
@@ -795,21 +820,41 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
                 <span className="text-xs font-bold text-emerald-950">Repayments</span>
               </div>
               <div className="space-y-1 text-[11px]">
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Daily</span>
-                  <span className="font-mono font-bold text-emerald-600">{formatNaira(dailyLoansRepaid)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-emerald-600 block">{formatNaira(dailyLoansRepaid)}</span>
+                    {dailyLoansRepaidPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(dailyLoansRepaidPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Weekly</span>
-                  <span className="font-mono font-bold text-emerald-600">{formatNaira(weeklyLoansRepaid)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-emerald-600 block">{formatNaira(weeklyLoansRepaid)}</span>
+                    {weeklyLoansRepaidPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(weeklyLoansRepaidPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Monthly</span>
-                  <span className="font-mono font-bold text-emerald-600">{formatNaira(monthlyLoansRepaid)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-emerald-600 block">{formatNaira(monthlyLoansRepaid)}</span>
+                    {monthlyLoansRepaidPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(monthlyLoansRepaidPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5">
+                <div className="flex justify-between items-start py-0.5">
                   <span className="text-neutral-400 font-medium">Yearly</span>
-                  <span className="font-mono font-bold text-emerald-600">{formatNaira(yearlyLoansRepaid)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-emerald-600 block">{formatNaira(yearlyLoansRepaid)}</span>
+                    {yearlyLoansRepaidPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(yearlyLoansRepaidPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -851,21 +896,41 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
                 <span className="text-xs font-bold text-purple-950">Returned</span>
               </div>
               <div className="space-y-1 text-[11px]">
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Daily</span>
-                  <span className="font-mono font-bold text-purple-600">{formatNaira(dailyMoneyReturned)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-purple-600 block">{formatNaira(dailyMoneyReturned)}</span>
+                    {dailyMoneyReturnedPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(dailyMoneyReturnedPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Weekly</span>
-                  <span className="font-mono font-bold text-purple-600">{formatNaira(weeklyMoneyReturned)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-purple-600 block">{formatNaira(weeklyMoneyReturned)}</span>
+                    {weeklyMoneyReturnedPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(weeklyMoneyReturnedPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5 border-b border-neutral-100/40">
+                <div className="flex justify-between items-start py-0.5 border-b border-neutral-100/40">
                   <span className="text-neutral-400 font-medium">Monthly</span>
-                  <span className="font-mono font-bold text-purple-600">{formatNaira(monthlyMoneyReturned)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-purple-600 block">{formatNaira(monthlyMoneyReturned)}</span>
+                    {monthlyMoneyReturnedPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(monthlyMoneyReturnedPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center py-0.5">
+                <div className="flex justify-between items-start py-0.5">
                   <span className="text-neutral-400 font-medium">Yearly</span>
-                  <span className="font-mono font-bold text-purple-600">{formatNaira(yearlyMoneyReturned)}</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-purple-600 block">{formatNaira(yearlyMoneyReturned)}</span>
+                    {yearlyMoneyReturnedPending > 0 && (
+                      <span className="text-[9px] text-amber-600 block font-sans">({formatNaira(yearlyMoneyReturnedPending)} pending)</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1620,17 +1685,23 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
                 <span className="block opacity-75">Loan Given ({state.activeTimeframe})</span>
                 <span className="text-sm font-black mt-0.5 block">{formatNaira(periodLoansGiven)}</span>
             </div>
-            <div className="bg-emerald-50 text-emerald-700 p-2.5 rounded-xl border border-emerald-100">
+            <div className="bg-emerald-50 text-emerald-700 p-2.5 rounded-xl border border-emerald-100 flex flex-col justify-between items-center min-h-[58px]">
                 <span className="block opacity-75">Repaid ({state.activeTimeframe})</span>
                 <span className="text-sm font-black mt-0.5 block">{formatNaira(periodLoansRepaid)}</span>
+                {periodLoansRepaidPending > 0 && (
+                  <span className="text-[8px] text-amber-600 block">({formatNaira(periodLoansRepaidPending)} pending)</span>
+                )}
             </div>
             <div className="bg-blue-50 text-blue-700 p-2.5 rounded-xl border border-blue-100">
                 <span className="block opacity-75">Kept ({state.activeTimeframe})</span>
                 <span className="text-sm font-black mt-0.5 block">{formatNaira(periodMoneyKept)}</span>
             </div>
-            <div className="bg-purple-50 text-purple-700 p-2.5 rounded-xl border border-purple-100">
+            <div className="bg-purple-50 text-purple-700 p-2.5 rounded-xl border border-purple-100 flex flex-col justify-between items-center min-h-[58px]">
                 <span className="block opacity-75">Returned ({state.activeTimeframe})</span>
                 <span className="text-sm font-black mt-0.5 block">{formatNaira(periodMoneyReturned)}</span>
+                {periodMoneyReturnedPending > 0 && (
+                  <span className="text-[8px] text-amber-600 block">({formatNaira(periodMoneyReturnedPending)} pending)</span>
+                )}
             </div>
           </div>
 
@@ -1785,6 +1856,23 @@ export function BorrowKeepSection({ state, syncOwnerId }: { state: any; syncOwne
                         }`}>
                           {t.type === 'loan_given' || t.type === 'money_returned' ? '-' : '+'}{formatNaira(t.amount)}
                         </span>
+                        
+                        {/* Approval Status Badges */}
+                        {t.approvalStatus === 'pending' && (
+                          <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[8px] font-black px-1.5 py-0.5 rounded-full inline-block animate-pulse">
+                            ⏳ PENDING APPROVAL
+                          </span>
+                        )}
+                        {t.approvalStatus === 'approved' && (t.type === 'loan_repaid' || t.type === 'money_returned') && (
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[8px] font-black px-1.5 py-0.5 rounded-full inline-block">
+                            ✓ APPROVED
+                          </span>
+                        )}
+                        {t.approvalStatus === 'rejected' && (
+                          <span className="bg-red-50 text-red-700 border border-red-200 text-[8px] font-black px-1.5 py-0.5 rounded-full inline-block">
+                            ❌ REJECTED
+                          </span>
+                        )}
                         
                         <div className="flex gap-1">
                           <button

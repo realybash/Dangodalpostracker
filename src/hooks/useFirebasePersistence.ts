@@ -25,12 +25,12 @@ export const useFirebasePersistence = (
       }
     }
 
-    if (!syncOwnerId && !auth.currentUser) {
-      console.log('[Persistence] Real-time users sync starting in public mode (no syncOwnerId)');
-    }
+    // Safety fallback: Always resolve isUsersLoaded to true after 1500ms to avoid locking out users on slow connection
+    const safetyTimer = setTimeout(() => {
+      console.log('[Persistence] Safety timeout reached. Forcing isUsersLoaded to true.');
+      setIsUsersLoaded(true);
+    }, 1500);
 
-    console.log('[Persistence] Initializing real-time users sync. Auth UID:', auth.currentUser?.uid);
-    
     const usersRef = collection(db, 'users');
     
     // In public mode or logged in mode, we fetch users to allow login lookups and team management.
@@ -38,7 +38,7 @@ export const useFirebasePersistence = (
     const usersQuery = usersRef;
     
     const unsubscribeSnapshot = onSnapshot(usersQuery, (snap) => {
-      console.log(`[Persistence] Received users snapshot: ${snap.size} documents`);
+      clearTimeout(safetyTimer);
       
       const cloudUsersList = snap.docs.map(docSnap => mapFirestoreUser(docSnap.data(), docSnap.id));
       
@@ -49,13 +49,23 @@ export const useFirebasePersistence = (
       
       // Also cache in IndexedDB for robust offline login
       import('../lib/offlineDb').then(({ saveCachedUsersBatch }) => {
-        saveCachedUsersBatch(cloudUsersList).catch(err => console.error('[Persistence] IndexedDB user cache failed:', err));
+        saveCachedUsersBatch(cloudUsersList).catch(err => { /* Quietly handle indexdb issues */ });
       });
       
       setIsUsersLoaded(true);
     }, (err) => {
-      console.error('[Persistence] Users sync failed:', err);
-      handleFirestoreError(err, OperationType.LIST, 'users');
+      clearTimeout(safetyTimer);
+      const errMsg = err?.message || String(err);
+      if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
+        if (typeof window !== 'undefined') {
+          (window as any).__firestoreQuotaExceeded = true;
+          window.dispatchEvent(new Event('firestore-quota-exceeded'));
+        }
+      }
+      try {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+      } catch (e) {
+      }
       
       const saved = localStorage.getItem('OPay_Registered_Users_v4');
       if (saved) {
@@ -64,7 +74,6 @@ export const useFirebasePersistence = (
           setRegisteredUsers(list);
           dispatch({ type: 'SET_REGISTERED_USERS', payload: list });
         } catch (e) {
-          console.error('[Persistence] Failed to load from local storage fallback');
         }
       }
       setIsUsersLoaded(true);

@@ -22,7 +22,8 @@ import {
 import { t } from '../i18n';
 
 interface MetricCardsProps {
-  profit: number;
+  dailyProfit: number;
+  periodProfit: number;
   volume: number;
   totalExpenses: number;
   count: number;
@@ -36,7 +37,8 @@ interface MetricCardsProps {
 }
 
 export const MetricCards = React.memo(({
-  profit,
+  dailyProfit,
+  periodProfit,
   volume,
   totalExpenses,
   count,
@@ -60,12 +62,36 @@ export const MetricCards = React.memo(({
   };
 
   const isDaily = timeframe === 'Daily';
+  const isLIFETIME = (timeframe as string) === 'LIFETIME';
+  
   // Net profit is Gross Profit - Expenses
-  const netProfit = profit - totalExpenses;
-  const progressPercent = dailyTarget > 0 ? Math.min((netProfit / dailyTarget) * 100, 100) : 0;
+  // IMPORTANT: For Daily ledger, we only subtract today's expenses.
+  // For period, we subtract the expenses belonging to that period.
+  const netDailyProfit = dailyProfit - totalExpenses; 
+  const netPeriodProfit = periodProfit - totalExpenses;
+  
+  const displayProfit = isDaily ? dailyProfit : periodProfit;
+  const displayNetProfit = isDaily ? netDailyProfit : netPeriodProfit;
+  const displayLabel = isDaily ? 'REALIZED GAIN (DAILY)' : (isLIFETIME ? 'REALIZED GAIN (LIFETIME)' : `REALIZED GAIN (${timeframe.toUpperCase()})`);
+
+  const progressPercent = dailyTarget > 0 ? Math.min((netDailyProfit / dailyTarget) * 100, 100) : 0;
   
   return (
     <div className="space-y-6">
+      {/* Both Profits Display (if not daily) */}
+      {!isDaily && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4 bg-white border border-neutral-200 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase text-neutral-400">Stable Daily Gain (Today)</span>
+            <p className="text-lg font-black text-neutral-800">{formatNaira(dailyProfit)}</p>
+          </div>
+          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase text-emerald-600">Selected {timeframe} Gain</span>
+            <p className="text-lg font-black text-emerald-900">{formatNaira(periodProfit)}</p>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Segment Header Call-out */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-neutral-200 p-5 rounded-3xl gap-4 shadow-sm">
         <div>
@@ -121,7 +147,7 @@ export const MetricCards = React.memo(({
           <div className="relative overflow-hidden bg-white border border-neutral-200 p-4 rounded-3xl shadow-sm transition-all hover:border-[#00B87A]">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-extrabold text-neutral-400 uppercase tracking-wider font-mono">
-                {t('Net Profit', language)}
+                {displayLabel}
               </span>
               <span className="p-2 bg-emerald-50 text-emerald-600 rounded-full">
                 <DollarSign className="w-4 h-4 stroke-[2.5]" />
@@ -129,7 +155,7 @@ export const MetricCards = React.memo(({
             </div>
             <div className="mt-4">
               <h3 className="text-xl sm:text-2xl font-black font-mono text-emerald-600 tracking-tight">
-                {formatNaira(netProfit)}
+                {formatNaira(displayNetProfit)}
               </h3>
               <div className="flex items-center gap-1 mt-1 text-[10px] text-emerald-500 font-bold">
                 <TrendingUp className="w-3.5 h-3.5" />
@@ -310,7 +336,7 @@ export const MetricCards = React.memo(({
           <div className="space-y-2">
             <div className="flex justify-between text-xs font-mono">
               <span className="text-neutral-500">Milestone Met: <strong className="text-neutral-700">{progressPercent.toFixed(1)}%</strong></span>
-              <span className="text-[#00B87A] font-bold">{formatNaira(profit)} / {formatNaira(dailyTarget)}</span>
+              <span className="text-[#00B87A] font-bold">{formatNaira(dailyProfit)} / {formatNaira(dailyTarget)}</span>
             </div>
             
             <div className="relative h-3 bg-neutral-100 rounded-full overflow-hidden border border-neutral-200">
@@ -343,7 +369,7 @@ export const MetricCards = React.memo(({
                   🏆 POS Business Milestone Target Met! Fantastic Job! 🌟
                 </motion.span>
               ) : (
-                <span className="text-neutral-500 font-medium">Need <strong className="text-neutral-700">{formatNaira(Math.max(dailyTarget - profit, 0))}</strong> more to hit target</span>
+                <span className="text-neutral-500 font-medium">Need <strong className="text-neutral-700">{formatNaira(Math.max(dailyTarget - dailyProfit, 0))}</strong> more to hit target</span>
               )}
             </div>
           </div>

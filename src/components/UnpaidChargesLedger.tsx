@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Transaction, User, AppSettings } from '../types';
-import { formatNaira, calculateTerminalFee, calculateCBNCharge, generateId, getCalculatedFinancials } from '../utils';
-import { 
+import {  Transaction, User, AppSettings } from '../types';
+import { copyToClipboard,    formatNaira, calculateTerminalFee, calculateCBNCharge, generateId, getCalculatedFinancials } from '../utils';
+import {  
   AlertTriangle, 
   Search, 
   Check, 
@@ -670,7 +670,7 @@ export function UnpaidChargesLedger({
     const businessName = "Dan Godal POS Hub";
     const msg = `Hello ${tx.customerName || 'Customer'}, this is a friendly reminder from ${businessName} regarding your outstanding transaction fee of ${formatNaira(feeToSettle)} for your ${tx.type} transaction on ${dateStr}. Kindly drop it by the counter when you pass. Thank you!`;
     
-    navigator.clipboard.writeText(msg);
+    copyToClipboard(msg);
     setCopiedId(tx.id);
     setTimeout(() => setCopiedId(null), 3000);
   };

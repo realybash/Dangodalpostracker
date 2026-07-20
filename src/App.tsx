@@ -8,7 +8,7 @@ import { AppState, AppAction, User, Transaction, UserRole, TransactionType, AppS
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, signOut } from 'firebase/auth';
 import { collection, doc, query, where, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, getDocs, orderBy, limit, or, Timestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
-import { 
+import { copyToClipboard,
   getSeedTransactions, 
   computeTxMetrics, 
   formatNaira, 
@@ -23,6 +23,7 @@ import {
   mapFirestoreUser,
   cleanPhoneForCompare,
   getAuthPassword,
+  getBusinessDate,
   prepareFirestoreData,
   filterTransactionsByHistoryFilter,
   applyAdvancedFilter,
@@ -169,6 +170,7 @@ const DEFAULT_STATE: AppState = {
 };
 
 // Reducer implementation guaranteeing reactive immediate computation
+
 function appReducer(state: AppState, action: AppAction): AppState {
   let nextState: AppState;
 
@@ -446,6 +448,16 @@ function initAppState(): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, initAppState);
+  
+  const visiblePosTerminals = useMemo(() => {
+    if (state.impersonatedUserId) {
+      return state.posTerminals.filter(p => p.employeeId === state.impersonatedUserId);
+    }
+    if (state.currentUser.role === 'Manager') {
+      return state.posTerminals;
+    }
+    return state.posTerminals.filter(p => p.employeeId === state.currentUser.id);
+  }, [state.posTerminals, state.currentUser.role, state.currentUser.id, state.impersonatedUserId]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [logoutConfirmRole, setLogoutConfirmRole] = useState<'Manager' | 'Employee' | null>(null);
 
@@ -466,6 +478,24 @@ export default function App() {
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [indexedDbPendingCount, setIndexedDbPendingCount] = useState(0);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuotaEvent = () => {
+      setIsQuotaExceeded(true);
+    };
+    if (typeof window !== 'undefined') {
+      if ((window as any).__firestoreQuotaExceeded) {
+        setIsQuotaExceeded(true);
+      }
+      window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+      }
+    };
+  }, []);
 
   const updateIndexedDbPendingCount = async () => {
     try {
@@ -478,7 +508,6 @@ export default function App() {
       ]);
       const totalPending = txs.length + expenses.length + terminals.length + deletions.length;
       setIndexedDbPendingCount(totalPending);
-      console.log(`[TRANSACTION SYNC TRACE] [IndexedDB State check] Updated pending count from IndexedDB. Total: ${totalPending} (Txs: ${txs.length}, Expenses: ${expenses.length}, Terminals: ${terminals.length}, Deletes: ${deletions.length})`);
     } catch (err) {
       console.error('[Sync] Failed to query IndexedDB pending queues:', err);
     }
@@ -486,7 +515,7 @@ export default function App() {
 
   const syncOwnerId = useMemo(() => {
     // If we have a profile loaded in state, that's the most reliable source for ownerId
-    if (state.currentUser && state.currentUser.id && state.currentUser.id !== '' && state.currentUser.id !== 'mgr_1') {
+    if (state.currentUser && state.currentUser.id && state.currentUser.id !== '') {
       return state.currentUser.role === 'Manager' ? state.currentUser.id : state.currentUser.ownerId;
     }
     // Fallback to Auth UID if no profile yet (initial load)
@@ -506,7 +535,27 @@ export default function App() {
     updateIndexedDbPendingCount();
   }, [state.transactions, state.expenses, state.posTerminals]);
 
-  const [cloudLoading, setCloudLoading] = useState(true);
+  const [cloudLoading, setCloudLoading] = useState(() => {
+    // If terminal is locked, we are showing the PIN entry screen anyway, so show it instantly!
+    if (localStorage.getItem('OPay_Terminal_Locked') === 'true') {
+      return false;
+    }
+    // If there is no cached user, we show the Login Screen anyway, so show it instantly!
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!saved) {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(saved);
+      if (!parsed?.currentUser?.id) {
+        return false;
+      }
+    } catch (e) {
+      return false;
+    }
+    // Only wait for auth if we are already logged in and unlocked
+    return true;
+  });
 
   // Sync state to local storage
   useEffect(() => {
@@ -602,11 +651,9 @@ export default function App() {
   // Consolidated browser network connectivity status listener
   useEffect(() => {
     const handleOnline = () => {
-      console.log('[Sync] Browser online event fired.');
       setBrowserOnline(true);
     };
     const handleOffline = () => {
-      console.log('[Sync] Browser offline event fired.');
       setBrowserOnline(false);
     };
 
@@ -623,10 +670,8 @@ export default function App() {
   useEffect(() => {
     const resolvedOnline = browserOnline && appMode === 'online';
     setIsOnline(resolvedOnline);
-    console.log(`[Sync] Network status evaluated: browserOnline=${browserOnline}, appMode=${appMode} -> isOnline=${resolvedOnline}`);
     
     if (resolvedOnline) {
-      console.log('[Sync] Device is online and Online Mode is active. Attempting to synchronize pending local mutations...');
       import('./lib/sync').then(({ syncOfflineTransactions }) => {
         syncOfflineTransactions((syncing) => setIsSyncing(syncing)).then(() => {
           updateIndexedDbPendingCount();
@@ -706,7 +751,7 @@ export default function App() {
 
   // Compute individual stats for each linked terminal
   const terminalStats = useMemo(() => {
-    const list = state.posTerminals || [];
+    const list = visiblePosTerminals || [];
     const txs = state.transactions || [];
     
     return list.map(terminal => {
@@ -724,7 +769,7 @@ export default function App() {
         count
       };
     });
-  }, [state.posTerminals, state.transactions]);
+  }, [visiblePosTerminals, state.transactions]);
 
   // Find the most active registered terminal based on transaction volume
   const mostActiveTerminal = useMemo(() => {
@@ -759,17 +804,21 @@ export default function App() {
 
   // Initialize Auth state listener
   useEffect(() => {
-    console.log('[Auth] Initializing onAuthStateChanged listener');
+    
+    // Safety timeout: force cloudLoading to false after 300ms to prevent startup hangs
+    const safetyTimer = setTimeout(() => {
+      setCloudLoading(false);
+    }, 300);
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      clearTimeout(safetyTimer);
       setCloudUser(user);
       setCloudLoading(false);
       
       if (user) {
-        console.log('[Auth] User detected:', user.uid, user.email);
         
         // If registration is in progress, bypass the auto-restoration flow
         if (isRegisteringUser.current) {
-          console.log('[Auth] Registration in progress, bypassing auto-restoration in auth listener');
           return;
         }
 
@@ -785,6 +834,9 @@ export default function App() {
             return prev;
           });
           dispatch({ type: 'SWITCH_USER', payload: mUser });
+          if (localStorage.getItem('OPay_Terminal_Locked') !== 'true') {
+            setIsLocked(false);
+          }
         };
 
         try {
@@ -797,12 +849,11 @@ export default function App() {
 
           if (snap && snap.exists()) {
             const mUser = mapFirestoreUser(snap.data(), user.uid);
-            console.log('[Auth] Profile restored from Firestore:', mUser.name, 'Role:', mUser.role);
             updatePoolAndDispatch(mUser);
 
             // Load settings if manager or linked to one
             const ownerId = mUser.role === 'Manager' ? mUser.id : mUser.ownerId;
-            if (ownerId && ownerId !== 'mgr_1') {
+            if (ownerId) {
               try {
                 const settingsSnap = await getDoc(doc(db, 'settings', ownerId));
                 if (settingsSnap.exists()) {
@@ -818,7 +869,6 @@ export default function App() {
             
             // Self-healing: Trigger recovery to restore the operator's record
             const recoverFirestoreProfile = async () => {
-              console.log('[Auth Recovery] Attempting to recover and restore missing Firestore profile for UID:', user.uid);
               try {
                 let recoveredUser: User | null = null;
                 
@@ -830,7 +880,6 @@ export default function App() {
                     const found = parsed.find(u => u.id === user.uid);
                     if (found) {
                       recoveredUser = found;
-                      console.log('[Auth Recovery] Found user in localStorage cache:', recoveredUser.name);
                     }
                   } catch (e) {
                     console.error('[Auth Recovery] Failed to parse localStorage cached users:', e);
@@ -844,7 +893,6 @@ export default function App() {
                     const cached = await getCachedUser(user.uid);
                     if (cached) {
                       recoveredUser = mapFirestoreUser(cached, user.uid);
-                      console.log('[Auth Recovery] Found user in IndexedDB offline cache:', recoveredUser.name);
                     }
                   } catch (e) {
                     console.error('[Auth Recovery] Failed to query IndexedDB cache:', e);
@@ -862,11 +910,10 @@ export default function App() {
                     name: fallbackName,
                     role: fallbackRole,
                     phone: user.email?.split('@')[0] || '',
-                    ownerId: fallbackRole === 'Manager' ? user.uid : 'mgr_1',
+                    ownerId: fallbackRole === 'Manager' ? user.uid : undefined,
                     activated: true,
                     email: emailClean
                   };
-                  console.log('[Auth Recovery] Reconstructed default profile:', recoveredUser.name, 'Role:', recoveredUser.role);
                 }
 
                 // 4. Save self-healed profile to Firestore
@@ -877,7 +924,7 @@ export default function App() {
                   phoneNumber: recoveredUser.phone,
                   phone: recoveredUser.phone,
                   role: recoveredUser.role,
-                  ownerId: recoveredUser.ownerId || (recoveredUser.role === 'Manager' ? user.uid : 'mgr_1'),
+                  ownerId: recoveredUser.ownerId || (recoveredUser.role === 'Manager' ? user.uid : undefined),
                   email: recoveredUser.email || user.email || '',
                   activated: true,
                   createdAt: new Date().toISOString(),
@@ -888,7 +935,6 @@ export default function App() {
 
                 const cleanData = prepareFirestoreData(firestoreDocRaw, 'users');
                 await setDoc(doc(db, 'users', user.uid), cleanData, { merge: true });
-                console.log('[Auth Recovery] Successfully self-healed and restored user document in Firestore for:', recoveredUser.name);
                 showAppNotification('Operator profile recovered and synchronized successfully.', 'success');
 
                 // 5. Cache locally to ensure offline availability
@@ -903,7 +949,6 @@ export default function App() {
                 updatePoolAndDispatch(recoveredUser);
               } catch (recoveryErr) {
                 console.error('[Auth Recovery] Profile recovery completely failed:', recoveryErr);
-                console.log('[Auth Recovery] Forced fallback: signing out to prevent stale state.');
                 try {
                   await signOut(auth);
                   localStorage.removeItem('OPay_Registered_Users_v4');
@@ -928,7 +973,6 @@ export default function App() {
           // Don't log out, maybe it's just a network glitch
         }
       } else {
-        console.log('[Auth] No active session. Reverting to login state.');
         // Reset to default empty user to trigger LoginScreen
         const emptyUser: User = {
           id: '',
@@ -948,42 +992,45 @@ export default function App() {
 
 
   useEffect(() => {
-    // Always trigger an initial pending IndexedDB count check
-    updateIndexedDbPendingCount();
+    // Always load local cached data from IndexedDB immediately on startup to ensure instant render
+    import('./lib/offlineDb').then(async ({ getCachedTransactions, getCachedExpenses, getCachedPosTerminals }) => {
+      try {
+        const [txs, expenses, terminals] = await Promise.all([
+          getCachedTransactions(),
+          (getCachedExpenses as any)?.() || Promise.resolve([]),
+          (getCachedPosTerminals as any)?.() || Promise.resolve([])
+        ]);
+        
+        if (txs?.length) {
+          dispatch({ type: 'SET_TRANSACTIONS', payload: txs });
+          dispatch({ type: 'SET_HISTORY_TRANSACTIONS', payload: txs });
+        }
+        if (expenses?.length) dispatch({ type: 'SET_EXPENSES', payload: expenses });
+        if (terminals?.length) dispatch({ type: 'SET_POS_TERMINALS', payload: terminals });
+      } catch (err) {
+        console.error('[Startup] Failed to load cached data:', err);
+      } finally {
+        // Update IndexedDB pending count
+        updateIndexedDbPendingCount();
+      }
+    });
 
-    // Initial cache loading
+    // Defer background synchronization to run in background without blocking initial render
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
     const actuallyOffline = !navigator.onLine || mode === 'offline';
 
     if (!actuallyOffline) {
+      const syncTimer = setTimeout(() => {
         import('./lib/sync').then(({ syncOfflineTransactions }) => {
           syncOfflineTransactions((syncing) => setIsSyncing(syncing)).then(() => {
             updateIndexedDbPendingCount();
+          }).catch(err => {
+            console.error('[Startup] Background sync failed:', err);
           });
         });
-    } else {
-        // Load offline cached data
-        import('./lib/offlineDb').then(async ({ getCachedTransactions, getCachedExpenses, getCachedPosTerminals }) => {
-            try {
-                const [txs, expenses, terminals] = await Promise.all([
-                    getCachedTransactions(),
-                    (getCachedExpenses as any)?.() || Promise.resolve([]),
-                    (getCachedPosTerminals as any)?.() || Promise.resolve([])
-                ]);
-                
-                if (txs?.length) dispatch({ type: 'SET_TRANSACTIONS', payload: txs });
-                if (expenses?.length) dispatch({ type: 'SET_EXPENSES', payload: expenses });
-                if (terminals?.length) dispatch({ type: 'SET_POS_TERMINALS', payload: terminals });
-                
-                console.log('[Offline] Loaded cached data from IndexedDB:', { 
-                    txs: txs?.length, 
-                    expenses: expenses?.length, 
-                    terminals: terminals?.length 
-                });
-            } catch (err) {
-                console.error('[Offline] Failed to load cached data:', err);
-            }
-        });
+      }, 1500); // 1.5 seconds delay
+
+      return () => clearTimeout(syncTimer);
     }
   }, []);
 
@@ -994,22 +1041,71 @@ export default function App() {
     const currentUserId = state.currentUser.id;
     const isManager = state.currentUser.role === 'Manager';
 
+    const handleSyncError = async (err: any, path: string) => {
+      const errMsg = err?.message || String(err);
+      const isQuota = errMsg.toLowerCase().includes('quota') || 
+                      errMsg.toLowerCase().includes('resource_exhausted') || 
+                      errMsg.toLowerCase().includes('resource-exhausted') ||
+                      errMsg.toLowerCase().includes('exhausted');
+
+      if (isQuota) {
+        setIsQuotaExceeded(true);
+        try {
+          const { getCachedTransactions, getCachedExpenses, getCachedPosTerminals } = await import('./lib/offlineDb');
+          if (path.includes('transactions')) {
+            const cachedTxs = await getCachedTransactions();
+            cachedTxs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            dispatch({ type: 'SET_TRANSACTIONS', payload: cachedTxs });
+            dispatch({ type: 'SET_HISTORY_TRANSACTIONS', payload: cachedTxs });
+          } else if (path.includes('expenses')) {
+            const cachedExpenses = await getCachedExpenses();
+            cachedExpenses.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            dispatch({ type: 'SET_EXPENSES', payload: cachedExpenses });
+          } else if (path.includes('pos_terminals')) {
+            const cachedTerminals = await getCachedPosTerminals();
+            cachedTerminals.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            dispatch({ type: 'SET_POS_TERMINALS', payload: cachedTerminals });
+          }
+        } catch (cacheErr) {
+        }
+      } else {
+        try {
+          handleFirestoreError(err, OperationType.LIST, path);
+        } catch (e) {
+        }
+      }
+    };
+
     const buildTxQuery = (field: 'ownerId' | 'cashierId', value: string) => {
-      // Restore original: Load ALL permitted transactions for this user/owner to support "Lifetime" and memory filtering
+      // Load the most recent 1000 transactions to ensure accurate daily/weekly summaries on the dashboard.
+      if (field === 'ownerId' && value === 'JcC1krC85wXQidNcL8no2NEJc4v1') {
+        return query(
+          collection(db, 'transactions'),
+          where(field, 'in', ['JcC1krC85wXQidNcL8no2NEJc4v1', 'mgr_1', 'local_owner']),
+          orderBy('timestamp', 'desc'),
+          limit(1000)
+        );
+      }
+
       return query(
         collection(db, 'transactions'),
         where(field, '==', value),
-        orderBy('timestamp', 'desc')
+        orderBy('timestamp', 'desc'),
+        limit(1000)
       );
     };
 
     const mapSnapToTxs = (snap: any) => {
       return snap.docs.map((d: any) => {
-        const data = d.data();
+        const data = d.data() as Transaction;
         if (data.timestamp && typeof data.timestamp === 'object' && (data.timestamp as any).toDate) {
           data.timestamp = (data.timestamp as any).toDate().toISOString();
         }
-        return data as Transaction;
+        // Force derive businessDate if missing to ensure stable ledger filtering
+        if (!data.businessDate && data.timestamp) {
+          data.businessDate = getBusinessDate(data.timestamp);
+        }
+        return data;
       });
     };
 
@@ -1035,14 +1131,14 @@ export default function App() {
         ownerTxsRef.current = txs;
         updateStateTxs();
         import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_owner'));
+      }, (err) => handleSyncError(err, 'transactions_owner'));
     } else {
       unsubCashier = onSnapshot(buildTxQuery('cashierId', currentUserId), (snap) => {
         const txs = mapSnapToTxs(snap);
         cashierTxsRef.current = txs;
         updateStateTxs();
         import('./lib/offlineDb').then(({ saveCachedTransactions }) => saveCachedTransactions(txs));
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions_cashier'));
+      }, (err) => handleSyncError(err, 'transactions_cashier'));
     }
 
     // Subscribe to Expenses
@@ -1064,7 +1160,7 @@ export default function App() {
       dispatch({ type: 'SET_EXPENSES', payload: expList });
       import('./lib/offlineDb').then(({ saveCachedExpenses }) => saveCachedExpenses(expList));
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'expenses');
+      handleSyncError(err, 'expenses');
     });
 
     // Subscribe to POS Terminals
@@ -1086,7 +1182,7 @@ export default function App() {
       dispatch({ type: 'SET_POS_TERMINALS', payload: termList });
       import('./lib/offlineDb').then(({ saveCachedPosTerminals }) => saveCachedPosTerminals(termList));
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'pos_terminals');
+      handleSyncError(err, 'pos_terminals');
     });
 
     return () => {
@@ -1099,6 +1195,29 @@ export default function App() {
 
   // Firestore mutation wrappers
   const handleUpdatePosTerminal = async (term: PosTerminal) => {
+    if (state.currentUser.role !== 'Manager') {
+      const original = state.posTerminals?.find(t => t.id === term.id);
+      if (original) {
+        if (
+          original.name !== term.name ||
+          original.provider !== term.provider ||
+          original.posAccountNo !== term.posAccountNo ||
+          original.cashierName !== term.cashierName ||
+          original.areaOfWorking !== term.areaOfWorking ||
+          original.terminalFeeRate !== term.terminalFeeRate ||
+          original.serialNumber !== term.serialNumber ||
+          original.simCardNumber !== term.simCardNumber
+        ) {
+          alert('Unauthorized operation. Only Managers can edit POS terminal registration details.');
+          return;
+        }
+      }
+    }
+    const isDuplicate = state.posTerminals.some(t => t.posAccountNo === term.posAccountNo && t.id !== term.id);
+    if (isDuplicate) {
+      alert('This Account Number is already registered to another POS terminal.');
+      return;
+    }
     dispatch({ type: 'UPDATE_POS_TERMINAL', payload: term });
 
     const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
@@ -1138,6 +1257,16 @@ export default function App() {
   };
 
   const handleAddPosTerminal = async (term: PosTerminal) => {
+    if (state.currentUser.role !== 'Manager') {
+      alert('Unauthorized operation. Only Managers can add or register POS terminals.');
+      return;
+    }
+    const isDuplicate = state.posTerminals.some(t => t.posAccountNo === term.posAccountNo);
+    if (isDuplicate) {
+      alert('This Account Number is already registered to another POS terminal.');
+      return;
+    }
+
     dispatch({ type: 'ADD_POS_TERMINAL', payload: term });
 
     const termWithOwner = { ...term, ownerId: syncOwnerId || 'mgr_1' };
@@ -1199,14 +1328,25 @@ export default function App() {
   };
 
   const handleDeletePosTerminal = async (id: string) => {
+    if (state.currentUser.role !== 'Manager') {
+      alert('Unauthorized operation. Only Managers can delete or remove POS terminals.');
+      return;
+    }
     dispatch({ type: 'DELETE_POS_TERMINAL', payload: id });
 
     // 1. Delete from local IndexedDB main cache first
     try {
-      const { saveCachedPosTerminals, getCachedPosTerminals } = await import('./lib/offlineDb');
+      const { saveCachedPosTerminals, getCachedPosTerminals, savePendingDeletion } = await import('./lib/offlineDb');
       const current = await getCachedPosTerminals();
       const updated = current.filter((t: any) => t.id !== id);
       await saveCachedPosTerminals(updated);
+      
+      // Record the deletion
+      await savePendingDeletion({
+        id: `pos_terminals_${id}`,
+        collection: 'pos_terminals',
+        docId: id
+      });
     } catch (dbErr) {
       console.error('[DB] Failed to delete POS terminal from main cache:', dbErr);
     }
@@ -1252,7 +1392,6 @@ export default function App() {
     const txList = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
     
     for (let tx of txList) {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleAddTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
       
       const { getBusinessDate } = await import('./utils');
       if (!tx.createdAt) {
@@ -1274,43 +1413,34 @@ export default function App() {
 
       // 1. Save directly to local IndexedDB main cache first to avoid losing data across offline restarts
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Saving transaction ID: "${tx.id}" to IndexedDB main cache...`);
         const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
         const current = await getCachedTransactions();
         const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
         await saveCachedTransactions(updated);
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" saved to IndexedDB main cache.`);
       } catch (dbErr) {
-        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save transaction to main cache:', dbErr);
       }
 
       const mode = localStorage.getItem('POSTrack_Mode') || 'online';
       const offline = mode === 'offline' || !isOnline;
 
       if (offline) {
-          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing to IndexedDB pending list.`);
           const { savePendingTransaction } = await import('./lib/offlineDb');
           await savePendingTransaction(cleanData);
       } else if (syncOwnerId) {
         try {
-          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore write for transaction ID: "${tx.id}"...`);
           await setDoc(doc(db, 'transactions', tx.id), cleanData);
-          console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" written to Firestore successfully.`);
         } catch (err) {
-          console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore write failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
           handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
           // Fallback to offline storage if write fails
           const { savePendingTransaction } = await import('./lib/offlineDb');
           await savePendingTransaction(cleanData);
         }
       } else {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore write for ID: "${tx.id}".`);
       }
     }
   };
 
   const handleUpdateTransaction = async (tx: Transaction) => {
-    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleUpdateTransaction initiated. ID: "${tx.id}", Amount: $${tx.amount}`);
     dispatch({ type: 'UPDATE_TRANSACTION', payload: tx });
 
     const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
@@ -1323,21 +1453,17 @@ export default function App() {
 
     // 1. Save directly to local IndexedDB main cache first
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Updating transaction ID: "${tx.id}" in IndexedDB main cache...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
       const updated = [...current.filter((t: any) => t.id !== tx.id), cleanData];
       await saveCachedTransactions(updated);
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" updated in IndexedDB main cache.`);
     } catch (dbErr) {
-      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to update transaction in main cache:', dbErr);
     }
 
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
     const offline = mode === 'offline' || !isOnline;
 
     if (offline) {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing update to IndexedDB pending list.`);
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
         return;
@@ -1345,18 +1471,14 @@ export default function App() {
 
     if (syncOwnerId) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore update for transaction ID: "${tx.id}"...`);
         await setDoc(doc(db, 'transactions', tx.id), cleanData);
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${tx.id}" updated in Firestore successfully.`);
       } catch (err) {
-        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore update failed for transaction ID: "${tx.id}". Falling back to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, `transactions/${tx.id}`);
         // Fallback to offline storage
         const { savePendingTransaction } = await import('./lib/offlineDb');
         await savePendingTransaction(cleanData);
       }
     } else {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore update for ID: "${tx.id}".`);
     }
   };
 
@@ -1434,7 +1556,6 @@ export default function App() {
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleDeleteTransaction initiated. ID: "${id}"`);
     
     // Identify all linked child transactions that should be deleted with the parent
     const linkedChildIds = state.transactions
@@ -1447,14 +1568,11 @@ export default function App() {
 
     // 1. Save directly to local IndexedDB main cache first
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing transactions: [${allIdsToDelete.join(', ')}] from IndexedDB...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
       const updated = current.filter((t: any) => !allIdsToDelete.includes(t.id));
       await saveCachedTransactions(updated);
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${id}" removed from IndexedDB main cache.`);
     } catch (dbErr) {
-      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to delete transaction from main cache:', dbErr);
     }
 
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
@@ -1462,7 +1580,6 @@ export default function App() {
 
     if (offline) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Saving deletion request to IndexedDB pending list.`);
         const { savePendingDeletion } = await import('./lib/offlineDb');
         await savePendingDeletion({
           id: `transactions_${id}`,
@@ -1470,18 +1587,14 @@ export default function App() {
           docId: id
         });
       } catch (err) {
-        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed to save pending transaction deletion:', err);
       }
       return;
     }
 
     if (syncOwnerId) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate Firestore deletion for transaction ID: "${id}"...`);
         await deleteDoc(doc(db, 'transactions', id));
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Transaction ID: "${id}" deleted from Firestore successfully.`);
       } catch (err) {
-        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Firestore deletion failed for transaction ID: "${id}". Saving deletion request to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.DELETE, `transactions/${id}`);
         // Fallback
         try {
@@ -1492,16 +1605,13 @@ export default function App() {
             docId: id
           });
         } catch (queueErr) {
-          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback save pending transaction deletion failed:', queueErr);
         }
       }
     } else {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate Firestore deletion for ID: "${id}".`);
     }
   };
 
   const handleBulkDeleteTransactions = async (ids: string[]) => {
-    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleBulkDeleteTransactions initiated. Total count: ${ids.length}`);
     
     // Identify all linked child transactions that should be deleted with their parents
     const linkedChildIds = state.transactions
@@ -1513,14 +1623,11 @@ export default function App() {
 
     // 1. Update IndexedDB main cache first
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Removing ${allIdsToDelete.length} transactions from IndexedDB main cache...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
       const updated = current.filter((t: any) => !allIdsToDelete.includes(t.id));
       await saveCachedTransactions(updated);
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk transactions removed from IndexedDB main cache.`);
     } catch (dbErr) {
-      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed bulk deletion from main cache:', dbErr);
     }
 
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
@@ -1528,7 +1635,6 @@ export default function App() {
 
     if (offline) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Enqueuing bulk deletions to IndexedDB pending list.`);
         const { savePendingDeletion } = await import('./lib/offlineDb');
         for (const id of ids) {
           await savePendingDeletion({
@@ -1538,22 +1644,18 @@ export default function App() {
           });
         }
       } catch (err) {
-        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed saving bulk pending deletions:', err);
       }
       return;
     }
 
     if (syncOwnerId) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate bulk deletion on Firestore...`);
         const batch = writeBatch(db);
         ids.forEach((id) => {
           batch.delete(doc(db, 'transactions', id));
         });
         await batch.commit();
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk Firestore deletions committed successfully.`);
       } catch (err) {
-        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Bulk Firestore deletion failed. Saving bulk deletion requests to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_delete');
         // Fallback
         try {
@@ -1566,29 +1668,23 @@ export default function App() {
             });
           }
         } catch (queueErr) {
-          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback saving bulk pending deletions failed:', queueErr);
         }
       }
     } else {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] No syncOwnerId set. Skipping immediate bulk Firestore deletion.`);
     }
   };
 
   const handleBulkUpdateTransactions = async (updatedTxs: Transaction[]) => {
-    console.log(`[TRANSACTION SYNC TRACE] [Save Flow] handleBulkUpdateTransactions initiated. Total count: ${updatedTxs.length}`);
     dispatch({ type: 'BULK_UPDATE_TRANSACTIONS', payload: updatedTxs });
 
     // 1. Update IndexedDB main cache
     try {
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Updating ${updatedTxs.length} transactions in IndexedDB main cache...`);
       const { saveCachedTransactions, getCachedTransactions } = await import('./lib/offlineDb');
       const current = await getCachedTransactions();
       const idMap = new Map(updatedTxs.map(tx => [tx.id, tx]));
       const updated = current.map((tx: any) => idMap.has(tx.id) ? { ...tx, ...idMap.get(tx.id) } : tx);
       await saveCachedTransactions(updated);
-      console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk transactions updated in IndexedDB main cache.`);
     } catch (dbErr) {
-      console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed bulk update in main cache:', dbErr);
     }
 
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
@@ -1596,7 +1692,6 @@ export default function App() {
 
     if (offline) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device/Terminal mode resolved as OFFLINE (POSTrack_Mode: "${mode}", isOnline: ${isOnline}). Saving bulk updates to IndexedDB pending list.`);
         const { savePendingTransaction } = await import('./lib/offlineDb');
         for (const tx of updatedTxs) {
           const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
@@ -1605,37 +1700,32 @@ export default function App() {
           await savePendingTransaction(cleanData);
         }
       } catch (err) {
-        console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Failed saving pending bulk transaction updates:', err);
       }
       return;
     }
 
     if (syncOwnerId) {
       try {
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] Device is online. Attempting immediate bulk update on Firestore...`);
         const batch = writeBatch(db);
         updatedTxs.forEach((tx) => {
           const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
-          const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
+          const txWithOwner = { ...tx, ownerId: syncOwnerId || 'mgr_1', cashierId };
           const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
           batch.set(doc(db, 'transactions', tx.id), cleanData, { merge: true });
         });
         await batch.commit();
-        console.log(`[TRANSACTION SYNC TRACE] [Save Flow] [SUCCESS] Bulk Firestore updates committed successfully.`);
       } catch (err) {
-        console.warn(`[TRANSACTION SYNC TRACE] [Save Flow] [FALLBACK] Bulk Firestore update failed. Saving bulk updates to IndexedDB pending list. Error:`, err);
         handleFirestoreError(err, OperationType.WRITE, 'transactions_bulk_update');
         // Fallback
         try {
           const { savePendingTransaction } = await import('./lib/offlineDb');
           for (const tx of updatedTxs) {
             const cashierId = tx.employeeId || tx.cashierId || (tx.terminalId ? state.posTerminals.find(t => t.id === tx.terminalId)?.employeeId : undefined) || state.currentUser.id || 'cashier';
-            const txWithOwner = { ...tx, ownerId: syncOwnerId, cashierId };
+            const txWithOwner = { ...tx, ownerId: syncOwnerId || 'mgr_1', cashierId };
             const cleanData = prepareFirestoreData(txWithOwner, 'transactions');
             await savePendingTransaction(cleanData);
           }
         } catch (queueErr) {
-          console.error('[TRANSACTION SYNC TRACE] [Save Flow] [ERROR] Fallback saving pending bulk transaction updates failed:', queueErr);
         }
       }
     }
@@ -1772,22 +1862,16 @@ export default function App() {
 
   // Secure terminal locking on startup/refresh: always start with the login page open (locked)
   // so cashiers and managers must enter their PIN to unlock the till.
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLocked, setIsLocked] = useState(() => {
+    return localStorage.getItem('OPay_Terminal_Locked') === 'true';
+  });
 
   const handleLoginSuccess = (user: User) => {
     const terminalMode = (localStorage.getItem('POSTrack_Mode') as 'online' | 'offline') || 'online';
     setAppMode(terminalMode);
-    console.log('[OFFLINE AUTH TRACE] handleLoginSuccess successfully invoked:', {
-      userId: user.id,
-      userName: user.name,
-      userRole: user.role,
-      userPhone: user.phone,
-      terminalMode: terminalMode
-    });
 
     setRegisteredUsers((prev) => {
       if (!prev.some(u => u.id === user.id)) {
-        console.log('[OFFLINE AUTH TRACE] Adding logged-in user to active registeredUsers pool and localStorage:', user.id);
         const next = [...prev, user];
         localStorage.setItem('OPay_Registered_Users_v4', JSON.stringify(next));
         return next;
@@ -1798,11 +1882,9 @@ export default function App() {
     dispatch({ type: 'SWITCH_USER', payload: user });
     setIsLocked(false);
     localStorage.setItem('OPay_Terminal_Locked', 'false');
-    console.log('[OFFLINE AUTH TRACE] Terminal unlocked. Current active shift operator is:', user.name);
   };
 
   const handleLockTerminal = () => {
-    console.log('[OFFLINE AUTH TRACE] Terminal lock triggered manually. Setting OPay_Terminal_Locked = true.');
     setIsLocked(true);
     localStorage.setItem('OPay_Terminal_Locked', 'true');
   };
@@ -1829,8 +1911,32 @@ export default function App() {
   }, []);
 
   // Unified registered users pool
-  const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
-  const [isUsersLoaded, setIsUsersLoaded] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem('OPay_Registered_Users_v4');
+    if (saved) {
+      try {
+        const list = JSON.parse(saved);
+        if (Array.isArray(list)) {
+          return list;
+        }
+      } catch (e) {
+        console.error('[Startup] Failed to parse local cached users:', e);
+      }
+    }
+    return [];
+  });
+  const [isUsersLoaded, setIsUsersLoaded] = useState(() => {
+    const saved = localStorage.getItem('OPay_Registered_Users_v4');
+    if (saved) {
+      try {
+        const list = JSON.parse(saved);
+        if (Array.isArray(list) && list.length > 0) {
+          return true; // We have cached users, enable login immediately!
+        }
+      } catch (e) {}
+    }
+    return false;
+  });
 
   useFirebasePersistence(setRegisteredUsers, setIsUsersLoaded, dispatch, syncOwnerId);
 
@@ -1854,7 +1960,6 @@ export default function App() {
   }, [state.transactions, state.currentUser, state.impersonatedUserId, registeredUsers]);
 
   const handleRegisterUser = async (newUser: User) => {
-    console.log('[Registration] Starting registration for:', newUser.name, 'Role:', newUser.role);
     isRegisteringUser.current = true;
     try {
       let finalUid = newUser.id;
@@ -1882,14 +1987,12 @@ export default function App() {
             emailExists = !snap.empty;
           }
         } catch (err) {
-          console.error('[Registration] Firestore pre-check failed:', err);
         }
       }
 
       if (phoneExists || emailExists) {
         const dupError = new Error(`An account already exists with this ${phoneExists ? 'phone number' : 'email address'}. Please sign in instead.`);
         (dupError as any).code = 'auth/email-already-in-use';
-        console.error('[Registration] Pre-check failed: User already exists');
         throw dupError;
       }
 
@@ -1898,7 +2001,6 @@ export default function App() {
       const authEmail = `${loginIdentifier}@opay-pos.com`;
       const authPass = getAuthPassword(newUser.pin || '1111'); 
       
-      console.log(`[Registration] Creating Auth account for ${newUser.role}:`, authEmail);
       
       let userCred;
       try {
@@ -1906,7 +2008,6 @@ export default function App() {
         finalUid = userCred.user.uid;
         await updateProfile(userCred.user, { displayName: newUser.name });
       } catch (authErr: any) {
-        console.error('[Registration] Firebase Authentication failed:', authErr.code, authErr.message);
         throw authErr;
       }
 
@@ -1944,9 +2045,7 @@ export default function App() {
 
     } catch (err: any) {
       if (['auth/email-already-in-use', 'auth/weak-password', 'auth/network-request-failed'].includes(err.code)) {
-        console.warn(`[Registration Flow] Handled auth error: ${err.code}`);
       } else {
-        console.error('[Registration Flow] Error captured:', err.code, err.message);
       }
       
       let friendlyMsg = 'Registration failed. Please try again later.';
@@ -1977,20 +2076,15 @@ export default function App() {
 
 
   const handleUpdateUserPin = async (userId: string, newPin: string) => {
-    console.log('[OFFLINE AUTH TRACE] App.tsx: updating user PIN inside IndexedDB "users" store for user ID:', userId, 'with new PIN length:', newPin.length);
     // 1. Sync directly to local IndexedDB cache
     try {
       const { saveCachedUser, getCachedUser } = await import('./lib/offlineDb');
       const cached = await getCachedUser(userId);
       if (cached) {
-        console.log('[OFFLINE AUTH TRACE] User found in cache. Proceeding to update PIN in "users" store.');
         await saveCachedUser({ ...cached, pin: newPin });
-        console.log('[OFFLINE AUTH TRACE] Successfully updated user PIN in offline IndexedDB cache for userId:', userId);
       } else {
-        console.warn('[OFFLINE AUTH TRACE] Failed to find user in offline cache to update PIN:', userId);
       }
     } catch (dbErr) {
-      console.error('[OFFLINE AUTH TRACE] Failed to update PIN in offline cache:', dbErr);
     }
 
     if (syncOwnerId) {
@@ -2000,7 +2094,6 @@ export default function App() {
         if (auth.currentUser && auth.currentUser.uid === userId) {
           const { updatePassword } = await import('firebase/auth');
           await updatePassword(auth.currentUser, getAuthPassword(newPin));
-          console.log('[PIN Update] Successfully updated Firebase Auth password for current user.');
         } else {
           console.warn('[PIN Update] Skipping Firestore PIN storage for other user per security rules. Raw PINs must never be stored in the database.');
         }
@@ -2025,7 +2118,6 @@ export default function App() {
       const { saveCachedUser } = await import('./lib/offlineDb');
       const cleanData = prepareFirestoreData({ ...updatedUser, ownerId: syncOwnerId || 'mgr_1' }, 'users');
       await saveCachedUser(cleanData);
-      console.log('[User Update] Successfully updated user in offline IndexedDB cache:', updatedUser.id);
     } catch (dbErr) {
       console.error('[User Update] Failed to update user in offline cache:', dbErr);
     }
@@ -2057,7 +2149,6 @@ export default function App() {
     try {
       const { deleteCachedUser } = await import('./lib/offlineDb');
       await deleteCachedUser(userId);
-      console.log('[User Delete] Successfully deleted user from offline IndexedDB cache:', userId);
     } catch (dbErr) {
       console.error('[User Delete] Failed to delete user from offline cache:', dbErr);
     }
@@ -2203,10 +2294,25 @@ export default function App() {
 
   // Compute Active Selection Metrics (Synchronized with History Filter)
   const activeMetrics = useMemo(() => {
-    // Use the already filtered authorizedHistoryTransactions to ensure synchronization
-    // Pass 'Lifetime' to computeTxMetrics as date filtering was already applied in memory
+    // The activeMetrics MUST strictly agree with the filtered transaction list on screen.
+    // This allows the user to see the exact Volume and Realized Gain for whatever period or search they apply.
     return computeTxMetrics(authorizedHistoryTransactions, 'Lifetime', state.terminalFeeRate);
   }, [authorizedHistoryTransactions, state.terminalFeeRate]);
+
+  // Stable Daily Ledger Metrics - This ensures "Today" is always tracked correctly even if list is filtered
+  const todayLedgerMetrics = useMemo(() => {
+    const todayStr = getBusinessDate(new Date());
+    let txs = state.transactions.filter(t => t.businessDate === todayStr);
+    if (state.currentUser.role === 'Employee') {
+      txs = txs.filter(t => t.employeeId === state.currentUser.id);
+    } else {
+      const targetUserId = state.impersonatedUserId || (state.selectedEmployeeFilter === 'ALL' ? undefined : state.selectedEmployeeFilter);
+      if (targetUserId) {
+        txs = txs.filter(t => t.employeeId === targetUserId);
+      }
+    }
+    return computeTxMetrics(txs, 'Daily', state.terminalFeeRate);
+  }, [state.transactions, state.currentUser, state.selectedEmployeeFilter, state.impersonatedUserId, state.terminalFeeRate]);
 
   // Compute Timeframe Blocks metrics for Overview Matrix items
   const summaryOverviews = useMemo(() => {
@@ -2425,7 +2531,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-100 text-neutral-850 flex flex-col font-sans relative pb-20 antialiased selection:bg-emerald-200">
+    <div className="min-h-screen bg-neutral-100 text-neutral-900 flex flex-col font-sans relative pb-24 antialiased selection:bg-emerald-200">
+
       {state.impersonatedUserId && (
         <div className="bg-gradient-to-r from-amber-600 via-orange-500 to-amber-500 text-white px-4 py-3 shadow-md z-50 sticky top-0 backdrop-blur-md border-b border-amber-400/20 select-none">
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -2576,6 +2683,23 @@ export default function App() {
       <div className="bg-[#00B87A] text-white text-center text-[11px] font-semibold py-1.5 px-4 select-none relative z-10 font-mono tracking-tight flex items-center justify-center gap-1.5 shadow-sm">
         <Smartphone className="w-3.5 h-3.5 inline animate-pulse" /> Security Reminder: OPay agents will never ask for your password, PIN or OTP. Drive cash out safely!
       </div>
+
+      {isQuotaExceeded && (
+        <div className="bg-amber-600 text-white text-center text-xs font-bold py-2.5 px-4 select-none relative z-20 font-sans tracking-tight flex flex-col sm:flex-row items-center justify-center gap-2 shadow-md">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4 text-yellow-300 shrink-0" />
+            <span><strong>Firestore Usage Quota Exceeded</strong>: Running in Local Offline Fallback Mode. Your data is persisted offline.</span>
+          </div>
+          <a
+            href="https://console.firebase.google.com/project/pos-tracker-da64e/firestore/databases/ai-studio-0e9bc98d-4cf2-45b4-b8a6-417a194ce4d6/data?openUpgradeDialog=true"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white text-amber-950 hover:bg-amber-100 text-[10px] sm:text-xs font-extrabold px-2 py-0.5 rounded shadow-sm transition-colors cursor-pointer"
+          >
+            Upgrade & Manage Quota
+          </a>
+        </div>
+      )}
 
       {/* Primary OPay Brand Header Bar */}
       <header className="border-b border-neutral-200 bg-white sticky top-0 z-30 shadow-sm">
@@ -2917,30 +3041,18 @@ export default function App() {
                       {currentShiftStats.volume > 0 ? formatNaira(currentShiftStats.volume).replace('₦', '') : '0'}
                     </span>
                   </div>
-                  <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-2xl text-center relative flex flex-col justify-between min-h-[84px]">
-                    <div>
-                      <span className="text-[8.5px] text-neutral-400 block font-bold uppercase tracking-wider">
-                        Agent profit
-                      </span>
-                      <span className="text-sm font-black font-mono text-indigo-400 block mt-1.5 truncate" title={formatNaira(currentShiftStats.profit)}>
-                        {currentShiftStats.profit > 0 ? formatNaira(currentShiftStats.profit).replace('₦', '') : '0'}
-                      </span>
-                      {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
-                        <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
-                          {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-2 pt-1 border-t border-neutral-800 flex justify-between items-center text-[8.5px]">
-                      <span className="text-neutral-500 font-mono font-bold">SESSION</span>
-                      <button
-                        type="button"
-                        onClick={() => setLogoutConfirmRole('Employee')}
-                        className="font-black uppercase text-rose-400 hover:text-rose-300 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <LogOut className="w-2.5 h-2.5 text-rose-400" /> Logout
-                      </button>
-                    </div>
+                  <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-2xl text-center relative">
+                    <span className="text-[8.5px] text-neutral-400 block font-bold uppercase tracking-wider">
+                      Agent profit
+                    </span>
+                    <span className="text-sm font-black font-mono text-indigo-400 block mt-1.5 truncate" title={formatNaira(currentShiftStats.profit)}>
+                      {currentShiftStats.profit > 0 ? formatNaira(currentShiftStats.profit).replace('₦', '') : '0'}
+                    </span>
+                    {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length > 0 && (
+                      <div className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] text-white font-black animate-pulse">
+                        {state.transactions.filter(t => t.chargesStatus === 'Unpaid').length}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2964,17 +3076,6 @@ export default function App() {
                       className="text-[9.5px] font-black uppercase text-[#00B87A] hover:text-emerald-400 hover:underline transition cursor-pointer"
                     >
                       {activeUser?.role === 'Manager' ? 'Manage \u2192' : 'Metrics \u2192'}
-                    </button>
-                    
-                    <span className="text-neutral-700 font-bold select-none">|</span>
-                    
-                    <button
-                      type="button"
-                      onClick={() => setLogoutConfirmRole('Employee')}
-                      className="text-[9px] font-black uppercase text-rose-400 hover:text-rose-300 hover:underline transition cursor-pointer flex items-center gap-1"
-                    >
-                      <LogOut className="w-3 h-3 text-rose-400" />
-                      <span>Log Out</span>
                     </button>
                   </div>
                 </div>
@@ -3935,6 +4036,7 @@ export default function App() {
                 </h2>
                 <p className="text-xs text-neutral-550 mt-1 font-medium">Add POS terminals, map cashier operations, trace account numbers, and monitor differentiated cashier profits and volume flow.</p>
               </div>
+              {state.currentUser.role === 'Manager' && (
                 <button
                   type="button"
                   onClick={() => setIsAddingTerminal(!isAddingTerminal)}
@@ -3943,6 +4045,7 @@ export default function App() {
                   <Plus className="w-4 h-4" />
                   <span>Register POS Terminal</span>
                 </button>
+              )}
             </div>
 
             {/* MOST ACTIVE TERMINAL PERFORMANCE SUMMARY BAR */}
@@ -4325,17 +4428,23 @@ export default function App() {
 
                     <div className="flex justify-between items-center border-t border-neutral-100 pt-3">
                       <span className="text-[9px] text-neutral-400 font-semibold font-sans">Added by: {term.addedBy}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Are you sure you want to remove ${term.name}?`)) {
-                            handleDeletePosTerminal(term.id);
-                          }
-                        }}
-                        className="text-red-500 hover:text-red-700 text-[11px] font-bold transition flex items-center gap-0.5 cursor-pointer select-none"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Remove POS
-                      </button>
+                      {state.currentUser.role === 'Manager' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('Remove POS clicked for terminal:', term.id);
+                            if (confirm(`Are you sure you want to remove ${term.name}?`)) {
+                              console.log('Confirmed removal for:', term.id);
+                              handleDeletePosTerminal(term.id);
+                            }
+                          }}
+                          className="relative z-[60] text-red-500 hover:text-red-700 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer select-none"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Remove POS
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -4501,7 +4610,7 @@ export default function App() {
             currentUser={state.currentUser}
             registeredUsers={registeredUsers}
             transactions={state.transactions}
-            posTerminals={state.posTerminals}
+            posTerminals={visiblePosTerminals}
             settings={state.settings}
             activeTimeframe={state.activeTimeframe}
             selectedEmployeeFilter={state.selectedEmployeeFilter}
@@ -4511,6 +4620,7 @@ export default function App() {
             onAddTransaction={handleAddTransaction}
             onSwitchToCashier={(userId) => dispatch({ type: 'SET_IMPERSONATED_USER', payload: userId })}
             onEditEmployee={(user) => setEditingEmployeeFromDashboard(user)}
+            syncOwnerId={syncOwnerId}
           />
         )}
 
@@ -4635,23 +4745,28 @@ export default function App() {
             </>
           )}
           <MetricCards
-            profit={activeMetrics.profit}
+            dailyProfit={todayLedgerMetrics.profit}
+            periodProfit={activeMetrics.profit}
             volume={activeMetrics.volume}
             totalExpenses={state.expenses.filter(e => {
               const d = new Date(e.timestamp);
-              const now = new Date();
-              if (state.activeTimeframe === 'Daily') return isSameDay(d, now);
-              if (state.activeTimeframe === 'Weekly') return isSameWeek(d, now);
-              if (state.activeTimeframe === 'Monthly') return isSameMonth(d, now);
-              return isSameYear(d, now);
+              const txDateStr = getBusinessDate(d);
+              const todayStr = getBusinessDate();
+              
+              if (state.historyFilter.type === 'DAY_1') return txDateStr === todayStr;
+              if (state.historyFilter.type === 'LIFETIME') return true;
+              
+              // Apply memory-based filter to expenses too
+              const filteredExp = filterTransactionsByHistoryFilter([{ timestamp: e.timestamp, businessDate: txDateStr } as any], state.historyFilter);
+              return filteredExp.length > 0;
             }).reduce((acc, e) => acc + e.amount, 0)}
             count={activeMetrics.count}
             averageTxSize={activeMetrics.averageTxSize}
-            timeframe={state.activeTimeframe}
+            timeframe={state.activeTimeframe as any}
             dailyTarget={state.dailyTarget}
             onSetDailyTarget={(val) => dispatch({ type: 'SET_DAILY_TARGET', payload: val })}
             onOpenAddModal={(mode) => {
-              if (mode) setPreselectedMode(mode);
+              if (mode && typeof mode === 'string') setPreselectedMode(mode as any);
               else setPreselectedMode('Standard');
               setIsAddModalOpen(true);
             }}
@@ -4735,22 +4850,13 @@ export default function App() {
           
           <button 
             type="button"
-            onClick={() => alert("Already viewing OPay Manager Home screen")}
-            className="flex-1 flex flex-col items-center gap-1 text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
+            onClick={() => setDashboardTab('pos')}
+            className={`flex-1 flex flex-col items-center gap-1 transition-transform duration-75 active:scale-95 cursor-pointer ${dashboardTab === 'pos' ? 'text-[#00B87A] font-black' : 'hover:text-neutral-600'}`}
           >
-            <Smartphone className="w-5 h-5 text-[#00B87A]" />
+            <Smartphone className={`w-5 h-5 ${dashboardTab === 'pos' ? 'text-[#00B87A]' : ''}`} />
             <span>Home</span>
           </button>
           
-          <button 
-            type="button"
-            onClick={() => openWithPreset('Withdrawal')}
-            className="flex-1 flex flex-col items-center gap-1 hover:text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
-          >
-            <ArrowDownToLine className="w-5 h-5" />
-            <span>Withdraw</span>
-          </button>
-
           <button 
             type="button"
             onClick={() => {
@@ -4764,21 +4870,21 @@ export default function App() {
 
           <button 
             type="button"
+            onClick={() => scrollToRef(historySectionRef)}
+            className="flex-1 flex flex-col items-center gap-1 hover:text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-5 h-5" />
+            <span>Journals</span>
+          </button>
+
+          <button 
+            type="button"
             onClick={() => setIsProfileModalOpen(true)}
             className="flex-1 flex flex-col items-center gap-1 hover:text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
             title="View and Edit My Profile"
           >
             <UserIcon className="w-5 h-5" />
             <span>Profile</span>
-          </button>
-          
-          <button 
-            type="button"
-            onClick={() => scrollToRef(historySectionRef)}
-            className="flex-1 flex flex-col items-center gap-1 hover:text-[#00B87A] transition-transform duration-75 active:scale-95 cursor-pointer"
-          >
-            <FileSpreadsheet className="w-5 h-5" />
-            <span>Journals</span>
           </button>
 
           {activeUser.role === 'Manager' && (
@@ -4792,8 +4898,6 @@ export default function App() {
               <span>Settings</span>
             </button>
           )}
-
-
 
         </div>
       </footer>
@@ -4818,7 +4922,7 @@ export default function App() {
           }}
           onClose={() => setIsAddModalOpen(false)}
           settings={state.settings}
-          posTerminals={state.posTerminals}
+          posTerminals={visiblePosTerminals}
         />
       )}
 
@@ -4840,7 +4944,7 @@ export default function App() {
           }}
           onClose={() => setEditingTransaction(null)}
           settings={state.settings}
-          posTerminals={state.posTerminals}
+          posTerminals={visiblePosTerminals}
         />
       )}
 
@@ -5071,7 +5175,19 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(providerTxId);
+                          if (navigator.clipboard && copyToClipboard) {
+                            copyToClipboard(providerTxId);
+                          } else {
+                            // Basic fallback for older browsers
+                            const textArea = document.createElement("textarea");
+                            textArea.value = providerTxId;
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            try {
+                              document.execCommand('copy');
+                            } catch (err) {}
+                            document.body.removeChild(textArea);
+                          }
                           setCopiedTxId(providerTxId);
                           setTimeout(() => setCopiedTxId(null), 2000);
                         }}

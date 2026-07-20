@@ -1,7 +1,24 @@
 import { Timestamp } from 'firebase/firestore';
 import { Transaction, User, TransactionType, ProviderType, AppSettings, UserRole, ProviderChargeConfig, RegulatoryConfig, ChargeRule, PricingProfile, ChargeRange, PricingRule, HistoryFilter } from './types';
 
-// REMOVED HARDCODED DEFAULTS (Strictly enforced Firestore-only rules)
+// Fallback to older browser copy
+export const copyToClipboard = (text: string) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  } else {
+    // Basic fallback for older browsers
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+    } catch (err) {}
+    document.body.removeChild(textArea);
+    return Promise.resolve();
+  }
+}
+
 
 // REALISTIC NIGERIAN POS TERMINAL DEFAULTS (2024/2025)
 export const REALISTIC_PROVIDER_CONFIGS: ProviderChargeConfig[] = [
@@ -133,29 +150,40 @@ export function formatNaira(amount: number | undefined | null): string {
 // Unique and random ID generator helper
 export function generateId(): string {
   return Math.random().toString(36).substring(2, 11).toUpperCase();
-}/**
- * Derive stable business date YYYY-MM-DD from any timestamp
+}
+
+/**
+ * Derive stable business date YYYY-MM-DD from any timestamp in Africa/Lagos
  */
 export function getBusinessDate(timestamp?: string | number | Date | any): string {
-  let d = new Date();
-  if (timestamp) {
-    d = timestamp && (timestamp as any).toDate ? (timestamp as any).toDate() : new Date(timestamp);
-    if (isNaN(d.getTime())) {
-      d = new Date();
-    }
+  let d: Date;
+  
+  if (!timestamp) {
+    d = new Date();
+  } else if (timestamp && (timestamp as any).toDate && typeof (timestamp as any).toDate === 'function') {
+    d = (timestamp as any).toDate();
+  } else {
+    d = new Date(timestamp);
   }
+  
+  if (isNaN(d.getTime())) {
+    d = new Date();
+  }
+  
   try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
-    const year = parts.find(p => p.type === 'year')?.value;
-    const month = parts.find(p => p.type === 'month')?.value;
-    const day = parts.find(p => p.type === 'day')?.value;
-    if (year && month && day) {
-      return `${year}-${month}-${day}`;
-    }
+    const formatter = new Intl.DateTimeFormat('en-CA', { 
+      timeZone: 'Africa/Lagos', 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit' 
+    });
+    return formatter.format(d);
   } catch (e) {
-    // fallback
+    // Robust fallback: Nigeria is UTC+1. 
+    const lagosOffset = 1 * 60 * 60 * 1000;
+    const lagosTime = new Date(d.getTime() + lagosOffset);
+    return lagosTime.toISOString().split('T')[0];
   }
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
@@ -164,55 +192,53 @@ export function getBusinessDate(timestamp?: string | number | Date | any): strin
 export function filterTransactionsByHistoryFilter(transactions: Transaction[], filter: HistoryFilter): Transaction[] {
   if (!filter || filter.type === 'LIFETIME') return transactions;
 
-  const todayDate = new Date();
+  const now = new Date();
+  const todayStr = getBusinessDate(now);
   
   const getPastBusinessDateStr = (daysAgo: number) => {
-     const d = new Date(todayDate);
+     if (daysAgo === 0) return todayStr;
+     const d = new Date(now);
      d.setDate(d.getDate() - daysAgo);
      return getBusinessDate(d);
   };
 
-  const todayStr = getPastBusinessDateStr(0);
-
   return transactions.filter((tx) => {
     // Use stored stable businessDate, or derive it from historical timestamp if missing
+    // Every transaction MUST have a businessDate to be part of the ledger.
     const txDateStr = tx.businessDate || getBusinessDate(tx.createdAt || tx.timestamp);
     
     switch (filter.type) {
       case 'DAY_1': // Today
         return txDateStr === todayStr;
-      case 'DAY_2': { // Yesterday
+      case 'DAY_2': // Yesterday
         return txDateStr === getPastBusinessDateStr(1);
-      }
-      case 'DAY_3': { // Last 3 Days (inclusive of today)
+      case 'DAY_3': // Last 3 Days (inclusive of today)
         return txDateStr >= getPastBusinessDateStr(2) && txDateStr <= todayStr;
-      }
-      case 'DAY_4': { // Last 4 Days
+      case 'DAY_4':
         return txDateStr >= getPastBusinessDateStr(3) && txDateStr <= todayStr;
-      }
-      case 'DAY_5': { // Last 5 Days
+      case 'DAY_5':
         return txDateStr >= getPastBusinessDateStr(4) && txDateStr <= todayStr;
-      }
-      case 'DAY_6': { // Last 6 Days
+      case 'DAY_6':
         return txDateStr >= getPastBusinessDateStr(5) && txDateStr <= todayStr;
-      }
-      case 'DAY_7': { // Last 7 Days
+      case 'DAY_7':
         return txDateStr >= getPastBusinessDateStr(6) && txDateStr <= todayStr;
-      }
       case 'THIS_WEEK': {
-        const d = new Date(todayDate);
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-        const startOfWeek = new Date(d.setDate(diff));
-        return txDateStr >= getBusinessDate(startOfWeek) && txDateStr <= todayStr;
+        // A robust way to find the start of the week: go back up to 6 days
+        // We can just use the local day of week to approximate how many days to go back.
+        // Or simpler: JavaScript getDay() returns 0 for Sunday.
+        const day = now.getDay(); 
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        return txDateStr >= getPastBusinessDateStr(diffToMonday) && txDateStr <= todayStr;
       }
       case 'THIS_MONTH': {
-        const startOfMonth = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1);
-        return txDateStr >= getBusinessDate(startOfMonth) && txDateStr <= todayStr;
+        // String prefix matching: YYYY-MM
+        const monthPrefix = todayStr.substring(0, 7);
+        return txDateStr.startsWith(monthPrefix) && txDateStr <= todayStr;
       }
       case 'THIS_YEAR': {
-        const startOfYear = new Date(todayDate.getFullYear(), 0, 1);
-        return txDateStr >= getBusinessDate(startOfYear) && txDateStr <= todayStr;
+        // String prefix matching: YYYY
+        const yearPrefix = todayStr.substring(0, 4);
+        return txDateStr.startsWith(yearPrefix) && txDateStr <= todayStr;
       }
       case 'CUSTOM': {
         const startStr = filter.customStart ? getBusinessDate(filter.customStart) : null;
@@ -368,25 +394,23 @@ export function getAuthPassword(pin: string): string {
 export const prepareFirestoreData = (data: any, collectionName?: string) => {
   const copy = { ...data };
   
-  // Explicitly delete sensitive authentication fields so they are never stored in Firestore
+  // Explicitly delete sensitive authentication fields
   delete (copy as any).password;
   delete (copy as any).pin;
 
-  // Convert timestamp strings to Firestore Timestamps for efficient querying
   if (copy.timestamp && typeof copy.timestamp === 'string') {
     try {
       copy.timestamp = Timestamp.fromDate(new Date(copy.timestamp));
     } catch (e) {
-      console.warn(`[Firestore Write] Failed to convert timestamp for ${collectionName}:`, e);
+      // Quiet fail to maintain professional UI
     }
   }
   
-  // Remove every undefined property before calling setDoc()
+  // Remove every undefined property
   const cleanData = Object.fromEntries(
     Object.entries(copy).filter(([_, value]) => value !== undefined)
   );
   
-  console.log(`[Firestore Write] Cleaned object for "${collectionName || 'unknown'}":`, cleanData);
   return cleanData;
 };
 
@@ -611,7 +635,11 @@ export function computeTxMetrics(
     
     // Profit is cumulative (Parent profit - Child costs)
     if (tx.status === 'Success') {
-      profit += tx.profit || 0;
+      // Robust fallback for older transactions missing the profit field
+      const txProfit = tx.profit !== undefined 
+        ? tx.profit 
+        : ((tx.customerCharge || tx.customerFee || 0) - (tx.providerCharge || tx.terminalFee || 0) - (tx.cbnCharge || 0));
+      profit += txProfit;
     }
 
     // Volume and Count should only reflect unique customer interactions (exclude child segments)

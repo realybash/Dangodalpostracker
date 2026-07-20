@@ -435,7 +435,7 @@ export function ShiftControlModal({
           </div>
 
           {/* Quick toggle to Switch Role/Mode for Manager Superuser */}
-          {currentUser.id === 'mgr_1' && (
+          {false && (
             <div className="border-t border-neutral-150/50 pt-4 flex items-center justify-between bg-neutral-50/50 p-3 rounded-2xl border border-neutral-150/50 gap-2">
               <div className="min-w-0">
                 <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block font-mono">

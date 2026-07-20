@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, Transaction } from '../types';
-import { formatNaira } from '../utils';
-import { 
+import {  User, Transaction } from '../types';
+import { copyToClipboard,    formatNaira } from '../utils';
+import {  
   X, 
   User as UserIcon, 
   UserCheck, 
@@ -31,9 +31,9 @@ import {
   Copy,
   LogOut
 } from 'lucide-react';
-import { signOut } from 'firebase/auth';
-import { auth } from '../lib/firebase';
-import { playStatusSound } from './TransactionForm';
+import {  signOut } from 'firebase/auth';
+import {  auth } from '../lib/firebase';
+import {  playStatusSound } from './TransactionForm';
 
 export function renderUserAvatar(
   avatar: string | undefined,
@@ -497,7 +497,7 @@ export function ProfileModal({
                           </div>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(currentUser.referralCode!);
+                              copyToClipboard(currentUser.referralCode!);
                               playStatusSound('Success');
                             }}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded-lg transition"

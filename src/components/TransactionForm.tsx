@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Transaction, TransactionType, ProviderType, User, AppSettings, SubTransfer, PosTerminal } from '../types';
-import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles } from '../utils';
+import { calculateTerminalFee, calculateCBNCharge, generateId, formatNaira, getRecommendedAgentFee, getCalculatedFinancials, getDefaultPricingProfiles, getBusinessDate } from '../utils';
 import { AudioRecorder } from './AudioRecorder';
 import { X, Sparkles, Check, Info, Mic, MicOff, Plus, PlusCircle, Trash2, Lock, Unlock, ShieldCheck, AlertTriangle, CreditCard, Smartphone, ArrowRightLeft, Wallet, Landmark, PieChart, Search, Globe, Wifi, Banknote, Building2, UserCircle, Download, ArrowUpRight, Cpu, Zap, Receipt } from 'lucide-react';
 
@@ -310,6 +310,7 @@ export function TransactionForm({
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>(
     initialTransaction ? (initialTransaction.terminalId || '') : ''
   );
+  const [terminalError, setTerminalError] = useState<boolean>(false);
   const [isNetworkLocked, setIsNetworkLocked] = useState<boolean>(false);
   const [basket, setBasket] = useState<Transaction[]>([]);
 
@@ -317,7 +318,13 @@ export function TransactionForm({
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [activeDictationField, setActiveDictationField] = useState<'notes' | 'customerName' | null>(null);
   const recognitionRef = useRef<any>(null);
+  const activeFieldRef = useRef<'notes' | 'customerName' | null>(null);
+
+  useEffect(() => {
+    activeFieldRef.current = activeDictationField;
+  }, [activeDictationField]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -336,10 +343,19 @@ export function TransactionForm({
       rec.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         if (transcript) {
-          setNotes((prev) => {
-            const trimmed = prev.trim();
-            return trimmed ? `${trimmed} ${transcript}` : transcript;
-          });
+          const currentField = activeFieldRef.current;
+          if (currentField === 'customerName') {
+            setCustomerName((prev) => {
+              const trimmed = prev.trim();
+              const formatted = transcript.toUpperCase(); // names are usually uppercase in this app
+              return trimmed ? `${trimmed} ${formatted}` : formatted;
+            });
+          } else {
+            setNotes((prev) => {
+              const trimmed = prev.trim();
+              return trimmed ? `${trimmed} ${transcript}` : transcript;
+            });
+          }
         }
       };
 
@@ -351,10 +367,12 @@ export function TransactionForm({
           setSpeechError(`Error: ${event.error}`);
         }
         setIsListening(false);
+        setActiveDictationField(null);
       };
 
       rec.onend = () => {
         setIsListening(false);
+        setActiveDictationField(null);
       };
 
       recognitionRef.current = rec;
@@ -371,19 +389,24 @@ export function TransactionForm({
     };
   }, []);
 
-  const toggleListening = () => {
+  const toggleListening = (field: 'notes' | 'customerName') => {
     if (!recognitionRef.current) return;
 
     if (isListening) {
       recognitionRef.current.stop();
-    } else {
-      try {
-        setSpeechError(null);
-        recognitionRef.current.start();
-      } catch (err) {
-        console.error('Error starting speech recognition:', err);
-        setIsListening(false);
+      if (activeDictationField === field) {
+        return;
       }
+    }
+
+    try {
+      setSpeechError(null);
+      setActiveDictationField(field);
+      recognitionRef.current.start();
+    } catch (err) {
+      console.error('Error starting speech recognition:', err);
+      setIsListening(false);
+      setActiveDictationField(null);
     }
   };
   
@@ -599,6 +622,7 @@ export function TransactionForm({
       destinationBank: (type === 'Transfer' || type === 'Deposit' || type === 'Airtime' || type === 'Data' || type === 'Withdrawal') ? destinationBank : undefined,
       totalCustomerCharged,
       timestamp: customTimestamp,
+      businessDate: getBusinessDate(customTimestamp),
       notes: finalNotes.trim() || undefined,
       customerPhone: customerPhone.trim() || undefined,
       customerName: customerName.trim() || undefined,
@@ -670,6 +694,7 @@ export function TransactionForm({
               terminalFee: segmentCost,
               profit: -segmentCost, // Explicitly subtract cost from net daily profit
               timestamp: childTimestamp,
+              businessDate: getBusinessDate(childTimestamp),
               notes: `Linked Distribution from session: ${tx.id}`,
               customerPhone: tx.customerPhone,
               status: tx.status,
@@ -720,7 +745,7 @@ export function TransactionForm({
 
   const handleAddToBasket = () => {
     if (posTerminals && posTerminals.length > 0 && !selectedTerminalId) {
-      alert('⚠️ CRITICAL HARDWARE LOCK: Please select the specific physical POS terminal you used for this transaction.');
+      setTerminalError(true);
       const el = document.getElementById('terminal-selection-container');
       if (el) {
         el.scrollIntoView({ behavior: 'smooth' });
@@ -773,7 +798,7 @@ export function TransactionForm({
     e.preventDefault();
 
     if (posTerminals && posTerminals.length > 0 && !selectedTerminalId) {
-      alert('⚠️ CRITICAL HARDWARE LOCK: Please select the specific physical POS terminal you used for this transaction.');
+      setTerminalError(true);
       const el = document.getElementById('terminal-selection-container');
       if (el) {
         el.scrollIntoView({ behavior: 'smooth' });
@@ -1300,22 +1325,37 @@ export function TransactionForm({
           {posTerminals && posTerminals.length > 0 && (
             <div 
               id="terminal-selection-container" 
-              className={`p-4 rounded-3xl space-y-3.5 transition-all duration-300 shadow-sm border ${
-                !selectedTerminalId 
-                  ? 'border-amber-300 bg-amber-50/15 ring-2 ring-amber-500/5 shadow-amber-50' 
-                  : 'bg-neutral-50/50 border-neutral-200'
+              className={`p-5 rounded-[36px] space-y-3.5 transition-all duration-300 shadow-2xl border-4 ring-8 ${
+                terminalError
+                  ? 'border-red-500 bg-red-50/10 ring-red-500/10 animate-pulse'
+                  : 'bg-gradient-to-br from-amber-500 via-yellow-400 to-amber-600 border-amber-300/50 ring-amber-500/10 shadow-amber-900/10'
               }`}
             >
+              {terminalError && (
+                <div className="bg-red-50 border border-red-200 p-3 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-1 duration-200 shadow-xs">
+                  <div className="p-1.5 bg-red-500 text-white rounded-xl shrink-0">
+                    <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider font-mono">
+                      Selection Required
+                    </h4>
+                    <p className="text-[9.5px] text-red-700 font-semibold leading-relaxed">
+                      Please select the exact physical POS terminal you used for this transaction to proceed.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <label className={`block text-[10.5px] font-black uppercase tracking-widest font-mono flex items-center gap-1.5 ${
-                  !selectedTerminalId ? 'text-amber-800 animate-pulse' : 'text-neutral-500'
+                  terminalError ? 'text-red-700' : 'text-amber-950 font-black'
                 }`}>
-                  📟 Link Physical POS Device <span className="text-[7.5px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 animate-pulse">REQUIRED</span>
+                  📟 Link Physical POS Device <span className={`text-[7.5px] font-black px-1.5 py-0.5 rounded animate-pulse ${terminalError ? 'bg-red-200 text-red-800' : 'bg-amber-950/20 text-amber-950'}`}>REQUIRED</span>
                 </label>
                 <span className={`text-[7.5px] font-black px-2 py-0.5 rounded-full font-mono uppercase tracking-widest leading-none ${
-                  !selectedTerminalId ? 'bg-amber-100 text-amber-800' : 'bg-[#00B87A]/10 text-[#00B87A]'
+                  terminalError ? 'bg-red-100 text-red-800' : !selectedTerminalId ? 'bg-amber-950/20 text-amber-950 animate-pulse' : 'bg-emerald-600 text-white shadow-xs'
                 }`}>
-                  {!selectedTerminalId ? 'Awaiting Selection' : 'Locked & Synced'}
+                  {terminalError ? 'Select Device Now' : !selectedTerminalId ? 'Awaiting Selection' : 'Locked & Synced'}
                 </span>
               </div>
               
@@ -1382,6 +1422,7 @@ export function TransactionForm({
                         onClick={() => {
                           setSelectedTerminalId(term.id);
                           setProvider(term.provider as any);
+                          setTerminalError(false);
                           // Synthesize a tactile chime on selection
                           try {
                             const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -1779,16 +1820,16 @@ export function TransactionForm({
             )}
 
           {/* Input Money Amount 💰 */}
-          <div className="bg-gradient-to-br from-emerald-50 to-white border-2 border-emerald-100 rounded-[32px] p-6 shadow-xl shadow-emerald-50/50 space-y-6">
+          <div className="bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-700 border-4 border-blue-400/40 rounded-[36px] p-6 shadow-2xl shadow-blue-900/20 space-y-6 ring-8 ring-blue-500/10">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <label htmlFor="amount-input" className="text-[11px] font-black uppercase tracking-widest text-emerald-800 font-mono flex items-center gap-2">
+                <label htmlFor="amount-input" className="text-[11px] font-black uppercase tracking-widest text-sky-100 font-mono flex items-center gap-2 drop-shadow-sm">
                   <span>Type the Amount 💰</span>
                 </label>
               </div>
               
               <div className="relative group">
-                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl font-black text-emerald-300 font-mono group-focus-within:text-[#00B87A] transition-colors">₦</span>
+                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl font-black text-blue-600 font-mono group-focus-within:text-blue-700 transition-colors">₦</span>
                 <input
                   id="amount-input"
                   type="text"
@@ -1800,7 +1841,7 @@ export function TransactionForm({
                       setAmountInput(formatNumber(val));
                     }
                   }}
-                  className="w-full bg-white border-2 border-emerald-100 hover:border-emerald-200 focus:border-[#00B87A] rounded-[24px] pl-12 pr-6 py-5 text-neutral-900 font-mono text-3xl focus:outline-none font-black placeholder:text-neutral-100 transition-all shadow-inner"
+                  className="w-full bg-white border-2 border-blue-200/80 hover:border-blue-300 focus:border-blue-600 rounded-[24px] pl-12 pr-6 py-5 text-blue-950 font-mono text-3xl focus:outline-none font-black placeholder:text-blue-200 transition-all shadow-md shadow-blue-900/10"
                   placeholder="0.00"
                   required
                 />
@@ -1808,13 +1849,13 @@ export function TransactionForm({
             </div>
 
             {/* Service Fee 💎 */}
-            <div className="pt-6 border-t-2 border-dashed border-emerald-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-black uppercase tracking-widest text-emerald-800 font-mono flex items-center gap-2">
+            <div className="pt-6 border-t-2 border-dashed border-blue-400/40 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <label className="text-[11px] font-black uppercase tracking-widest text-sky-100 font-mono flex items-center gap-2 drop-shadow-sm">
                   <span>Transaction Fee 💎</span>
                 </label>
                 
-                <div className="flex bg-neutral-100/80 p-1.5 rounded-[20px] shadow-inner gap-1 w-full max-w-sm">
+                <div className="flex bg-blue-950/30 p-1.5 rounded-[20px] shadow-inner gap-1 w-full max-w-sm ring-1 ring-white/10">
                   <button
                     type="button"
                     onClick={() => {
@@ -1822,7 +1863,7 @@ export function TransactionForm({
                       applyRecommendedFee();
                     }}
                     className={`flex-1 py-2.5 px-3 rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                      !isFeeWaived ? 'bg-white text-[#00B87A] shadow-[0_4px_12px_rgba(0,184,122,0.15)] ring-1 ring-emerald-100' : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200/50'
+                      !isFeeWaived ? 'bg-white text-blue-600 shadow-[0_4px_12px_rgba(255,255,255,0.25)] ring-1 ring-blue-100' : 'text-blue-100 hover:text-white hover:bg-white/10'
                     }`}
                   >
                     <span className="text-sm sm:text-base">💳</span> Apply Charge
@@ -1835,7 +1876,7 @@ export function TransactionForm({
                       setCustomerFee(0);
                     }}
                     className={`flex-1 py-2.5 px-3 rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                      isFeeWaived ? 'bg-white text-rose-500 shadow-[0_4px_12px_rgba(244,63,94,0.15)] ring-1 ring-rose-100' : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200/50'
+                      isFeeWaived ? 'bg-white text-rose-600 shadow-[0_4px_12px_rgba(255,255,255,0.25)] ring-1 ring-rose-100' : 'text-blue-100 hover:text-white hover:bg-white/10'
                     }`}
                   >
                     <span className="text-sm sm:text-base">🎉</span> Waive (₦0)
@@ -1845,7 +1886,7 @@ export function TransactionForm({
 
               {!isFeeWaived ? (
                 <div className="relative group animate-in fade-in slide-in-from-top-2 duration-200">
-                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-amber-300 font-mono group-focus-within:text-amber-500 transition-colors">₦</span>
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-blue-500 font-mono group-focus-within:text-blue-700 transition-colors">₦</span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1856,16 +1897,16 @@ export function TransactionForm({
                         setFeeInput(formatNumber(val));
                       }
                     }}
-                    className="w-full bg-white border-2 border-amber-100 hover:border-amber-200 focus:border-amber-500 rounded-[24px] pl-12 pr-6 py-4 text-amber-900 font-mono text-2xl focus:outline-none font-black placeholder:text-neutral-100 transition-all shadow-inner"
+                    className="w-full bg-white border-2 border-blue-200/80 hover:border-blue-300 focus:border-blue-600 rounded-[24px] pl-12 pr-6 py-4 text-blue-900 font-mono text-2xl focus:outline-none font-black placeholder:text-blue-200 transition-all shadow-md shadow-blue-900/10"
                     placeholder="0.00"
                   />
                 </div>
               ) : (
-                <div className="p-4 bg-rose-50/50 border border-dashed border-rose-200 rounded-[20px] flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-4 bg-white/10 border border-dashed border-blue-300/30 rounded-[20px] flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
                   <span className="text-xl">🎉</span>
                   <div className="flex-1">
-                    <p className="text-[10px] uppercase font-black tracking-widest text-rose-600 font-mono">Charges Waived (₦0)</p>
-                    <p className="text-[10px] text-neutral-500 font-semibold leading-relaxed">This transaction fee is fully waived. The customer will not be charged any service commission fee.</p>
+                    <p className="text-[10px] uppercase font-black tracking-widest text-sky-100 font-mono">Charges Waived (₦0)</p>
+                    <p className="text-[10px] text-sky-200 font-semibold leading-relaxed">This transaction fee is fully waived. The customer will not be charged any service commission fee.</p>
                   </div>
                 </div>
               )}
@@ -2139,14 +2180,27 @@ export function TransactionForm({
                         </span>
                         <span className="font-mono text-[11px] font-bold text-neutral-800">{formatNaira(cashHandout)}</span>
                       </div>
-                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
-                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
-                          <span>🎉</span> Reconciled Agent Profit:
-                        </span>
-                        <span className="font-mono font-extrabold text-[13px] leading-none">
-                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                        </span>
-                      </div>
+                      {(() => {
+                        const profit = customerFee - liveTerminalFee - liveCbnCharge;
+                        const isNeg = profit < 0;
+                        const isLow = profit >= 0 && profit < 50;
+                        return (
+                          <div className={`flex justify-between items-center border-t border-neutral-200/80 pt-2 -mx-4 px-4 py-1.5 rounded-b-xl ${
+                            isNeg 
+                              ? 'bg-rose-50 text-rose-800' 
+                              : isLow 
+                                ? 'bg-amber-50 text-amber-800' 
+                                : 'bg-emerald-50/50 text-emerald-800'
+                          }`}>
+                            <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                              <span>{isNeg ? '🚨' : isLow ? '⚠️' : '🎉'}</span> Reconciled Agent Profit:
+                            </span>
+                            <span className="font-mono font-extrabold text-[13px] leading-none">
+                              {profit >= 0 ? '+' : ''}{formatNaira(profit)}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </>
                   ) : withdrawChargeMode === 'SeparateCash' ? (
                     <>
@@ -2196,14 +2250,27 @@ export function TransactionForm({
                         </span>
                         <span className="font-mono text-[11px] font-bold text-neutral-800">{formatNaira(cashHandout)}</span>
                       </div>
-                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
-                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
-                          <span>🎉</span> Reconciled Agent Profit:
-                        </span>
-                        <span className="font-mono font-extrabold text-[13px] leading-none">
-                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                        </span>
-                      </div>
+                      {(() => {
+                        const profit = customerFee - liveTerminalFee - liveCbnCharge;
+                        const isNeg = profit < 0;
+                        const isLow = profit >= 0 && profit < 50;
+                        return (
+                          <div className={`flex justify-between items-center border-t border-neutral-200/80 pt-2 -mx-4 px-4 py-1.5 rounded-b-xl ${
+                            isNeg 
+                              ? 'bg-rose-50 text-rose-800' 
+                              : isLow 
+                                ? 'bg-amber-50 text-amber-800' 
+                                : 'bg-emerald-50/50 text-emerald-800'
+                          }`}>
+                            <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                              <span>{isNeg ? '🚨' : isLow ? '⚠️' : '🎉'}</span> Reconciled Agent Profit:
+                            </span>
+                            <span className="font-mono font-extrabold text-[13px] leading-none">
+                              {profit >= 0 ? '+' : ''}{formatNaira(profit)}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </>
                   ) : (
                     <>
@@ -2246,14 +2313,27 @@ export function TransactionForm({
                         </span>
                         <span className="font-mono font-extrabold text-[11px]">{formatNaira(cashHandout)}</span>
                       </div>
-                      <div className="flex justify-between items-center text-emerald-800 border-t border-neutral-200/80 pt-2 bg-emerald-50/50 -mx-4 px-4 py-1.5 rounded-b-xl">
-                        <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
-                          <span>🎉</span> Reconciled Agent Profit:
-                        </span>
-                        <span className="font-mono font-extrabold text-[13px] leading-none">
-                          +{formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                        </span>
-                      </div>
+                      {(() => {
+                        const profit = customerFee - liveTerminalFee - liveCbnCharge;
+                        const isNeg = profit < 0;
+                        const isLow = profit >= 0 && profit < 50;
+                        return (
+                          <div className={`flex justify-between items-center border-t border-neutral-200/80 pt-2 -mx-4 px-4 py-1.5 rounded-b-xl ${
+                            isNeg 
+                              ? 'bg-rose-50 text-rose-800' 
+                              : isLow 
+                                ? 'bg-amber-50 text-amber-800' 
+                                : 'bg-emerald-50/50 text-emerald-800'
+                          }`}>
+                            <span className="font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5 leading-none">
+                              <span>{isNeg ? '🚨' : isLow ? '⚠️' : '🎉'}</span> Reconciled Agent Profit:
+                            </span>
+                            <span className="font-mono font-extrabold text-[13px] leading-none">
+                              {profit >= 0 ? '+' : ''}{formatNaira(profit)}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
@@ -2596,72 +2676,109 @@ export function TransactionForm({
           </div>
 
           {/* Unpaid / Paid Charges Toggle */}
-          <div className="bg-amber-50/50 border border-amber-200/50 rounded-2xl p-4 space-y-3 shadow-xs">
+          <div className="bg-gradient-to-br from-[#5D4037] via-[#4E342E] to-[#3E2723] border-4 border-[#8D6E63]/40 rounded-[36px] p-6 shadow-2xl shadow-stone-950/20 space-y-4 ring-8 ring-[#4E342E]/10 animate-in fade-in slide-in-from-top-3 duration-250">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 font-mono flex items-center gap-1">
-                ⏳ Charges Payment Status
+              <label className="block text-[11px] font-black uppercase tracking-widest text-[#D7CCC8] font-mono flex items-center gap-2 drop-shadow-sm">
+                <span>⏳ CHARGES PAYMENT STATUS</span>
               </label>
-              <span className="bg-amber-150/70 text-amber-800 text-[9px] font-mono font-black uppercase tracking-wider px-2 py-0.5 rounded-full">
-                Defer Charges Option
+              <span className="bg-[#D7CCC8]/15 text-[#F5F5F5] text-[9px] font-mono font-black uppercase tracking-wider px-2.5 py-1 rounded-full border border-[#D7CCC8]/25">
+                DEFER CHARGES OPTION
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3.5">
               <button
                 type="button"
                 onClick={() => setChargesStatus('Paid')}
-                className={`py-2 px-1 rounded-xl text-xs font-extrabold border transition cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 ${
+                className={`py-3.5 px-3 rounded-[20px] text-[11px] sm:text-xs font-black border-2 transition-all duration-300 cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 active:scale-95 ${
                   chargesStatus === 'Paid'
-                    ? 'bg-emerald-600 border-emerald-600 text-white font-black'
-                    : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-800'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-600 border-emerald-400 text-white font-black shadow-lg shadow-emerald-950/40 ring-4 ring-emerald-500/25'
+                    : 'bg-[#D7CCC8]/10 border-[#8D6E63]/60 text-[#D7CCC8] hover:bg-[#D7CCC8]/20 hover:text-white'
                 }`}
               >
-                <span>✓ Paid Now</span>
+                <span>✓ PAID NOW</span>
               </button>
               <button
                 type="button"
                 onClick={() => setChargesStatus('Unpaid')}
-                className={`py-2 px-1 rounded-xl text-xs font-extrabold border transition cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 ${
+                className={`py-3.5 px-3 rounded-[20px] text-[11px] sm:text-xs font-black border-2 transition-all duration-300 cursor-pointer text-center uppercase font-mono flex items-center justify-center gap-1.5 active:scale-95 ${
                   chargesStatus === 'Unpaid'
-                    ? 'bg-amber-600 border-amber-600 text-white font-black animate-pulse'
-                    : 'bg-white border-neutral-200 text-neutral-500 hover:text-neutral-850'
+                    ? 'bg-gradient-to-r from-amber-500 to-[#FF9800] border-amber-400 text-stone-950 font-black shadow-lg shadow-amber-950/40 animate-pulse ring-4 ring-amber-500/25'
+                    : 'bg-[#D7CCC8]/10 border-[#8D6E63]/60 text-[#D7CCC8] hover:bg-[#D7CCC8]/20 hover:text-white'
                 }`}
               >
-                <span>⏳ Pay Later (Unpaid)</span>
+                <span>⏳ PAY LATER (UNPAID)</span>
               </button>
             </div>
           </div>
 
           {/* Customer Details - Beautiful and Professional */}
-          <div className="bg-neutral-50/80 border border-neutral-100 rounded-[28px] p-5 space-y-4 shadow-sm">
+          <div className="bg-gradient-to-br from-emerald-600 via-teal-500 to-emerald-700 border-4 border-emerald-400/40 rounded-[36px] p-6 space-y-5 shadow-2xl shadow-emerald-900/20 ring-8 ring-emerald-500/10">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-neutral-200 text-neutral-500 flex items-center justify-center shadow-sm">
+              <div className="w-8 h-8 rounded-xl bg-emerald-950/30 text-emerald-100 flex items-center justify-center shadow-inner ring-1 ring-white/10">
                 <UserCircle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-[11px] font-black uppercase tracking-widest text-neutral-500 font-mono leading-none">Customer Info</h3>
-                <p className="text-[9px] text-neutral-400 font-bold uppercase mt-1 tracking-tighter">Optional details for receipt</p>
+                <h3 className="text-[11px] font-black uppercase tracking-widest text-emerald-50 font-mono leading-none drop-shadow-sm">Customer Info</h3>
+                <p className="text-[9px] text-emerald-100 font-bold uppercase mt-1 tracking-tighter opacity-90">Optional details for receipt</p>
               </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
-                <label htmlFor="customer-name" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
-                  Account Name {chargesStatus === 'Unpaid' && <span className="text-red-500 font-black animate-pulse">*</span>}
+                <label htmlFor="customer-name" className="block text-[9px] font-black uppercase tracking-widest text-emerald-100 font-mono ml-1 drop-shadow-sm">
+                  Account Name {chargesStatus === 'Unpaid' && <span className="text-amber-300 font-black animate-pulse">*</span>}
                 </label>
-                <input
-                  id="customer-name"
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className={`w-full bg-white border-2 ${chargesStatus === 'Unpaid' && !customerName ? 'border-amber-400 shadow-md ring-4 ring-amber-50' : 'border-neutral-100'} rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-black transition-all shadow-sm`}
-                  placeholder="e.g. ALIYA MUSA"
-                  required={chargesStatus === 'Unpaid'}
-                />
+                <div className="relative">
+                  <input
+                    id="customer-name"
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className={`w-full bg-white border-2 ${chargesStatus === 'Unpaid' && !customerName ? 'border-amber-400 shadow-md ring-4 ring-amber-300/30' : 'border-emerald-200/80'} rounded-2xl pl-4 pr-10 py-3 text-xs text-emerald-950 focus:outline-none focus:border-emerald-600 font-black transition-all shadow-md shadow-emerald-900/10`}
+                    placeholder="e.g. ALIYA MUSA"
+                    required={chargesStatus === 'Unpaid'}
+                  />
+                  {speechSupported ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleListening('customerName')}
+                      className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors duration-200 cursor-pointer flex items-center justify-center ${
+                        isListening && activeDictationField === 'customerName'
+                          ? 'bg-red-500 text-white animate-pulse'
+                          : 'text-emerald-600 hover:text-white hover:bg-emerald-500/20'
+                      }`}
+                      title={isListening && activeDictationField === 'customerName' ? 'Stop voice recording' : 'Dictate name hands-free'}
+                    >
+                      {isListening && activeDictationField === 'customerName' ? (
+                        <Mic className="w-3.5 h-3.5 animate-bounce" />
+                      ) : (
+                        <Mic className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  ) : (
+                    <div
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-emerald-300/60"
+                      title="Speech recognition not supported on this browser context"
+                    >
+                      <MicOff className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+                </div>
+                {isListening && activeDictationField === 'customerName' && (
+                  <span className="text-[9px] text-emerald-100 font-semibold font-mono flex items-center gap-1.5 mt-1 animate-pulse ml-1 drop-shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-200" /> Recording name... speak clearly
+                  </span>
+                )}
+                {speechError && activeDictationField === 'customerName' && (
+                  <span className="text-[9px] text-red-200 font-semibold font-mono flex items-center gap-1.5 mt-1 ml-1 drop-shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-450" /> {speechError}
+                  </span>
+                )}
               </div>
               
               <div className="space-y-1.5">
-                <label htmlFor="account-number" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
+                <label htmlFor="account-number" className="block text-[9px] font-black uppercase tracking-widest text-emerald-100 font-mono ml-1 drop-shadow-sm">
                   Account Number
                 </label>
                 <input
@@ -2669,14 +2786,14 @@ export function TransactionForm({
                   type="text"
                   value={customerAccountNumber}
                   onChange={(e) => setCustomerAccountNumber(e.target.value.replace(/\D/g, ''))}
-                  className="w-full bg-white border-2 border-neutral-100 rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-mono font-black transition-all shadow-sm"
+                  className="w-full bg-white border-2 border-emerald-200/80 rounded-2xl px-4 py-3 text-xs text-emerald-950 focus:outline-none focus:border-emerald-600 font-mono font-black transition-all shadow-md shadow-emerald-900/10"
                   placeholder="0123456789"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="phone-input" className="block text-[9px] font-black uppercase tracking-widest text-neutral-450 font-mono ml-1">
+              <label htmlFor="phone-input" className="block text-[9px] font-black uppercase tracking-widest text-emerald-100 font-mono ml-1 drop-shadow-sm">
                 Phone Number
               </label>
               <input
@@ -2684,7 +2801,7 @@ export function TransactionForm({
                 type="tel"
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, ''))}
-                className="w-full bg-white border-2 border-neutral-100 rounded-2xl px-4 py-3 text-xs text-neutral-800 focus:outline-none focus:border-[#00B87A] font-mono font-black transition-all shadow-sm"
+                className="w-full bg-white border-2 border-emerald-200/80 rounded-2xl px-4 py-3 text-xs text-emerald-950 focus:outline-none focus:border-emerald-600 font-mono font-black transition-all shadow-md shadow-emerald-900/10"
                 placeholder="0801 234 5678"
               />
             </div>
@@ -2716,15 +2833,15 @@ export function TransactionForm({
               {speechSupported ? (
                 <button
                   type="button"
-                  onClick={toggleListening}
+                  onClick={() => toggleListening('notes')}
                   className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors duration-200 cursor-pointer flex items-center justify-center ${
-                    isListening
+                    isListening && activeDictationField === 'notes'
                       ? 'bg-red-500 text-white animate-pulse'
                       : 'text-neutral-400 hover:text-[#00B87A] hover:bg-neutral-100'
                   }`}
-                  title={isListening ? 'Stop voice recording' : 'Dictate notes hands-free'}
+                  title={isListening && activeDictationField === 'notes' ? 'Stop voice recording' : 'Dictate notes hands-free'}
                 >
-                  {isListening ? (
+                  {isListening && activeDictationField === 'notes' ? (
                     <Mic className="w-3.5 h-3.5 animate-bounce" />
                   ) : (
                     <Mic className="w-3.5 h-3.5" />
@@ -2739,12 +2856,12 @@ export function TransactionForm({
                 </div>
               )}
             </div>
-            {isListening && (
+            {isListening && activeDictationField === 'notes' && (
               <span className="text-[10px] text-[#00B87A] font-medium font-mono flex items-center gap-1.5 mt-1.5 animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#00B87A]" /> Recording audio... speak details clearly now
               </span>
             )}
-            {speechError && (
+            {speechError && activeDictationField === 'notes' && (
               <span className="text-[10px] text-red-500 font-medium font-mono flex items-center gap-1.5 mt-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {speechError}
               </span>
@@ -2852,26 +2969,89 @@ export function TransactionForm({
                     </div>
 
                     {/* Metric 4: Net Profit (The Prize) */}
-                    <div className={`border p-3 rounded-2xl transition-all hover:shadow-md flex flex-col justify-between gap-1.5 min-w-0 ring-4 ring-current/5 ${
-                      customerFee - liveTerminalFee - liveCbnCharge >= 0 
-                        ? 'bg-[#00B87A] text-white border-emerald-600 shadow-sm' 
-                        : 'bg-rose-600 text-white border-rose-700 shadow-sm'
-                    }`}>
-                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider opacity-90">
-                        <Banknote className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
-                        <span className="text-[8px] truncate">Net Earnings</span>
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="text-[14px] sm:text-[15px] font-black font-mono leading-none block truncate">
-                          {formatNaira(customerFee - liveTerminalFee - liveCbnCharge)}
-                        </span>
-                        <span className="text-[8.5px] opacity-80 font-bold block leading-tight">
-                          Our Take-home
-                        </span>
-                      </div>
-                    </div>
+                    {(() => {
+                      const liveNetProfit = customerFee - liveTerminalFee - liveCbnCharge;
+                      const isNegative = liveNetProfit < 0;
+                      const isBelowThreshold = liveNetProfit >= 0 && liveNetProfit < 50;
+
+                      return (
+                        <div className={`border p-3 rounded-2xl transition-all hover:shadow-md flex flex-col justify-between gap-1.5 min-w-0 ring-4 ring-current/5 ${
+                          isNegative 
+                            ? 'bg-rose-600 text-white border-rose-700 shadow-sm' 
+                            : isBelowThreshold
+                              ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
+                              : 'bg-[#00B87A] text-white border-emerald-600 shadow-sm'
+                        }`}>
+                          <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider opacity-90">
+                            <Banknote className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                            <span className="text-[8px] truncate">Net Earnings</span>
+                          </div>
+                          <div className="space-y-0.5">
+                            <span className="text-[14px] sm:text-[15px] font-black font-mono leading-none block truncate">
+                              {formatNaira(liveNetProfit)}
+                            </span>
+                            <span className="text-[8.5px] opacity-80 font-bold block leading-tight">
+                              Our Take-home
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                   </div>
+
+                  {/* Dynamic Profit Profile & Margin Safety Alert Banner */}
+                  {(() => {
+                    const activeProfile = settings?.pricingProfiles && Array.isArray(settings.pricingProfiles) && settings.pricingProfiles.length > 0
+                      ? settings.pricingProfiles.find(p => p.id === (settings.selectedProfileId || provider)) || settings.pricingProfiles[0]
+                      : { name: 'Realistic Default' };
+
+                    const liveNetProfit = customerFee - liveTerminalFee - liveCbnCharge;
+                    const isNegative = liveNetProfit < 0;
+                    const isBelowThreshold = liveNetProfit >= 0 && liveNetProfit < 50;
+
+                    if (isNegative) {
+                      return (
+                        <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 shadow-xs">
+                          <div className="p-1.5 bg-red-600 text-white rounded-xl shrink-0 mt-0.5 animate-pulse">
+                            <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-[10px] font-black text-red-800 uppercase tracking-wider font-mono">
+                              CRITICAL: NEGATIVE PROFIT MARGIN 🚨
+                            </h4>
+                            <p className="text-[11px] text-red-700 font-bold leading-snug">
+                              This transaction will result in a loss of <span className="text-red-900 font-black">{formatNaira(Math.abs(liveNetProfit))}</span>! 
+                            </p>
+                            <p className="text-[9.5px] text-red-600 font-semibold leading-relaxed">
+                              Under active profile <span className="underline font-bold">"{activeProfile.name}"</span>, the machine cost and CBN levies exceed the client fee. Consider adjusting manual fee overrides or using another POS terminal.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    } else if (isBelowThreshold) {
+                      return (
+                        <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 shadow-xs">
+                          <div className="p-1.5 bg-amber-500 text-white rounded-xl shrink-0 mt-0.5">
+                            <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-wider font-mono">
+                              WARNING: LOW PROFIT MARGIN ⚠️
+                            </h4>
+                            <p className="text-[11px] text-amber-700 font-bold leading-snug">
+                              Net profit of <span className="text-amber-950 font-black">{formatNaira(liveNetProfit)}</span> is below the recommended ₦50 minimum safety margin.
+                            </p>
+                            <p className="text-[9.5px] text-amber-650 font-semibold leading-relaxed">
+                              Based on the active profile <span className="underline font-bold">"{activeProfile.name}"</span>. Low-profit tickets reduce overall daily station yield.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    
+                    return null;
+                  })()}
 
                   {/* Easy summary statement for less-literated operators */}
                   <div className="p-3.5 rounded-2xl bg-white border border-neutral-200 shadow-xs flex items-start gap-3 text-[11px] font-bold text-neutral-600 leading-relaxed">

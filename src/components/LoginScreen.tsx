@@ -131,8 +131,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
   const staffUsers = registeredUsers.filter(u => u.role === 'Employee');
   const managerUsers = registeredUsers.filter(u => u.role === 'Manager');
   
-  console.log('LoginScreen registeredUsers:', registeredUsers);
-  console.log('LoginScreen managerUsers:', managerUsers);
 
   const avatarBgColors = [
     'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -144,6 +142,25 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
 
   const getInitials = (name: string) => {
     return name.trim().split(/\s+/).map(n => n[0]).join('').substring(0, 2).toUpperCase() || '👤';
+  };
+
+  const isQuotaOrNetworkError = (err: any): boolean => {
+    const errMsg = err?.message || String(err);
+    const errCode = err?.code || '';
+    return errMsg.toLowerCase().includes('quota') || 
+           errMsg.toLowerCase().includes('resource_exhausted') || 
+           errMsg.toLowerCase().includes('resource-exhausted') ||
+           errMsg.toLowerCase().includes('exhausted') ||
+           errMsg.toLowerCase().includes('network') ||
+           errMsg.toLowerCase().includes('offline') ||
+           errMsg.toLowerCase().includes('failed to get document') ||
+           errMsg.toLowerCase().includes('quota limit exceeded') ||
+           errMsg.toLowerCase().includes('unavailable') ||
+           errMsg.toLowerCase().includes('failed-precondition') ||
+           errCode.toLowerCase().includes('network') ||
+           errCode.toLowerCase().includes('quota') ||
+           errCode.toLowerCase().includes('exhausted') ||
+           errCode.toLowerCase().includes('unavailable');
   };
 
   const handleStaffLogin = async (e: React.FormEvent) => {
@@ -166,7 +183,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
     
     setIsSubmitting(true);
-    console.log(`[Login] Staff login attempt in ${mode} mode for:`, inputRaw);
 
     if (mode === 'offline') {
       try {
@@ -174,7 +190,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         const user = await verifyOfflineUserCredentials(inputRaw, pin, 'Employee');
         
         if (user) {
-          console.log('[Login] Offline login success for staff:', user.name);
           onLogin(user);
         } else {
           setError('Invalid credentials for offline login. Please log in online at least once.');
@@ -192,8 +207,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const inputPhoneDigits = cleanPhoneForCompare(inputRaw);
     const inputNameNormalized = inputRaw.toLowerCase().replace(/\s+/g, '');
     
-    console.log('[Login] Staff login attempt for:', inputRaw);
-
     try {
       // 1. Find the Employee document first (to get their Auth email and UID)
       let user = staffUsers.find(u => {
@@ -207,7 +220,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       });
 
       if (!user && isUsersLoaded) {
-        console.log('[Login] Staff not found locally, checking Firestore...');
         try {
           const usersRef = collection(db, 'users');
           // Search without role constraint first for robustness
@@ -220,7 +232,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           
           if (!snap.empty) {
              user = mapFirestoreUser(snap.docs[0].data(), snap.docs[0].id);
-             console.log('[Login] Found user in Firestore (role-agnostic search):', user.name);
           }
         } catch (err) {
           console.warn('[Login] Remote staff lookup failed:', err);
@@ -229,6 +240,27 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       }
 
       if (!user) {
+        // Fallback: Try offline verification before giving up
+        console.warn('[Login] Staff not found in online pool. Trying offline verification...');
+        try {
+          const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+          const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Employee');
+          if (offlineUser) {
+            if (typeof window !== 'undefined') {
+              (window as any).__firestoreQuotaExceeded = true;
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+            localStorage.setItem('POSTrack_Mode', 'offline');
+            setSuccess(`Online server is busy. Logged in successfully using Offline Mode! Welcome back, ${offlineUser.name}!`);
+            setTimeout(() => {
+              onLogin(offlineUser);
+            }, 1000);
+            return;
+          }
+        } catch (offlineErr) {
+          console.error('[Login] Offline fallback lookup failed:', offlineErr);
+        }
+
         setError('Staff account not found. Please verify the name or phone.');
         setIsSubmitting(false);
         return;
@@ -238,11 +270,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       const userPhoneKey = cleanPhoneForCompare(user.phone || '');
       const authEmail = `${userPhoneKey}@opay-pos.com`;
       
-      console.log('[Login] Attempting Auth sign-in for staff:', user.name, 'Email:', authEmail);
-      
       try {
         await signInWithEmailAndPassword(auth, authEmail, getAuthPassword(pin));
-        console.log('[Login] Staff Auth sign-in successful');
         setSuccess(`Welcome back, ${user.name}!`);
         
         // Persist preferences
@@ -251,8 +280,10 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           if (rememberMe) {
             localStorage.setItem('OPay_Last_Login_Tab', 'staff');
             localStorage.setItem('OPay_Last_Staff_Phone', loginPhone);
+            localStorage.setItem('OPay_Last_Staff_Pin', pin);
           } else {
             localStorage.removeItem('OPay_Last_Staff_Phone');
+            localStorage.removeItem('OPay_Last_Staff_Pin');
           }
         } catch (e) {}
         
@@ -268,10 +299,56 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         onLogin(user);
       } catch (authErr: any) {
         console.warn('[Login] Staff Auth failed:', authErr.code);
+        
+        if (isQuotaOrNetworkError(authErr)) {
+          console.warn('[Login] Quota/Network failure during auth. Trying offline fallback...');
+          try {
+            const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+            const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Employee');
+            if (offlineUser) {
+              if (typeof window !== 'undefined') {
+                (window as any).__firestoreQuotaExceeded = true;
+                window.dispatchEvent(new Event('firestore-quota-exceeded'));
+              }
+              localStorage.setItem('POSTrack_Mode', 'offline');
+              setSuccess(`Logged in successfully using Offline Mode (Server busy). Welcome back, ${offlineUser.name}!`);
+              setTimeout(() => {
+                onLogin(offlineUser);
+              }, 1000);
+              return;
+            }
+          } catch (offlineErr) {
+            console.error('[Login] Offline fallback auth lookup failed:', offlineErr);
+          }
+        }
+        
         setError(getFriendlyErrorMessage(authErr.code));
       }
     } catch (err: any) {
       console.error('[Login] Critical staff login error:', err);
+      
+      if (isQuotaOrNetworkError(err)) {
+        console.warn('[Login] Quota/Network failure in main block. Trying offline fallback...');
+        try {
+          const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+          const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Employee');
+          if (offlineUser) {
+            if (typeof window !== 'undefined') {
+              (window as any).__firestoreQuotaExceeded = true;
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+            localStorage.setItem('POSTrack_Mode', 'offline');
+            setSuccess(`Logged in successfully using Offline Mode (Server busy). Welcome back, ${offlineUser.name}!`);
+            setTimeout(() => {
+              onLogin(offlineUser);
+            }, 1000);
+            return;
+          }
+        } catch (offlineErr) {
+          console.error('[Login] Offline fallback catch block lookup failed:', offlineErr);
+        }
+      }
+
       setError(`Login failed: ${err.message}`);
     } finally {
       setIsSubmitting(false);
@@ -298,7 +375,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const mode = localStorage.getItem('POSTrack_Mode') || 'online';
     
     setIsSubmitting(true);
-    console.log(`[Login] Manager login attempt in ${mode} mode for:`, inputRaw);
 
     if (mode === 'offline') {
       try {
@@ -306,7 +382,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         const user = await verifyOfflineUserCredentials(inputRaw, pin, 'Manager');
         
         if (user) {
-          console.log('[Login] Manager Offline login success for:', user.name);
           onLogin(user);
         } else {
           setError('Invalid credentials for offline login. Please log in online at least once.');
@@ -325,8 +400,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     const inputNameSearch = inputRaw.toLowerCase().replace(/\s+/g, '');
     const normalizedInputPhone = normalizePhone(inputRaw);
     
-    console.log('[Login] Manager login attempt for:', inputRaw);
-
     try {
       // 1. Find the Manager document first
       let matchedManager = managerUsers.find(m => {
@@ -339,12 +412,10 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         return phoneMatch || nameMatch;
       });
 
-      console.log('[Login] Local match attempt result:', matchedManager ? `Found locally: ${matchedManager.name}` : 'Not found locally');
 
       // 2. Direct Firestore query using exactly the same field 'phoneNumber' that registration saved
       let fetchedDocsCount = 0;
       if (!matchedManager) {
-        console.log('[Login] Manager not found locally. Querying Firestore directly from "users" collection...');
         try {
           const usersRef = collection(db, 'users');
           // Try search by phone or name without role constraint
@@ -357,32 +428,35 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           
           if (!snap.empty) {
             matchedManager = mapFirestoreUser(snap.docs[0].data(), snap.docs[0].id);
-            console.log('[Login] Found manager in Firestore (role-agnostic search):', matchedManager.name, 'UID:', matchedManager.uid);
           }
         } catch (err) {
           console.warn('[Login] Firestore manager query/lookup failed:', err);
         }
       }
 
-      // Print comprehensive report of Firestore lookup parameters (Task 7)
-      console.log('--- FIRESTORE AUTH AUDIT REPORT ---');
-      console.log('Firestore collection: "users"');
-      console.log('Document ID (located):', matchedManager ? matchedManager.uid : 'N/A (Not Found)');
-      console.log('Phone number entered:', inputRaw);
-      console.log('Normalized phone:', normalizedInputPhone);
-      console.log('UID of located profile:', matchedManager ? matchedManager.uid : 'N/A');
-      console.log('Query Filters:', {
-        role: 'Manager',
-        phoneNumber: normalizedInputPhone,
-        fullName: inputRaw
-      });
-      console.log('Query Returned Documents Count:', fetchedDocsCount);
-      console.log('Matched Manager Profile:', matchedManager);
-      console.log('------------------------------------');
-
       if (!matchedManager) {
-        setError('Manager account not found. Please register first.');
-        console.log('[Login Result] FAILURE: Manager profile not found in "users" collection.');
+        // Fallback: Try offline verification before giving up
+        console.warn('[Login] Manager not found in online pool. Trying offline verification...');
+        try {
+          const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+          const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Manager');
+          if (offlineUser) {
+            if (typeof window !== 'undefined') {
+              (window as any).__firestoreQuotaExceeded = true;
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+            localStorage.setItem('POSTrack_Mode', 'offline');
+            setSuccess(`Online server is busy. Logged in successfully using Offline Mode! Welcome back, ${offlineUser.name}!`);
+            setTimeout(() => {
+              onLogin(offlineUser);
+            }, 1000);
+            return;
+          }
+        } catch (offlineErr) {
+          console.error('[Login] Offline fallback lookup failed:', offlineErr);
+        }
+
+        setError('Manager account not found. Please verify the name or phone.');
         setIsSubmitting(false);
         return;
       }
@@ -391,16 +465,8 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       const managerPhoneKey = cleanPhoneForCompare(matchedManager.phone || matchedManager.phoneNumber || '');
       const authEmail = `${managerPhoneKey}@opay-pos.com`;
       
-      console.log('[Login] Attempting Auth sign-in for manager:', matchedManager.name, 'Email:', authEmail);
-      
       try {
         await signInWithEmailAndPassword(auth, authEmail, getAuthPassword(pin));
-        console.log('[Login] Manager Auth sign-in successful. UID:', auth.currentUser?.uid);
-        console.log('[Login Result] SUCCESS', {
-          name: matchedManager.name,
-          uid: matchedManager.uid,
-          email: authEmail
-        });
         
         // Persist preferences
         try {
@@ -408,8 +474,10 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           if (rememberMe) {
             localStorage.setItem('OPay_Last_Login_Tab', 'manager');
             localStorage.setItem('OPay_Last_Manager_Phone', managerPhone);
+            localStorage.setItem('OPay_Last_Manager_Pin', pin);
           } else {
             localStorage.removeItem('OPay_Last_Manager_Phone');
+            localStorage.removeItem('OPay_Last_Manager_Pin');
           }
         } catch (e) {}
 
@@ -425,13 +493,56 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
         onLogin(matchedManager);
       } catch (authErr: any) {
         console.warn('[Login] Manager Auth failed:', authErr.code);
+        
+        if (isQuotaOrNetworkError(authErr)) {
+          console.warn('[Login] Quota/Network failure during auth. Trying offline fallback...');
+          try {
+            const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+            const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Manager');
+            if (offlineUser) {
+              if (typeof window !== 'undefined') {
+                (window as any).__firestoreQuotaExceeded = true;
+                window.dispatchEvent(new Event('firestore-quota-exceeded'));
+              }
+              localStorage.setItem('POSTrack_Mode', 'offline');
+              setSuccess(`Logged in successfully using Offline Mode (Server busy). Welcome back, ${offlineUser.name}!`);
+              setTimeout(() => {
+                onLogin(offlineUser);
+              }, 1000);
+              return;
+            }
+          } catch (offlineErr) {
+            console.error('[Login] Offline fallback auth lookup failed:', offlineErr);
+          }
+        }
+
         setError(getFriendlyErrorMessage(authErr.code));
       }
     } catch (err: any) {
       console.error('[Login] Critical manager login error:', err);
-      console.log('[Login Result] FAILURE: Critical logic execution error.', {
-        message: err.message
-      });
+      
+      if (isQuotaOrNetworkError(err)) {
+        console.warn('[Login] Quota/Network failure in main block. Trying offline fallback...');
+        try {
+          const { verifyOfflineUserCredentials } = await import('../lib/offlineDb');
+          const offlineUser = await verifyOfflineUserCredentials(inputRaw, pin, 'Manager');
+          if (offlineUser) {
+            if (typeof window !== 'undefined') {
+              (window as any).__firestoreQuotaExceeded = true;
+              window.dispatchEvent(new Event('firestore-quota-exceeded'));
+            }
+            localStorage.setItem('POSTrack_Mode', 'offline');
+            setSuccess(`Logged in successfully using Offline Mode (Server busy). Welcome back, ${offlineUser.name}!`);
+            setTimeout(() => {
+              onLogin(offlineUser);
+            }, 1000);
+            return;
+          }
+        } catch (offlineErr) {
+          console.error('[Login] Offline fallback catch block lookup failed:', offlineErr);
+        }
+      }
+
       setError(`Login error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
@@ -490,11 +601,9 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
     let manager: User | undefined;
     if (regRole === 'Employee') {
       const referralCode = regReferralCode.trim().toUpperCase();
-      console.log('DEBUG: Looking for manager with referral code (normalized):', referralCode);
       
       manager = registeredUsers.find(u => {
         const dbReferralCode = u.referralCode ? u.referralCode.toUpperCase() : '';
-        console.log(`DEBUG: Checking local user: ${u.name}, referralCode: ${dbReferralCode}`);
         return dbReferralCode === referralCode;
       });
       
@@ -503,7 +612,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           const usersRef = collection(db, 'users');
           // Referral codes are stored in uppercase, so search in uppercase
           const referralCodeSearch = referralCode.toUpperCase();
-          console.log('DEBUG: Referral code lookup in cloud for:', referralCodeSearch);
           
           // Note: Firestore queries are case-sensitive. 
           // We assume referral codes are stored exactly as generated (uppercase).
@@ -511,9 +619,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
           
           if (!snap.empty) {
             manager = snap.docs[0].data() as User;
-            console.log('DEBUG: Referral code match found in cloud! User:', manager.name);
           } else {
-            console.log('DEBUG: Referral code NOT found in cloud.');
             
             // Fallback: Try a case-insensitive search if standard search fails
             // This is slower but safer for debugging
@@ -524,7 +630,6 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
               
             if (managerInCloud) {
                 manager = managerInCloud;
-                console.log('DEBUG: Referral code match found in cloud (fallback)! User:', manager.name);
             }
           }
         } catch (err) {
@@ -548,7 +653,7 @@ export function LoginScreen({ registeredUsers, onLogin, onRegister, onDeleteAllA
       role: regRole,
       pin: regPin,
       phone: regPhone.trim() ? normalizePhone(regPhone) : `080${Math.floor(10000000 + Math.random() * 90000000)}`,
-      ownerId: regRole === 'Manager' ? userId : (manager?.id || managerUsers[0]?.id || 'mgr_1'),
+      ownerId: regRole === 'Manager' ? userId : (manager?.id || managerUsers[0]?.id),
       activated: true,
       email: regEmail.trim() || undefined,
       password: regPassword || undefined,

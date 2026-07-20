@@ -61,6 +61,9 @@ export interface BorrowKeepTransaction {
   photo?: string; // base64-encoded camera snapshot proof
   photoFront?: string; // base64-encoded front view snapshot proof (customer face)
   photoBack?: string; // base64-encoded back view snapshot proof (cash/receipt)
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export type TransactionType = 'Deposit' | 'Withdrawal' | 'Transfer' | 'Cash In' | 'Cash Out' | 'Cash Out (Transfer)' | 'Airtime' | 'Data' | 'Bills' | 'Money Received';

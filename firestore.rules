@@ -33,10 +33,10 @@ service cloud.firestore {
       // Allow get/list publicly to support local lookup/matching prior to active session authentication.
       allow get, list: if true;
       
-      // Only managers can create/update other users. Users can update their own profile/PIN.
-      allow create: if request.auth != null && (request.auth.uid == userId || isManager());
-      allow update: if request.auth != null && (request.auth.uid == userId || isManager());
-      allow delete: if isManager();
+      // Only managers can create/update other users' documents belonging to their franchise. Users can update their own profile/PIN.
+      allow create: if request.auth != null && (request.auth.uid == userId || (request.resource.data.ownerId == request.auth.uid && isManager()));
+      allow update: if request.auth != null && (request.auth.uid == userId || (resource.data.ownerId == request.auth.uid && isManager()));
+      allow delete: if request.auth != null && (resource.data.ownerId == request.auth.uid && isManager());
     }
     
     // Users sync (legacy or auxiliary match)
@@ -48,7 +48,7 @@ service cloud.firestore {
     match /settings/{ownerId} {
       // Managers can read/write their own settings.
       // Employees can read their manager's settings if they are linked.
-      allow read: if isOwnerOrEmployee(ownerId) || isManager();
+      allow read: if request.auth != null && (request.auth.uid == ownerId || isEmployeeOf(ownerId));
       allow write: if request.auth != null && request.auth.uid == ownerId && isManager();
     }
 
@@ -56,23 +56,18 @@ service cloud.firestore {
     match /borrowKeep/{id} {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        isEmployeeOf(resource.data.ownerId) ||
-        isManager()
+        isEmployeeOf(resource.data.ownerId)
       );
       allow create: if request.auth != null && (
         request.resource.data.ownerId == request.auth.uid ||
-        isEmployeeOf(request.resource.data.ownerId) ||
-        isManager()
+        isEmployeeOf(request.resource.data.ownerId)
       );
       allow update: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        isEmployeeOf(resource.data.ownerId) ||
-        isManager()
+        isEmployeeOf(resource.data.ownerId)
       );
       allow delete: if request.auth != null && (
-        resource.data.ownerId == request.auth.uid || 
-        isEmployeeOf(resource.data.ownerId) ||
-        isManager()
+        resource.data.ownerId == request.auth.uid
       );
     }
     
@@ -81,17 +76,15 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
         resource.data.cashierId == request.auth.uid ||
-        isManager()
+        (request.auth.uid == 'JcC1krC85wXQidNcL8no2NEJc4v1' && (resource.data.ownerId == 'mgr_1' || resource.data.ownerId == 'local_owner'))
       );
       allow create: if request.auth != null && (
         request.resource.data.cashierId == request.auth.uid ||
-        request.resource.data.ownerId == request.auth.uid ||
-        isManager()
+        request.resource.data.ownerId == request.auth.uid
       );
       allow update, delete: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.cashierId == request.auth.uid ||
-        isManager()
+        resource.data.cashierId == request.auth.uid
       );
     }
 
@@ -99,18 +92,15 @@ service cloud.firestore {
     match /expenses/{id} {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid ||
-        isManager()
+        resource.data.employeeId == request.auth.uid
       );
       allow create: if request.auth != null && (
         request.resource.data.employeeId == request.auth.uid ||
-        request.resource.data.ownerId == request.auth.uid ||
-        isManager()
+        request.resource.data.ownerId == request.auth.uid
       );
       allow update, delete: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        resource.data.employeeId == request.auth.uid ||
-        isManager()
+        resource.data.employeeId == request.auth.uid
       );
     }
 
@@ -119,21 +109,19 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
         resource.data.employeeId == request.auth.uid ||
-        isManager()
+        isEmployeeOf(resource.data.ownerId)
       );
       // ONLY the owner/manager can create or delete terminals
       allow create: if request.auth != null && (
-        request.resource.data.ownerId == request.auth.uid ||
-        isManager()
+        request.resource.data.ownerId == request.auth.uid && isManager()
       );
       allow update: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
         resource.data.employeeId == request.auth.uid ||
-        isManager()
+        isEmployeeOf(resource.data.ownerId)
       );
       allow delete: if request.auth != null && (
-        resource.data.ownerId == request.auth.uid ||
-        isManager()
+        resource.data.ownerId == request.auth.uid && isManager()
       );
     }
     

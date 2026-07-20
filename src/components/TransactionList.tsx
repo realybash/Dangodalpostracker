@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Transaction, TransactionType, ProviderType, User, AppSettings, HistoryFilter, HistoryFilterType } from '../types';
-import { formatNaira, getProviderTransactionNumber, getFriendlyTypeLabel, analyzeQuery } from '../utils';
-import { 
+import {  motion, AnimatePresence } from 'motion/react';
+import {  Transaction, TransactionType, ProviderType, User, AppSettings, HistoryFilter, HistoryFilterType } from '../types';
+import { copyToClipboard,    formatNaira, getProviderTransactionNumber, getFriendlyTypeLabel, analyzeQuery } from '../utils';
+import {  
   Search, 
   Trash2, 
   Download, 
@@ -177,7 +177,7 @@ export const TransactionList = React.memo(({
   }, [settlingTx]);
 
   const handleCopy = (id: string) => {
-    navigator.clipboard.writeText(id).catch(() => {});
+    copyToClipboard(id).catch(() => {});
     setCopiedId(id);
     setTimeout(() => {
       setCopiedId(null);

@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
+import {   
   X, Plus, Minus, Trash2, Calculator, Save, 
   DollarSign, ArrowDown, TrendingUp, Check, 
   Copy, Share2, Sparkles, RefreshCw, Landmark, 
   ShoppingBag, Edit, AlertCircle, RefreshCcw, Info
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import {   motion, AnimatePresence } from 'motion/react';
 import { playStatusSound } from './TransactionForm';
+import { copyToClipboard } from '../utils';
 
 interface Entry {
   id: string;
@@ -234,7 +235,7 @@ export function CashierReconciliationCalculator({ onClose, onSave }: CashierReco
     text += `==============================\n`;
     text += `_Generated via Dan Godal Terminal Auditor_`;
 
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopied(true);
     playStatusSound('Success');
     setTimeout(() => setCopied(false), 2000);

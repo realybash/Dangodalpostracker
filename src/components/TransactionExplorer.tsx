@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
+import {  motion, AnimatePresence } from 'motion/react';
+import {  
   collection, 
   query, 
   where, 
@@ -15,10 +15,10 @@ import {
   DocumentData,
   QueryDocumentSnapshot
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Transaction, User, AppSettings } from '../types';
-import { formatNaira, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
-import { 
+import {  db } from '../lib/firebase';
+import {  Transaction, User, AppSettings } from '../types';
+import { copyToClipboard,    formatNaira, isSameDay, isSameWeek, isSameMonth, isSameYear } from '../utils';
+import {  
   Search, 
   Filter, 
   Calendar, 
@@ -203,7 +203,13 @@ export function TransactionExplorer({
       } else if (selectedOperator !== 'ALL') {
         q = query(q, where('cashierId', '==', selectedOperator));
       } else {
-        q = query(q, where('ownerId', '==', currentUser.id));
+        // Recovery fix: include legacy ownerIds for this manager.
+        // SECURITY NOTE: This restricted list MUST be maintained carefully.
+        let authorizedOwnerIds = [currentUser.id];
+        if (currentUser.id === 'JcC1krC85wXQidNcL8no2NEJc4v1') {
+          authorizedOwnerIds = ['JcC1krC85wXQidNcL8no2NEJc4v1', 'mgr_1', 'local_owner'];
+        }
+        q = query(q, where('ownerId', 'in', authorizedOwnerIds));
       }
 
       // Range timestamp constraint
@@ -212,8 +218,10 @@ export function TransactionExplorer({
       }
 
       const querySnapshot = await getDocs(q);
+
       const list: Transaction[] = [];
       querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         list.push({ id: docSnap.id, ...docSnap.data() } as Transaction);
       });
 
@@ -234,7 +242,7 @@ export function TransactionExplorer({
 
   // Handle transaction ID copying
   const handleCopyId = (id: string) => {
-    navigator.clipboard.writeText(id).catch(() => {});
+    copyToClipboard(id).catch(() => {});
     setCopiedTxId(id);
     setTimeout(() => setCopiedTxId(null), 2000);
   };
@@ -642,7 +650,6 @@ export function TransactionExplorer({
     printWindow.document.close();
   };
 
-  // SYSTEM DIAGNOSTICS & FINANCIAL AUDITS (Meets "Testing" requirement completely)
   const runFinancialAudit = () => {
     setIsAuditing(true);
     setTimeout(() => {
